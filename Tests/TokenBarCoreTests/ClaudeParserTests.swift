@@ -18,12 +18,15 @@ final class ClaudeParserTests: XCTestCase {
         XCTAssertEqual(record?.requestId, "msg-1") // message id wins
     }
 
-    func testCacheReadPlusCreationIsSubsetNoFoldIn() {
+    func testCacheReadPlusCreationFoldedIntoInput() {
+        // Anthropic semantics: total input sums raw input plus both cache
+        // components, so normalized input folds cache back in (same rule as
+        // OpenCode). Cached stays a subset of input by construction.
         let line = #"{"type":"assistant","message":{"model":"m","id":"msg-c","usage":{"input_tokens":1200,"output_tokens":340,"cache_read_input_tokens":200,"cache_creation_input_tokens":50}},"timestamp":"2026-09-10T08:15:00Z","sessionId":"s"}"#
         let record = ClaudeParser.parseLine(line)
         XCTAssertEqual(record?.cachedTokens, 250)
-        XCTAssertEqual(record?.inputTokens, 1200) // input already includes cache
-        XCTAssertEqual(record?.totalTokens, 1540) // not input + cache + output
+        XCTAssertEqual(record?.inputTokens, 1450) // 1200 raw + 200 read + 50 creation
+        XCTAssertEqual(record?.totalTokens, 1790) // normalized input + output
         XCTAssertLessThanOrEqual(record!.cachedTokens, record!.inputTokens)
     }
 
@@ -62,9 +65,29 @@ final class ClaudeParserTests: XCTestCase {
     func testExplicitTotalWins() {
         let line = #"{"type":"assistant","timestamp":"2026-09-10T08:15:00Z","sessionId":"s","message":{"model":"m","id":"t","usage":{"input_tokens":800,"output_tokens":200,"cache_read_input_tokens":100,"total_tokens":5000}}}"#
         let record = ClaudeParser.parseLine(line)
-        XCTAssertEqual(record?.inputTokens, 800)
+        XCTAssertEqual(record?.inputTokens, 900) // 800 raw + 100 cache
         XCTAssertEqual(record?.cachedTokens, 100)
         XCTAssertEqual(record?.totalTokens, 5000)
+    }
+
+    func testCacheOnlyRowNormalizesInput() {
+        // Cache-only line: normalized input equals cached, total follows.
+        let line = #"{"type":"assistant","timestamp":"2026-09-10T08:15:00Z","sessionId":"s","message":{"model":"m","id":"co","usage":{"cache_read_input_tokens":300}}}"#
+        let record = ClaudeParser.parseLine(line)
+        XCTAssertEqual(record?.inputTokens, 300)
+        XCTAssertEqual(record?.cachedTokens, 300)
+        XCTAssertEqual(record?.totalTokens, 300)
+    }
+
+    func testCacheLargerThanRawInputStillFolds() {
+        // Live-Mac regression: raw input far smaller than cache must fold,
+        // never violate the cached-subset-of-input invariant.
+        let line = #"{"type":"assistant","timestamp":"2026-09-10T08:15:00Z","sessionId":"s","message":{"model":"m","id":"big","usage":{"input_tokens":200,"output_tokens":50,"cache_read_input_tokens":600,"cache_creation_input_tokens":100}}}"#
+        let record = ClaudeParser.parseLine(line)
+        XCTAssertEqual(record?.inputTokens, 900) // 200 raw + 600 read + 100 creation
+        XCTAssertEqual(record?.cachedTokens, 700)
+        XCTAssertEqual(record?.totalTokens, 950) // normalized input + output
+        XCTAssertLessThanOrEqual(record!.cachedTokens, record!.inputTokens)
     }
 
     func testRequestIdFallbackStaysUniqueById() {

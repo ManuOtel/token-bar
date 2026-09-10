@@ -259,6 +259,10 @@ def parse_claude_line(line, file_id="", line_no=0):
                          "cache_write_input_tokens", "cachewriteinputtokens",
                          "tokens_cache_write", "tokenscachewrite"))
     c = None if (c_read is None and c_make is None) else (c_read or 0) + (c_make or 0)
+    # Anthropic semantics: total input sums raw input plus both cache
+    # components (same fold-in as OpenCode; Codex needs no fold).
+    raw = i
+    i = None if (raw is None and c is None) else (raw or 0) + (c or 0)
     tot = to_int(get(usage, "total_tokens", "totaltokens", "tokens_total", "tokenstotal", "total"))
     if tot is None:
         tot = to_int(get(message, "total_tokens", "totaltokens", "total"))
@@ -500,10 +504,24 @@ def run():
         '"usage":{"input_tokens":1200,"output_tokens":340,'
         '"cache_read_input_tokens":200,"cache_creation_input_tokens":50}},'
         '"timestamp":"2026-09-10T08:15:00Z","sessionId":"s"}')
-    check("claude cache pair no fold-in",
+    check("claude cache folded into input and total",
           claude_cache is not None and claude_cache["cached"] == 250
-          and claude_cache["input"] == 1200 and claude_cache["total"] == 1540
+          and claude_cache["input"] == 1450 and claude_cache["total"] == 1790
           and claude_cache["cached"] <= claude_cache["input"])
+    check("claude cache-only row normalizes input",
+          (lambda r: r is not None and r["input"] == 300 and r["cached"] == 300
+           and r["total"] == 300)(
+              parse_claude_line('{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+                                '"message":{"model":"m","id":"co",'
+                                '"usage":{"cache_read_input_tokens":300}}}')))
+    check("claude cache larger than raw input still folds",
+          (lambda r: r is not None and r["input"] == 900 and r["cached"] == 700
+           and r["total"] == 950 and r["cached"] <= r["input"])(
+              parse_claude_line('{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+                                '"message":{"model":"m","id":"big",'
+                                '"usage":{"input_tokens":200,"output_tokens":50,'
+                                '"cache_read_input_tokens":600,'
+                                '"cache_creation_input_tokens":100}}}')))
     check("claude user line skipped",
           parse_claude_line('{"type":"user","message":{"role":"user"},'
                             '"timestamp":"2026-09-10T09:00:00Z"}') is None)
@@ -523,10 +541,11 @@ def run():
                             '"message":{"model":"m","id":"m",'
                             '"usage":{"input_tokens":1,"output_tokens":1}}}') is not None)
     check("claude explicit total wins",
-          parse_claude_line('{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
-                            '"message":{"model":"m","id":"t",'
-                            '"usage":{"input_tokens":800,"output_tokens":200,'
-                            '"cache_read_input_tokens":100,"total_tokens":5000}}}')["total"] == 5000)
+          (lambda r: r is not None and r["input"] == 900 and r["total"] == 5000)(
+              parse_claude_line('{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+                                '"message":{"model":"m","id":"t",'
+                                '"usage":{"input_tokens":800,"output_tokens":200,'
+                                '"cache_read_input_tokens":100,"total_tokens":5000}}}')))
     no_id_a = parse_claude_line(
         '{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
         '"message":{"model":"m","usage":{"input_tokens":1,"output_tokens":1}}}',

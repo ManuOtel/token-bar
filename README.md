@@ -106,10 +106,10 @@ OpenCode note: the schema stores `tokens_input` separately from
 `tokens_cache_read`/`tokens_cache_write`, so normalized `input` folds
 cache back in (`tokens_input + cache_read + cache_write`) and the total
 fallback includes cached usage. Codex needs no fold: its
-`payload.usage` input already includes cached input. Claude Code needs no
-fold either: its `message.usage` `input_tokens` already includes cached
-input, so normalized `cached = cache_read_input_tokens +
-cache_creation_input_tokens` stays a subset of input. Cost stays
+`payload.usage` input already includes cached input. Claude Code folds
+like OpenCode: Anthropic usage semantics sum all three input components,
+so normalized `input = input_tokens + cache_read_input_tokens +
+cache_creation_input_tokens`. Cost stays
 consistent either way: cached is billed at the cached rate on
 `min(cached, input)`.
 

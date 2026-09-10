@@ -12,9 +12,10 @@ import Foundation
 /// with `model` / `id` plus nested `usage` (`input_tokens`,
 /// `output_tokens`, `cache_read_input_tokens`,
 /// `cache_creation_input_tokens`), plus top-level `model`, `timestamp`,
-/// `sessionId`. `input_tokens` already includes cached input, so normalized
-/// `cached = cache_read + cache_creation` stays a subset of input with no
-/// fold-in (same rule as Codex, unlike OpenCode). `total = input + output`
+/// `sessionId`. Anthropic usage semantics sum all three input components,
+/// so normalized `input = input_tokens + cache_read + cache_creation`
+/// (same fold-in rule as OpenCode, unlike Codex whose `payload.usage`
+/// input already includes cache). `total = normalized input + output`
 /// unless an explicit positive total exists.
 public enum ClaudeParser {
     public struct Result {
@@ -77,7 +78,7 @@ public enum ClaudeParser {
               let usage = message["usage"] as? [String: Any]
         else { return nil }
 
-        let input = intField(usage, keys: ["input_tokens", "inputtokens", "input"])
+        let rawInput = intField(usage, keys: ["input_tokens", "inputtokens", "input"])
         let output = intField(usage, keys: ["output_tokens", "outputtokens", "output"])
         let cacheRead = intField(usage, keys: [
             "cache_read_input_tokens", "cachereadinputtokens",
@@ -92,6 +93,15 @@ public enum ClaudeParser {
         let cached: Int? = {
             if cacheRead == nil && cacheCreation == nil { return nil }
             return (cacheRead ?? 0) + (cacheCreation ?? 0)
+        }()
+        // Anthropic usage semantics: total input sums raw input plus both
+        // cache components, so the normalized input folds cache back in.
+        // This keeps cached a true subset of input and lets the total
+        // fallback include cached usage. (Codex needs no such fold: its
+        // payload.usage input already includes cached input.)
+        let input: Int? = {
+            if rawInput == nil && cached == nil { return nil }
+            return (rawInput ?? 0) + (cached ?? 0)
         }()
         let total = intField(usage, keys: ["total_tokens", "totaltokens", "tokens_total", "tokenstotal", "total"])
             ?? intField(message, keys: ["total_tokens", "totaltokens", "total"])

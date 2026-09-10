@@ -36,10 +36,11 @@ scripts/run-token-bar.sh # one-command menu bar launcher: swift run TokenBarApp
 - **Normalized records**: every event becomes one `NormalizedUsage` with
   clamped non-negative counts and `total` derived deterministically.
   OpenCode folds `tokens_cache_read`/`tokens_cache_write` into normalized
-  input (the schema stores them separately); Codex input already includes
-  cached input, and Claude Code `message.usage.input_tokens` already
-  includes cached input, so cached stays a subset of input on all three
-  sources.
+  input (the schema stores them separately); Claude Code folds
+  `cache_read_input_tokens`/`cache_creation_input_tokens` into normalized
+  input the same way (Anthropic semantics sum all three input components).
+  Codex input already includes cached input, so no fold there. Cached
+  stays a subset of input on all three sources.
 - **Deterministic aggregation**: explicit `now` + `Calendar` inputs, stable
   `(timestamp, id)` sort, documented tie-breaks (earliest month, key asc).
 - **Pricing separated**: `Pricing.swift` owns all money math; aggregation only
