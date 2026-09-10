@@ -83,6 +83,10 @@ Behavior:
   path.
 - macOS under 13: API unavailable; UI reports "unavailable on this macOS
   version" (app minimum is macOS 14, so this is a fallback only).
+- Unsigned or ad-hoc-signed bundles: registration can fail (the system may
+  refuse login items from unsigned apps). The toggle then stays off and shows
+  the sanitized system error; nothing crashes and the rest of the app keeps
+  working. Use the signed path above for a login item that sticks.
 - Errors are sanitized (no paths) via `ReportFormatter`.
 
 Entitlements: none added. Login items via `SMAppService.mainApp` need no
@@ -103,7 +107,7 @@ codesign --verify --deep --strict dist/TokenBar.app
 spctl -a -vvv -t install dist/TokenBar.app   # local Gatekeeper check
 
 # 2. Zip the signed app, submit to Apple, wait, staple.
-ditto -c -k --keepParent dist/TokenBar.app dist/TokenBar-0.1.0-macos.zip
+ditto -c -k --sequesterRsrc --keepParent dist/TokenBar.app dist/TokenBar-0.1.0-macos.zip
 xcrun notarytool submit dist/TokenBar-0.1.0-macos.zip \
   --keychain-profile "TOKENBAR-NOTARY" --wait
 xcrun stapler staple dist/TokenBar.app
@@ -111,7 +115,7 @@ xcrun stapler validate dist/TokenBar.app
 spctl -a -vvv -t install dist/TokenBar.app
 
 # 3. Re-package the stapled app and publish the checksum.
-/scripts/package-release.sh --version 0.1.0 --format zip
+./scripts/package-release.sh --version 0.1.0 --format zip
 ```
 
 Notes: `notarytool` stores credentials in the local keychain profile; never

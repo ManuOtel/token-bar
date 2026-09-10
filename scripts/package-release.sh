@@ -12,17 +12,33 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-VERSION="${TOKENBAR_VERSION:-0.1.0}"
+# Precedence: explicit --version flag wins, then TOKENBAR_VERSION env,
+# then the built app's Info.plist, then the 0.1.0 default. This keeps the
+# artifact name consistent with what the caller asked for.
+VERSION="${TOKENBAR_VERSION:-}"
+VERSION_FROM_FLAG=0
 FORMAT="${TOKENBAR_FORMAT:-zip}"
 APP="${TOKENBAR_APP:-dist/TokenBar.app}"
 OUTDIR="dist"
 
+need_value() {
+  # $1 = flag name. Caller must have at least the flag + one value left.
+  if [ $# -lt 2 ]; then
+    echo "Error: missing value for $1." >&2
+    exit 2
+  fi
+  if [ -z "${2:-}" ] || [ "${2#-}" != "$2" ]; then
+    echo "Error: missing value for $1 (got '${2:-}')." >&2
+    exit 2
+  fi
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version) VERSION="$2"; shift 2 ;;
-    --format) FORMAT="$2"; shift 2 ;;
-    --app) APP="$2"; shift 2 ;;
-    --outdir) OUTDIR="$2"; shift 2 ;;
+    --version) need_value "$@"; VERSION="$2"; VERSION_FROM_FLAG=1; shift 2 ;;
+    --format) need_value "$@"; FORMAT="$2"; shift 2 ;;
+    --app) need_value "$@"; APP="$2"; shift 2 ;;
+    --outdir) need_value "$@"; OUTDIR="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,10p' "$0"
       exit 0 ;;
@@ -30,18 +46,49 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+case "$OUTDIR" in
+  ""|/|.|..)
+    echo "Error: invalid --outdir '$OUTDIR'." >&2
+    exit 2 ;;
+esac
+
+# Fail fast on an explicit bad version before touching the filesystem, so
+# the caller sees the real problem even when the app bundle is also missing.
+if [ -n "$VERSION" ]; then
+  case "$VERSION" in
+    *[!0-9A-Za-z.\-]*)
+      echo "Error: invalid --version '$VERSION' (use digits, letters, dots, dashes)." >&2
+      exit 2 ;;
+  esac
+fi
+
 if [ ! -d "$APP" ]; then
   echo "Error: app bundle missing at $APP. Run ./scripts/build-app.sh first." >&2
   exit 1
 fi
 
-# Prefer the bundled version when the caller did not override it.
-if [ -f "$APP/Contents/Info.plist" ] && [ "${TOKENBAR_VERSION:-}" = "" ]; then
-  PLIST_VERSION="$(/usr/bin/defaults read "$PWD/$APP/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)"
+# Fall back to the bundled version only when the caller did not ask for one
+# via flag or env, so an explicit --version always names the artifact.
+# `defaults` exists on macOS only; elsewhere the default below applies.
+if [ "$VERSION_FROM_FLAG" -eq 0 ] && [ -z "$VERSION" ] && [ -f "$APP/Contents/Info.plist" ] \
+    && command -v defaults >/dev/null 2>&1; then
+  case "$APP" in
+    /*) INFO_PATH="$APP/Contents/Info" ;;
+    *) INFO_PATH="$PWD/$APP/Contents/Info" ;;
+  esac
+  PLIST_VERSION="$(defaults read "$INFO_PATH" CFBundleShortVersionString 2>/dev/null || true)"
   if [ -n "$PLIST_VERSION" ]; then
     VERSION="$PLIST_VERSION"
   fi
 fi
+if [ -z "$VERSION" ]; then
+  VERSION="0.1.0"
+fi
+case "$VERSION" in
+  *[!0-9A-Za-z.\-]*)
+    echo "Error: invalid --version '$VERSION' (use digits, letters, dots, dashes)." >&2
+    exit 2 ;;
+esac
 
 mkdir -p "$OUTDIR"
 
@@ -67,7 +114,11 @@ case "$FORMAT" in
       ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARTIFACT"
     elif command -v zip >/dev/null 2>&1; then
       rm -f "$ARTIFACT"
-      (cd "$(dirname "$APP")" && zip -qry "$PWD/$ARTIFACT" "$(basename "$APP")")
+      case "$ARTIFACT" in
+        /*) ZIP_TARGET="$ARTIFACT" ;;
+        *) ZIP_TARGET="$PWD/$ARTIFACT" ;;
+      esac
+      (cd "$(dirname "$APP")" && zip -qry "$ZIP_TARGET" "$(basename "$APP")")
     else
       echo "Error: neither ditto nor zip is available." >&2
       exit 1

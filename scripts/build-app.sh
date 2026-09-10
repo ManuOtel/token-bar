@@ -20,12 +20,24 @@ BUILD="${TOKENBAR_BUILD:-1}"
 BUNDLE_ID="${TOKENBAR_BUNDLE_ID:-com.manuotel.TokenBar}"
 OUTPUT="dist/TokenBar.app"
 
+need_value() {
+  # $1 = flag name. Caller must have at least the flag + one value left.
+  if [ $# -lt 2 ]; then
+    echo "Error: missing value for $1." >&2
+    exit 2
+  fi
+  if [ -z "${2:-}" ] || [ "${2#-}" != "$2" ]; then
+    echo "Error: missing value for $1 (got '${2:-}')." >&2
+    exit 2
+  fi
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --version) VERSION="$2"; shift 2 ;;
-    --build) BUILD="$2"; shift 2 ;;
-    --bundle-id) BUNDLE_ID="$2"; shift 2 ;;
-    --output) OUTPUT="$2"; shift 2 ;;
+    --version) need_value "$@"; VERSION="$2"; shift 2 ;;
+    --build) need_value "$@"; BUILD="$2"; shift 2 ;;
+    --bundle-id) need_value "$@"; BUNDLE_ID="$2"; shift 2 ;;
+    --output) need_value "$@"; OUTPUT="$2"; shift 2 ;;
     -h|--help)
       sed -n '2,14p' "$0"
       exit 0 ;;
@@ -36,6 +48,54 @@ done
 case "$VERSION" in
   ""|*[!0-9A-Za-z.\-]*)
     echo "Error: invalid --version '$VERSION' (use digits, letters, dots, dashes)." >&2
+    exit 2 ;;
+esac
+
+case "$BUILD" in
+  ""|*[!0-9A-Za-z.\-]*)
+    echo "Error: invalid --build '$BUILD' (use digits, letters, dots, dashes)." >&2
+    exit 2 ;;
+esac
+
+# Reverse-DNS bundle id, e.g. com.example.TokenBar: dot-separated, each part
+# starts with a letter, rest letters/digits/dashes. Validated before it ever
+# reaches Info.plist.
+valid_bundle_id() {
+  case "$1" in
+    *[!A-Za-z0-9.-]*|""|.*|*.|*..*) return 1 ;;
+  esac
+  _old="$IFS"; IFS="."
+  # shellcheck disable=SC2162
+  set -- $1
+  IFS="$_old"
+  if [ $# -lt 2 ]; then return 1; fi
+  for _part in "$@"; do
+    case "$_part" in
+      ""|[!A-Za-z]*|*[!A-Za-z0-9-]*) return 1 ;;
+    esac
+  done
+  return 0
+}
+if ! valid_bundle_id "$BUNDLE_ID"; then
+  echo "Error: invalid --bundle-id '$BUNDLE_ID' (expected reverse-DNS like com.example.TokenBar)." >&2
+  exit 2
+fi
+
+# Guard the destructive removal: never allow empty, root, cwd, or non-.app
+# targets so a bad --output cannot wipe the repo or the filesystem.
+case "$OUTPUT" in
+  ""|/|.|..)
+    echo "Error: invalid --output '$OUTPUT'." >&2
+    exit 2 ;;
+esac
+OUTPUT="${OUTPUT%/}"
+case "$OUTPUT" in
+  ""|/|.|..)
+    echo "Error: invalid --output '$OUTPUT'." >&2
+    exit 2 ;;
+  *.app) ;;
+  *)
+    echo "Error: invalid --output '$OUTPUT' (expected a path ending in .app)." >&2
     exit 2 ;;
 esac
 
