@@ -21,7 +21,7 @@ enum CLIError: Error, CustomStringConvertible {
         case .unknownFlag(let flag): return "Unknown flag: \(flag)"
         case .missingValue(let flag): return "Missing value for \(flag)"
         case .invalidPreset(let value): return "Invalid --preset '\(value)'. Expected one of: today, 24h, 7d, 30d, best-month, lifetime."
-        case .invalidSource(let value): return "Invalid --source '\(value)'. Expected one of: all, codex, opencode."
+        case .invalidSource(let value): return "Invalid --source '\(value)'. Expected one of: all, codex, opencode, claude."
         }
     }
 }
@@ -43,6 +43,7 @@ func parseSource(_ raw: String) throws -> SourceFilter {
     case "all": return .all
     case "codex": return .codex
     case "opencode": return .opencode
+    case "claude": return .claude
     default: throw CLIError.invalidSource(raw)
     }
 }
@@ -88,7 +89,7 @@ func usageText(executable: String = "token-bar") -> String {
     Usage: \(executable) [--preset <name>] [--source <name>] [--all-presets] [--json]
 
       --preset <name>   today | 24h | 7d | 30d | best-month | lifetime (default: lifetime)
-      --source <name>   all | codex | opencode (default: all)
+      --source <name>   all | codex | opencode | claude (default: all)
       --all-presets     print every preset for the chosen source, in fixed order
                         (today, 24h, 7d, 30d, best-month, lifetime); ignores --preset
       --json            emit machine-readable JSON instead of human-readable text

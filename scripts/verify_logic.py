@@ -234,6 +234,59 @@ def decode_opencode_row(cols, table="session_v2"):
             "session": session, "request": request}
 
 
+def parse_claude_line(line, file_id="", line_no=0):
+    try:
+        top = json.loads(line)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(top, dict):
+        return None
+    t = top.get("type")
+    if t is not None and "assistant" not in str(t).lower():
+        return None
+    message = top.get("message")
+    if not isinstance(message, dict):
+        return None
+    usage = message.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    i = to_int(get(usage, "input_tokens", "inputtokens", "input"))
+    o = to_int(get(usage, "output_tokens", "outputtokens", "output"))
+    c_read = to_int(get(usage, "cache_read_input_tokens", "cachereadinputtokens",
+                         "cached_tokens", "cachedtokens", "cached_input_tokens",
+                         "tokens_cache_read", "tokenscacheread"))
+    c_make = to_int(get(usage, "cache_creation_input_tokens", "cachecreationinputtokens",
+                         "cache_write_input_tokens", "cachewriteinputtokens",
+                         "tokens_cache_write", "tokenscachewrite"))
+    c = None if (c_read is None and c_make is None) else (c_read or 0) + (c_make or 0)
+    tot = to_int(get(usage, "total_tokens", "totaltokens", "tokens_total", "tokenstotal", "total"))
+    if tot is None:
+        tot = to_int(get(message, "total_tokens", "totaltokens", "total"))
+    if tot is None:
+        tot = to_int(get(top, "total_tokens", "totaltokens", "total"))
+    if all(v is None for v in (i, o, c, tot)):
+        return None
+    merged = dict(top)
+    merged.update(message)
+    ts = parse_ts(get(merged, "timestamp", "time", "created_at", "createdAt", "date"))
+    if ts is None:
+        return None
+    # The per-message API id is the finest-grained stable key, so it wins
+    # over the outer request id when both exist (mirrors ClaudeParser).
+    request = (get(message, "id", "message_id", "messageid", "messageId") or
+               get(merged, "requestId", "request_id", "requestid") or "")
+    session = (get(merged, "sessionId", "session_id", "sessionid") or "")
+    model = get(merged, "model", "model_name") or "unknown"
+    i, o = i or 0, o or 0
+    tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
+    rid = f"{file_id}:{line_no}"
+    return {"ts": ts, "model": model,
+            "input": i, "output": o, "cached": c or 0, "reasoning": 0,
+            "total": tot_val if tot_val else i + o,
+            "session": session, "request": request,
+            "id": f"claude:{request}" if request else f"claude:{rid}"}
+
+
 FALLBACK = (3.0, 12.0, 1.5)
 PRICE_TABLE = [
     ("gpt-4o-mini", (0.15, 0.60, 0.075)),
@@ -419,12 +472,94 @@ def run():
             unique.append(key)
     check("dedupe per source+request", unique == ["codex:dup", "opencode:dup"])
 
+    # Claude Code source (synthetic only, never real logs)
+    claude_fixture = os.path.join(root, "Fixtures", "synthetic-claude-sample.jsonl")
+    c_kept, c_skipped = 0, 0
+    if os.path.exists(claude_fixture):
+        with open(claude_fixture) as f:
+            for idx, line in enumerate(f, start=1):
+                if not line.strip():
+                    continue
+                if parse_claude_line(line, file_id="synthetic-claude-sample.jsonl",
+                                     line_no=idx) is not None:
+                    c_kept += 1
+                else:
+                    c_skipped += 1
+        check("claude fixture 3 kept / 5 skipped", c_kept == 3 and c_skipped == 5,
+              f"kept={c_kept} skipped={c_skipped}")
+
+    claude_valid = parse_claude_line(
+        '{"type":"assistant","message":{"model":"claude-sonnet-4-20250514","id":"msg-1",'
+        '"usage":{"input_tokens":1200,"output_tokens":340}},'
+        '"timestamp":"2026-09-10T08:15:00Z","sessionId":"sess-1","requestId":"req-1"}')
+    check("claude valid assistant",
+          claude_valid is not None and claude_valid["total"] == 1540
+          and claude_valid["request"] == "msg-1" and claude_valid["session"] == "sess-1")
+    claude_cache = parse_claude_line(
+        '{"type":"assistant","message":{"model":"m","id":"c",'
+        '"usage":{"input_tokens":1200,"output_tokens":340,'
+        '"cache_read_input_tokens":200,"cache_creation_input_tokens":50}},'
+        '"timestamp":"2026-09-10T08:15:00Z","sessionId":"s"}')
+    check("claude cache pair no fold-in",
+          claude_cache is not None and claude_cache["cached"] == 250
+          and claude_cache["input"] == 1200 and claude_cache["total"] == 1540
+          and claude_cache["cached"] <= claude_cache["input"])
+    check("claude user line skipped",
+          parse_claude_line('{"type":"user","message":{"role":"user"},'
+                            '"timestamp":"2026-09-10T09:00:00Z"}') is None)
+    check("claude summary skipped",
+          parse_claude_line('{"type":"summary","summary":"x",'
+                            '"timestamp":"2026-09-10T09:00:00Z"}') is None)
+    check("claude missing usage skipped",
+          parse_claude_line('{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+                            '"message":{"model":"m","id":"x"}}') is None)
+    check("claude malformed skipped", parse_claude_line("not json") is None)
+    check("claude epoch timestamp",
+          parse_claude_line('{"type":"assistant","timestamp":1757325600,"sessionId":"s",'
+                            '"message":{"model":"m","id":"e",'
+                            '"usage":{"input_tokens":1,"output_tokens":1}}}') is not None)
+    check("claude epoch millis",
+          parse_claude_line('{"type":"assistant","timestamp":1757325600000,"sessionId":"s",'
+                            '"message":{"model":"m","id":"m",'
+                            '"usage":{"input_tokens":1,"output_tokens":1}}}') is not None)
+    check("claude explicit total wins",
+          parse_claude_line('{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+                            '"message":{"model":"m","id":"t",'
+                            '"usage":{"input_tokens":800,"output_tokens":200,'
+                            '"cache_read_input_tokens":100,"total_tokens":5000}}}')["total"] == 5000)
+    no_id_a = parse_claude_line(
+        '{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+        '"message":{"model":"m","usage":{"input_tokens":1,"output_tokens":1}}}',
+        file_id="f.jsonl", line_no=1)
+    no_id_b = parse_claude_line(
+        '{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+        '"message":{"model":"m","usage":{"input_tokens":1,"output_tokens":1}}}',
+        file_id="f.jsonl", line_no=2)
+    check("claude empty request stays unique by id",
+          no_id_a is not None and no_id_b is not None
+          and no_id_a["request"] == "" and no_id_a["id"] != no_id_b["id"])
+    dup_a = parse_claude_line(
+        '{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+        '"message":{"model":"m","id":"msg-dup","usage":{"input_tokens":10,"output_tokens":5}}}')
+    dup_b = parse_claude_line(
+        '{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+        '"message":{"model":"m","id":"msg-dup","usage":{"input_tokens":10,"output_tokens":5}}}')
+    check("claude dedupe same message id",
+          dup_a is not None and dup_b is not None
+          and f"claude:{dup_a['request']}" == f"claude:{dup_b['request']}")
+    check("claude source isolation",
+          [r for r in
+           [{"source": "codex"}, {"source": "opencode"}, {"source": "claude"}]
+           if r["source"] == "claude"] == [{"source": "claude"}])
+
     # Report formatter mirror (matches Report.swift semantics)
     def sanitize(w):
         if "Codex sessions not found" in w:
             return "Codex sessions not found (checked default location or TOKENBAR_CODEX_ROOT)."
         if "OpenCode database not found" in w:
             return "OpenCode database not found (checked default location or TOKENBAR_OPENCODE_DB)."
+        if "Claude sessions not found" in w:
+            return "Claude sessions not found (checked default location or TOKENBAR_CLAUDE_ROOT)."
         return " ".join("<path>" if t.strip(".,:;()[]\"'").startswith(("/", "~")) else t
                         for t in w.split(" "))
 
@@ -445,6 +580,9 @@ def run():
           "Codex sessions not found (checked default location or TOKENBAR_CODEX_ROOT).")
     check("sanitize opencode path",
           "/Users/" not in sanitize("OpenCode database not found at /Users/someone/opencode.db"))
+    check("sanitize claude missing-root",
+          sanitize("Claude sessions not found at /Users/someone/.claude/projects.") ==
+          "Claude sessions not found (checked default location or TOKENBAR_CLAUDE_ROOT).")
     check("sanitize generic path",
           "/tmp/secret/x.db" not in sanitize("Read failed at /tmp/secret/x.db today")
           and "<path>" in sanitize("Read failed at /tmp/secret/x.db today"))

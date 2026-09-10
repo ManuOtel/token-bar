@@ -51,6 +51,7 @@ struct DashboardView: View {
             Text("All").tag(SourceFilter.all)
             Text("Codex").tag(SourceFilter.codex)
             Text("OpenCode").tag(SourceFilter.opencode)
+            Text("Claude").tag(SourceFilter.claude)
         }
         .pickerStyle(.segmented)
     }
@@ -144,7 +145,8 @@ struct DashboardView: View {
             Text("Checked:")
             Text("~/.codex/sessions/**/*.jsonl").font(.caption).monospaced()
             Text("~/.local/share/opencode/opencode.db").font(.caption).monospaced()
-            Text("Override with TOKENBAR_CODEX_ROOT / TOKENBAR_OPENCODE_DB for testing.")
+            Text("~/.claude/projects/**/*.jsonl").font(.caption).monospaced()
+            Text("Override with TOKENBAR_CODEX_ROOT / TOKENBAR_OPENCODE_DB / TOKENBAR_CLAUDE_ROOT for testing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

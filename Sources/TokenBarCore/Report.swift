@@ -63,6 +63,7 @@ public enum ReportFormatter {
         case .all: return "all"
         case .codex: return "codex"
         case .opencode: return "opencode"
+        case .claude: return "claude"
         }
     }
 
@@ -78,6 +79,9 @@ public enum ReportFormatter {
         }
         if result.contains("OpenCode database not found") {
             return "OpenCode database not found (checked default location or TOKENBAR_OPENCODE_DB)."
+        }
+        if result.contains("Claude sessions not found") {
+            return "Claude sessions not found (checked default location or TOKENBAR_CLAUDE_ROOT)."
         }
         // Generic fallback: redact tokens that look like absolute paths.
         // Keep the message deterministic: one fixed placeholder.

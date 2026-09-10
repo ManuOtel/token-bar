@@ -1,0 +1,8 @@
+{"type":"assistant","message":{"model":"claude-sonnet-4-20250514","id":"msg-demo-1","usage":{"input_tokens":1200,"output_tokens":340,"cache_read_input_tokens":200,"cache_creation_input_tokens":50}},"timestamp":"2026-09-10T08:15:00Z","sessionId":"sess-demo-1","requestId":"req-demo-1"}
+{"type":"assistant","message":{"model":"claude-sonnet-4-20250514","id":"msg-demo-2","usage":{"input_tokens":800,"output_tokens":200,"cache_read_input_tokens":100,"cache_creation_input_tokens":0}},"timestamp":"2026-09-09T10:00:00Z","sessionId":"sess-demo-1"}
+{"type":"assistant","message":{"model":"claude-haiku-4-5","id":"msg-demo-3","usage":{"input_tokens":500,"output_tokens":150}},"timestamp":1757325600,"sessionId":"sess-demo-2"}
+{"type":"user","message":{"role":"user","content":"synthetic prompt, never a real log"},"timestamp":"2026-09-10T09:00:00Z","sessionId":"sess-demo-1"}
+{"type":"summary","summary":"synthetic summary","timestamp":"2026-09-10T09:01:00Z","sessionId":"sess-demo-1"}
+this line is not json and must be skipped
+{"type":"assistant","timestamp":"not-a-date","sessionId":"sess-demo-3","message":{"model":"m","id":"msg-bad","usage":{"input_tokens":10,"output_tokens":5}}}
+{"type":"assistant","timestamp":"2026-09-10T08:15:00Z","sessionId":"sess-demo-3","message":{"model":"m","id":"msg-nousage"}}

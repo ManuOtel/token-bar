@@ -4,6 +4,7 @@ import Foundation
 public enum UsageSource: String, Codable, Hashable, Sendable, CaseIterable {
     case codex
     case opencode
+    case claude
 }
 
 /// Dashboard source filter.
@@ -11,12 +12,14 @@ public enum SourceFilter: String, Codable, Hashable, Sendable, CaseIterable {
     case all
     case codex
     case opencode
+    case claude
 
     public func matches(_ source: UsageSource) -> Bool {
         switch self {
         case .all: return true
         case .codex: return source == .codex
         case .opencode: return source == .opencode
+        case .claude: return source == .claude
         }
     }
 }
@@ -136,17 +139,20 @@ public struct LoadReport: Codable, Hashable, Sendable {
     public var records: [NormalizedUsage]
     public var skippedCodexLines: Int
     public var skippedOpenCodeRows: Int
+    public var skippedClaudeLines: Int
     public var warnings: [String]
 
     public init(
         records: [NormalizedUsage],
         skippedCodexLines: Int,
         skippedOpenCodeRows: Int,
-        warnings: [String]
+        warnings: [String],
+        skippedClaudeLines: Int = 0
     ) {
         self.records = records
         self.skippedCodexLines = skippedCodexLines
         self.skippedOpenCodeRows = skippedOpenCodeRows
+        self.skippedClaudeLines = skippedClaudeLines
         self.warnings = warnings
     }
 }
