@@ -1,0 +1,6 @@
+{"type": "token_usage_record", "timestamp": "2026-09-10T08:15:00Z", "model": "gpt-5-mini", "input_tokens": 1200, "output_tokens": 340, "cached_tokens": 200, "reasoning_tokens": 120, "session_id": "sess-demo-1", "request_id": "req-demo-1"}
+{"type": "token_usage_record", "timestamp": "2026-09-09T10:00:00Z", "model": "gpt-5-mini", "input_tokens": 800, "output_tokens": 200, "session_id": "sess-demo-1", "request_id": "req-demo-2"}
+{"payload": {"type": "token_usage_record", "timestamp": 1757325600, "model": "claude-sonnet-4", "prompt_tokens": 500, "completion_tokens": 150, "session_id": "sess-demo-2", "request_id": "req-demo-3"}}
+{"type": "heartbeat", "timestamp": "2026-09-10T09:00:00Z", "model": "gpt-5-mini"}
+this line is not json and must be skipped
+{"type": "token_usage_record", "timestamp": "not-a-date", "model": "gpt-5-mini", "input_tokens": 10, "output_tokens": 5}
