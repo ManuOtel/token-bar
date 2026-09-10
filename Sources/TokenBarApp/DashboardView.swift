@@ -29,6 +29,9 @@ struct DashboardView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
+        .onAppear {
+            if report.records.isEmpty && !isLoading { onRefresh() }
+        }
     }
 
     private var header: some View {
@@ -115,7 +118,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Daily trend").font(.subheadline).bold()
             let buckets = stats.dailyTrend.suffix(14)
-            let max = buckets.map(\.totalTokens).max() ?? 1
+            let maxTokens = buckets.map(\.totalTokens).max() ?? 1
             HStack(alignment: .bottom, spacing: 3) {
                 ForEach(buckets, id: \.dayLabel) { bucket in
                     VStack {
@@ -123,7 +126,7 @@ struct DashboardView: View {
                             .fill(.blue)
                             .frame(
                                 width: 12,
-                                height: max(2, CGFloat(bucket.totalTokens) / CGFloat(max(max, 1)) * 60)
+                                height: max(CGFloat(2), CGFloat(bucket.totalTokens) / CGFloat(max(maxTokens, 1)) * 60)
                             )
                         Text(String(bucket.dayLabel.suffix(2)))
                             .font(.caption2)

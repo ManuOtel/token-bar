@@ -75,7 +75,9 @@ public struct NormalizedUsage: Codable, Hashable, Sendable {
         self.reasoningTokens = max(0, reasoningTokens)
         // total is authoritative when positive, otherwise input + output.
         // cached/reasoning are subsets and never added on top.
-        let computed = inputTokens + outputTokens
+        let clampedInput = max(0, inputTokens)
+        let clampedOutput = max(0, outputTokens)
+        let computed = clampedInput + clampedOutput
         self.totalTokens = totalTokens > 0 ? totalTokens : max(0, computed)
         self.sessionId = sessionId
         self.requestId = requestId

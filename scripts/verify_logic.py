@@ -112,9 +112,10 @@ def parse_codex_line(line):
     if all(v is None for v in (i, o, c, r, tot)):
         return None
     i, o = i or 0, o or 0
+    tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
     return {"ts": ts, "model": get(merged, "model", "model_name") or "unknown",
             "input": i, "output": o, "cached": c or 0, "reasoning": r or 0,
-            "total": tot if tot else i + o,
+            "total": tot_val if tot_val else i + o,
             "session": get(merged, "session_id", "sessionid", "conversation_id") or "",
             "request": get(merged, "request_id", "requestid", "message_id", "id") or ""}
 
@@ -159,21 +160,43 @@ def decode_opencode_row(cols, table="session_v2"):
     if all(v is None for v in (i, o, c, r, tot)):
         return None
     i, o = i or 0, o or 0
+    tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
     return {"ts": ts, "model": get(merged, "model", "model_name") or "unknown",
             "input": i, "output": o, "cached": c or 0, "reasoning": r or 0,
-            "total": tot if tot else i + o,
+            "total": tot_val if tot_val else i + o,
             "session": get(merged, "session_id", "sessionid", "session", "id", "key") or ""}
 
 
 FALLBACK = (3.0, 12.0, 1.5)
+PRICE_TABLE = [
+    ("gpt-4o-mini", (0.15, 0.60, 0.075)),
+    ("gpt-4o", (2.50, 10.0, 1.25)),
+    ("gpt-5-mini", (0.25, 2.0, 0.025)),
+    ("gpt-5", (1.25, 10.0, 0.125)),
+    ("o1-mini", (1.10, 4.40, 0.55)),
+    ("o1", (15.0, 60.0, 7.50)),
+    ("o3-mini", (1.10, 4.40, 0.55)),
+    ("o3", (2.0, 8.0, 0.50)),
+    ("claude-haiku", (0.80, 4.0, 0.08)),
+    ("claude-sonnet", (3.0, 15.0, 0.30)),
+    ("claude-opus", (15.0, 75.0, 1.50)),
+    ("gemini-flash", (0.35, 1.05, 0.035)),
+    ("gemini-pro", (1.25, 10.0, 0.125)),
+]
+
+
+def price_for(model):
+    key = (model or "").lower()
+    for match, price in PRICE_TABLE:
+        if match in key:
+            return price
+    return FALLBACK
 
 
 def cost(model, i, o, c):
     cached = min(max(0, c), max(0, i))
     fresh = max(0, i) - cached
-    inp, outp, cch = FALLBACK
-    if "gpt-4o-mini" in model:
-        inp, outp, cch = (0.15, 0.60, 0.075)
+    inp, outp, cch = price_for(model)
     return fresh / 1e6 * inp + cached / 1e6 * cch + max(0, o) / 1e6 * outp
 
 
@@ -242,6 +265,21 @@ def run():
     # Cost: cached subset
     check("cached-only billed at cached rate",
           abs(cost("gpt-4o-mini", 1000, 0, 1000) - 1000 / 1e6 * 0.075) < 1e-12)
+    check("pricing mini-before-base order",
+          abs(cost("gpt-4o-mini", 1_000_000, 0, 0) - 0.15) < 1e-9 and
+          abs(cost("gpt-4o", 1_000_000, 0, 0) - 2.5) < 1e-9 and
+          abs(cost("gpt-5-mini", 1_000_000, 0, 0) - 0.25) < 1e-9 and
+          abs(cost("gpt-5", 1_000_000, 0, 0) - 1.25) < 1e-9)
+    check("pricing unknown fallback",
+          abs(cost("some-future-model-zzz", 1_000_000, 0, 0) - 3.0) < 1e-9)
+    check("negative total falls back to input+output",
+          parse_codex_line('{"timestamp":"2026-09-10T08:15:00Z","input_tokens":10,'
+                           '"output_tokens":5,"total_tokens":-3}')['total'] == 15)
+    check("float-string counts tolerated",
+          parse_codex_line('{"timestamp":"2026-09-10T08:15:00Z","input_tokens":"10.0",'
+                           '"output_tokens":"5"}')['total'] == 15)
+    check("bool counts rejected",
+          parse_codex_line('{"timestamp":"2026-09-10T08:15:00Z","input_tokens":true}') is None)
 
     # Dedupe earliest kept
     seen, unique = set(), []

@@ -52,6 +52,15 @@ final class CodexParserTests: XCTestCase {
         XCTAssertEqual(CodexParser.parseLine(line)?.model, "unknown")
     }
 
+    func testFloatStringCountsTolerated() {
+        let line = #"{"timestamp":"2026-09-10T08:15:00Z","input_tokens":"10.0","output_tokens":"5"}"#
+        XCTAssertEqual(CodexParser.parseLine(line)?.totalTokens, 15)
+    }
+
+    func testBoolCountsRejected() {
+        XCTAssertNil(CodexParser.parseLine(#"{"timestamp":"2026-09-10T08:15:00Z","input_tokens":true}"#))
+    }
+
     func testParseFileCountsSkipped() throws {
         let url = Bundle.module.url(forResource: "synthetic-codex-sample", withExtension: "jsonl")
             ?? URL(fileURLWithPath: "Fixtures/synthetic-codex-sample.jsonl")
