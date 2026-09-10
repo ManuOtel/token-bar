@@ -80,4 +80,56 @@ final class OpenCodeParserTests: XCTestCase {
         ]
         XCTAssertEqual(OpenCodeStore.decodeRow(columns)?.totalTokens, 15)
     }
+
+    func testRealColumnsWithModelJSON() {
+        // Real-world OpenCode shape: epoch-millis time_created, tokens_*
+        // columns, model as a JSON string.
+        let columns: [String: String?] = [
+            "id": "sess-1",
+            "time_created": "1757325600000",
+            "time_updated": "1757325660000",
+            "tokens_input": "1000",
+            "tokens_output": "250",
+            "tokens_reasoning": "50",
+            "tokens_cache_read": "100",
+            "tokens_cache_write": "20",
+            "model": #"{"id":"gpt-5-mini","providerID":"openai"}"#,
+        ]
+        let record = OpenCodeStore.decodeRow(columns, table: "session_v2")
+        XCTAssertNotNil(record)
+        XCTAssertEqual(record?.inputTokens, 1000)
+        XCTAssertEqual(record?.outputTokens, 250)
+        XCTAssertEqual(record?.reasoningTokens, 50)
+        XCTAssertEqual(record?.cachedTokens, 120) // read + write
+        XCTAssertEqual(record?.totalTokens, 1250) // input + output fallback
+        XCTAssertEqual(record?.model, "openai/gpt-5-mini")
+        XCTAssertEqual(record?.sessionId, "sess-1")
+        // No per-message ID: session ID doubles as request ID so the
+        // session_v2/session mirror pair dedupes downstream.
+        XCTAssertEqual(record?.requestId, "sess-1")
+    }
+
+    func testModelJSONIdOnly() {
+        let columns: [String: String?] = [
+            "id": "s", "time_created": "1757325600000",
+            "tokens_input": "10", "tokens_output": "5",
+            "model": #"{"id":"claude-sonnet-4"}"#,
+        ]
+        XCTAssertEqual(OpenCodeStore.decodeRow(columns)?.model, "claude-sonnet-4")
+    }
+
+    func testMirrorRowsAcrossTablesDedupeToOne() {
+        let base: [String: String?] = [
+            "id": "sess-dup",
+            "time_created": "1757325600000",
+            "tokens_input": "100",
+            "tokens_output": "50",
+            "model": "m",
+        ]
+        let first = OpenCodeStore.decodeRow(base, table: "session_v2")
+        let second = OpenCodeStore.decodeRow(base, table: "session")
+        XCTAssertNotNil(first)
+        XCTAssertNotNil(second)
+        XCTAssertEqual(TokenBarStore.dedupe([first!, second!]).count, 1)
+    }
 }

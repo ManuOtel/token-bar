@@ -80,7 +80,10 @@ public enum TokenBarStore {
 
     /// Deterministic dedupe: same source + same non-empty requestId collapses
     /// to the earliest (timestamp, id) record. Records without a requestId are
-    /// unique by id and always kept.
+    /// unique by id and always kept. OpenCode per-session rows mirrored across
+    /// `session_v2` / `session` share their session ID as the request ID (see
+    /// `OpenCodeStore.decodeRow`), so each mirror pair collapses here instead
+    /// of double-counting.
     public static func dedupe(_ records: [NormalizedUsage]) -> [NormalizedUsage] {
         var seen = Set<String>()
         var unique: [NormalizedUsage] = []

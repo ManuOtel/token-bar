@@ -76,6 +76,17 @@ def to_int(v):
             return None
 
 
+def nested_usage(top, payload):
+    for container in (payload, top):
+        if not isinstance(container, dict):
+            continue
+        for key in ("usage", "token_usage", "tokenusage"):
+            nested = container.get(key)
+            if isinstance(nested, dict):
+                return nested
+    return None
+
+
 def parse_codex_line(line):
     try:
         top = json.loads(line)
@@ -91,24 +102,35 @@ def parse_codex_line(line):
     t = get(top, "type", "payload_type", "kind", "event", "name")
     if t is None:
         t = get(payload, "type", "payload_type", "kind", "event", "name")
+    nested = nested_usage(top, payload)
     if t is not None:
         tl = str(t).lower()
         has_tok = any(k in payload or k in top for k in
                       ("input_tokens", "prompt_tokens", "output_tokens", "completion_tokens",
-                       "cached_tokens", "reasoning_tokens", "total_tokens",
-                       "inputtokens", "prompttokens", "outputtokens", "completiontokens"))
-        if "token_usage" not in tl and not has_tok:
+                        "cached_tokens", "reasoning_tokens", "total_tokens",
+                        "inputtokens", "prompttokens", "outputtokens", "completiontokens",
+                        "tokens_input", "tokens_output"))
+        if "token_usage" not in tl and not has_tok and not ("response" in tl and nested is not None):
             return None
     merged = dict(top)
     merged.update(payload)
+    # Per-record values come from payload.usage when present; turn/thread
+    # objects are cumulative and must not be summed on top.
+    usage = nested if nested is not None else merged
     ts = parse_ts(get(merged, "timestamp", "time", "created_at", "createdAt", "date"))
     if ts is None:
         return None
-    i = to_int(get(merged, "input_tokens", "inputtokens", "prompt_tokens", "prompttokens", "input"))
-    o = to_int(get(merged, "output_tokens", "outputtokens", "completion_tokens", "completiontokens", "output"))
-    c = to_int(get(merged, "cached_tokens", "cachedtokens", "cached_input_tokens"))
-    r = to_int(get(merged, "reasoning_tokens", "reasoningtokens"))
-    tot = to_int(get(merged, "total_tokens", "totaltokens", "total"))
+    i = to_int(get(usage, "input_tokens", "inputtokens", "prompt_tokens", "prompttokens",
+                     "tokens_input", "tokensinput", "input"))
+    o = to_int(get(usage, "output_tokens", "outputtokens", "completion_tokens", "completiontokens",
+                     "tokens_output", "tokensoutput", "output"))
+    c_read = to_int(get(usage, "cached_tokens", "cachedtokens", "cached_input_tokens",
+                          "tokens_cache_read"))
+    c_write = to_int(get(usage, "cache_write_input_tokens", "tokens_cache_write"))
+    c = None if (c_read is None and c_write is None) else (c_read or 0) + (c_write or 0)
+    r = to_int(get(usage, "reasoning_tokens", "reasoningtokens", "reasoning_output_tokens",
+                     "tokens_reasoning"))
+    tot = to_int(get(usage, "total_tokens", "totaltokens", "tokens_total", "total"))
     if all(v is None for v in (i, o, c, r, tot)):
         return None
     i, o = i or 0, o or 0
@@ -116,8 +138,33 @@ def parse_codex_line(line):
     return {"ts": ts, "model": get(merged, "model", "model_name") or "unknown",
             "input": i, "output": o, "cached": c or 0, "reasoning": r or 0,
             "total": tot_val if tot_val else i + o,
-            "session": get(merged, "session_id", "sessionid", "conversation_id") or "",
-            "request": get(merged, "request_id", "requestid", "message_id", "id") or ""}
+            "session": get(merged, "session_id", "sessionid", "thread_id", "conversation_id") or "",
+            "request": get(merged, "response_id", "responseid", "request_id", "requestid",
+                           "message_id", "turn_id", "thread_id", "id") or ""}
+
+
+def model_label(raw):
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if not s.startswith("{"):
+        return s
+    try:
+        obj = json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return s
+    if isinstance(obj, str) and obj:
+        return obj
+    if not isinstance(obj, dict):
+        return s
+    mid = obj.get("id") or obj.get("model") or obj.get("name")
+    prov = obj.get("providerID") or obj.get("providerId") or obj.get("provider")
+    variant = obj.get("variant")
+    if prov and mid:
+        return f"{prov}/{mid}"
+    return mid or prov or variant
 
 
 def decode_opencode_row(cols, table="session_v2"):
@@ -148,23 +195,29 @@ def decode_opencode_row(cols, table="session_v2"):
             for k, v in blob.items():
                 merged.setdefault(k.lower(), v)
                 merged.setdefault(k, v)
-    ts = parse_ts(get(merged, "timestamp", "time", "created_at", "createdAt", "created",
-                        "updated_at", "updated", "date"))
+    ts = parse_ts(get(merged, "timestamp", "time", "time_created", "created_at", "createdAt", "created",
+                        "updated_at", "updated", "time_updated", "date"))
     if ts is None:
         return None
-    i = to_int(get(merged, "input_tokens", "prompt_tokens", "input"))
-    o = to_int(get(merged, "output_tokens", "completion_tokens", "output"))
-    c = to_int(get(merged, "cached_tokens"))
-    r = to_int(get(merged, "reasoning_tokens"))
-    tot = to_int(get(merged, "total_tokens", "total", "tokens"))
+    i = to_int(get(merged, "input_tokens", "prompt_tokens", "tokens_input", "input"))
+    o = to_int(get(merged, "output_tokens", "completion_tokens", "tokens_output", "output"))
+    c_read = to_int(get(merged, "cached_tokens", "cached_input_tokens", "tokens_cache_read"))
+    c_write = to_int(get(merged, "cache_write_input_tokens", "tokens_cache_write"))
+    c = None if (c_read is None and c_write is None) else (c_read or 0) + (c_write or 0)
+    r = to_int(get(merged, "reasoning_tokens", "reasoning_output_tokens", "tokens_reasoning"))
+    tot = to_int(get(merged, "total_tokens", "tokens_total", "total", "tokens"))
     if all(v is None for v in (i, o, c, r, tot)):
         return None
     i, o = i or 0, o or 0
     tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
-    return {"ts": ts, "model": get(merged, "model", "model_name") or "unknown",
+    session = get(merged, "session_id", "sessionid", "session", "id", "key") or ""
+    request = get(merged, "request_id", "requestid", "message_id", "rowid") or ""
+    if not request:
+        request = session
+    return {"ts": ts, "model": model_label(get(merged, "model", "model_name")) or "unknown",
             "input": i, "output": o, "cached": c or 0, "reasoning": r or 0,
             "total": tot_val if tot_val else i + o,
-            "session": get(merged, "session_id", "sessionid", "session", "id", "key") or ""}
+            "session": session, "request": request}
 
 
 FALLBACK = (3.0, 12.0, 1.5)
@@ -280,6 +333,46 @@ def run():
                            '"output_tokens":"5"}')['total'] == 15)
     check("bool counts rejected",
           parse_codex_line('{"timestamp":"2026-09-10T08:15:00Z","input_tokens":true}') is None)
+
+    # Real-world Codex response shape: per-record usage wins over cumulative rollups
+    resp = {"type": "response", "timestamp": "2026-09-10T08:15:00Z",
+            "payload": {"response_id": "resp-1", "session_id": "sess-1", "thread_id": "t1",
+                        "turn_id": "turn-1", "root_turn_id": "turn-1",
+                        "usage": {"input_tokens": 1200, "output_tokens": 340,
+                                  "cached_input_tokens": 200, "cache_write_input_tokens": 50,
+                                  "reasoning_output_tokens": 120, "total_tokens": 1540},
+                        "turn_token_usage": {"input_tokens": 9999, "output_tokens": 9999},
+                        "thread_token_usage": {"input_tokens": 8888, "output_tokens": 8888}}}
+    parsed_resp = parse_codex_line(json.dumps(resp))
+    check("codex response per-record usage",
+          parsed_resp is not None and parsed_resp["input"] == 1200
+          and parsed_resp["cached"] == 250 and parsed_resp["total"] == 1540
+          and parsed_resp["session"] == "sess-1" and parsed_resp["request"] == "resp-1")
+    check("codex response without usage rejected",
+          parse_codex_line('{"type":"response","timestamp":"2026-09-10T08:15:00Z",'
+                           '"payload":{"response_id":"r1"}}') is None)
+
+    # Real-world OpenCode row shape
+    real = decode_opencode_row({"id": "sess-1", "time_created": "1757325600000",
+                                "tokens_input": "1000", "tokens_output": "250",
+                                "tokens_reasoning": "50", "tokens_cache_read": "100",
+                                "tokens_cache_write": "20",
+                                "model": json.dumps({"id": "gpt-5-mini", "providerID": "openai"})})
+    check("opencode real columns + model json",
+          real is not None and real["input"] == 1000 and real["cached"] == 120
+          and real["reasoning"] == 50 and real["total"] == 1250
+          and real["model"] == "openai/gpt-5-mini" and real["request"] == "sess-1")
+    check("opencode model id-only",
+          decode_opencode_row({"id": "s", "time_created": "1757325600000",
+                               "tokens_input": "10", "tokens_output": "5",
+                               "model": json.dumps({"id": "claude-sonnet-4"})})["model"] == "claude-sonnet-4")
+    check("opencode mirror rows share request key",
+          decode_opencode_row({"id": "sess-dup", "time_created": "1757325600000",
+                               "tokens_input": "100", "tokens_output": "50"},
+                              table="session_v2")["request"] ==
+          decode_opencode_row({"id": "sess-dup", "time_created": "1757325600000",
+                               "tokens_input": "100", "tokens_output": "50"},
+                              table="session")["request"] == "sess-dup")
 
     # Dedupe earliest kept
     seen, unique = set(), []

@@ -11,7 +11,15 @@ import SQLite3
 /// Reads `session_v2` (preferred) plus legacy `session` tables, read-only.
 /// Because the schema drifts between OpenCode versions, every row is decoded
 /// by the pure `decodeRow` function which accepts both column-form token
-/// counts and JSON-blob columns (`data`, `payload`, `info`, `value`).
+/// counts (legacy `input_tokens` style plus current `tokens_input`,
+/// `tokens_output`, `tokens_reasoning`, `tokens_cache_read`,
+/// `tokens_cache_write` style with `time_created` / `time_updated` epoch
+/// millis timestamps) and JSON-blob columns (`data`, `payload`, `info`,
+/// `value`). The `model` column may be a JSON string like
+/// `{"id": "...", "providerID": "..."}` and is reduced to a concise stable
+/// label. Rows mirrored across `session_v2` / `session` collapse downstream
+/// via `TokenBarStore.dedupe` because `decodeRow` falls back to the session
+/// ID as the request ID when no per-message ID exists.
 public enum OpenCodeStore {
     public static let tableNames = ["session_v2", "session"]
 
@@ -42,23 +50,35 @@ public enum OpenCodeStore {
         }
 
         let timestamp = CodexParser.parseTimestamp(firstRaw(merged, keys: [
-            "timestamp", "time", "created_at", "createdat", "created", "updated_at",
-            "updatedat", "updated", "createdAt", "date",
+            "timestamp", "time", "time_created", "timecreated", "created_at", "createdat",
+            "created", "updated_at", "updatedat", "updated", "time_updated", "timeupdated",
+            "createdAt", "date",
         ]))
         guard let timestamp else { return nil }
 
-        let input = intField(merged, keys: ["input_tokens", "inputtokens", "prompt_tokens", "prompttokens", "input"])
-        let output = intField(merged, keys: ["output_tokens", "outputtokens", "completion_tokens", "completiontokens", "output"])
-        let cached = intField(merged, keys: ["cached_tokens", "cachedtokens", "cached_input_tokens"])
-        let reasoning = intField(merged, keys: ["reasoning_tokens", "reasoningtokens"])
-        let total = intField(merged, keys: ["total_tokens", "totaltokens", "total", "tokens"])
+        let input = intField(merged, keys: ["input_tokens", "inputtokens", "prompt_tokens", "prompttokens", "tokens_input", "tokensinput", "input"])
+        let output = intField(merged, keys: ["output_tokens", "outputtokens", "completion_tokens", "completiontokens", "tokens_output", "tokensoutput", "output"])
+        let cachedRead = intField(merged, keys: ["cached_tokens", "cachedtokens", "cached_input_tokens", "cachedinputtokens", "tokens_cache_read", "tokenscacheread"])
+        let cachedWrite = intField(merged, keys: ["cache_write_input_tokens", "cachewriteinputtokens", "tokens_cache_write", "tokenscachewrite"])
+        let cached: Int? = {
+            if cachedRead == nil && cachedWrite == nil { return nil }
+            return (cachedRead ?? 0) + (cachedWrite ?? 0)
+        }()
+        let reasoning = intField(merged, keys: ["reasoning_tokens", "reasoningtokens", "reasoning_output_tokens", "reasoningoutputtokens", "tokens_reasoning", "tokensreasoning"])
+        let total = intField(merged, keys: ["total_tokens", "totaltokens", "tokens_total", "tokenstotal", "total", "tokens"])
         guard input != nil || output != nil || cached != nil || reasoning != nil || total != nil else {
             return nil
         }
 
-        let model = firstString(merged, keys: ["model", "model_name", "modelname", "provider_model"]) ?? "unknown"
+        let modelRaw = firstString(merged, keys: ["model", "model_name", "modelname", "provider_model"])
+        let model = decodeModelLabel(modelRaw) ?? "unknown"
         let sessionId = firstString(merged, keys: ["session_id", "sessionid", "session", "id", "key"]) ?? ""
-        let requestId = firstString(merged, keys: ["request_id", "requestid", "message_id", "messageid", "rowid"]) ?? ""
+        var requestId = firstString(merged, keys: ["request_id", "requestid", "message_id", "messageid", "rowid"]) ?? ""
+        // Per-session rollup rows carry no per-message ID and are mirrored
+        // across session_v2/session. Falling back to the session ID lets the
+        // existing source+requestId dedupe collapse the mirror pair instead
+        // of double-counting it.
+        if requestId.isEmpty { requestId = sessionId }
         let fallback = "\(table):\(sessionId.isEmpty ? UUID().uuidString : sessionId):\(Int(timestamp.timeIntervalSince1970))"
         let id = requestId.isEmpty ? "opencode:\(fallback)" : "opencode:\(requestId)"
         return NormalizedUsage(
@@ -87,6 +107,33 @@ public enum OpenCodeStore {
     }
 
     // MARK: - Private helpers
+
+    /// Reduces a model column value to a concise stable label. Accepts plain
+    /// model names plus JSON strings like `{"id": "...", "providerID": "...",
+    /// "variant": "..."}`. Prefers `providerID/id`, then `id`, then
+    /// `providerID`, then `variant`. Returns nil for empty input.
+    static func decodeModelLabel(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        guard trimmed.hasPrefix("{"),
+              let data = trimmed.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data)
+        else { return trimmed }
+        if let name = json as? String, !name.isEmpty { return name }
+        guard let dict = json as? [String: Any] else { return trimmed }
+        func text(_ keys: String...) -> String? {
+            for key in keys {
+                if let value = dict[key] as? String, !value.isEmpty { return value }
+            }
+            return nil
+        }
+        let id = text("id", "model", "modelID", "name")
+        let provider = text("providerID", "providerId", "provider", "providerName")
+        let variant = text("variant")
+        if let provider, let id { return "\(provider)/\(id)" }
+        return id ?? provider ?? variant
+    }
 
     private static func firstString(_ dict: [String: Any], keys: [String]) -> String? {
         for key in keys {

@@ -61,6 +61,34 @@ final class CodexParserTests: XCTestCase {
         XCTAssertNil(CodexParser.parseLine(#"{"timestamp":"2026-09-10T08:15:00Z","input_tokens":true}"#))
     }
 
+    func testResponseShapeUsesPerRecordUsageNotCumulative() {
+        // Real-world Codex shape: top-level response marker + timestamp, payload
+        // IDs plus nested usage (per-record) beside cumulative turn/thread rollups.
+        let line = """
+        {"type":"response","timestamp":"2026-09-10T08:15:00Z","payload":{\
+        "response_id":"resp-1","session_id":"sess-1","thread_id":"thread-1",\
+        "turn_id":"turn-1","root_turn_id":"turn-1",\
+        "usage":{"input_tokens":1200,"output_tokens":340,"cached_input_tokens":200,\
+        "cache_write_input_tokens":50,"reasoning_output_tokens":120,"total_tokens":1540},\
+        "turn_token_usage":{"input_tokens":9999,"output_tokens":9999,"total_tokens":19998},\
+        "thread_token_usage":{"input_tokens":8888,"output_tokens":8888,"total_tokens":17776}}}
+        """
+        let record = CodexParser.parseLine(line, fileId: "f.jsonl", lineNumber: 1)
+        XCTAssertNotNil(record)
+        XCTAssertEqual(record?.inputTokens, 1200)
+        XCTAssertEqual(record?.outputTokens, 340)
+        XCTAssertEqual(record?.cachedTokens, 250) // read + write, not cumulative
+        XCTAssertEqual(record?.reasoningTokens, 120)
+        XCTAssertEqual(record?.totalTokens, 1540) // per-record, not turn/thread
+        XCTAssertEqual(record?.sessionId, "sess-1")
+        XCTAssertEqual(record?.requestId, "resp-1")
+    }
+
+    func testResponseWithoutNestedUsageRejected() {
+        XCTAssertNil(CodexParser.parseLine(
+            #"{"type":"response","timestamp":"2026-09-10T08:15:00Z","payload":{"response_id":"r1"}}"#))
+    }
+
     func testParseFileCountsSkipped() throws {
         let url = Bundle.module.url(forResource: "synthetic-codex-sample", withExtension: "jsonl")
             ?? URL(fileURLWithPath: "Fixtures/synthetic-codex-sample.jsonl")
