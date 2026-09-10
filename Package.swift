@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "TokenBarCore", targets: ["TokenBarCore"]),
         .executable(name: "TokenBarApp", targets: ["TokenBarApp"]),
+        .executable(name: "TokenBarCLI", targets: ["TokenBarCLI"]),
     ],
     targets: [
         .target(name: "TokenBarCore", path: "Sources/TokenBarCore"),
@@ -14,6 +15,11 @@ let package = Package(
             name: "TokenBarApp",
             dependencies: ["TokenBarCore"],
             path: "Sources/TokenBarApp"
+        ),
+        .executableTarget(
+            name: "TokenBarCLI",
+            dependencies: ["TokenBarCore"],
+            path: "Sources/TokenBarCLI"
         ),
         .testTarget(
             name: "TokenBarCoreTests",

@@ -12,13 +12,19 @@ Sources/TokenBarCore/   # pure logic, Foundation only (no network, no auth)
   Pricing.swift         # static per-1M rates + cost formula
   Aggregator.swift      # filter / aggregate / bestMonth / dailyTrend (pure, clock-injected)
   Store.swift           # orchestrates adapters, env overrides, deterministic dedupe
+  Report.swift          # privacy-safe CLI sections: sanitize, human + JSON render (pure)
+Sources/TokenBarCLI/    # thin terminal front-end (Foundation only)
+  main.swift            # --preset/--source/--all-presets/--json parsing, prints Report
 Sources/TokenBarApp/    # SwiftUI + AppKit menu bar shell (macOS 14+)
   TokenBarApp.swift     # @main App, MenuBarExtra, accessory AppDelegate, refresh
   DashboardView.swift   # filters, presets, stats, breakdowns, trend, empty states
 Tests/TokenBarCoreTests/
   CodexParserTests.swift / OpenCodeParserTests.swift / AggregatorTests.swift
+  ReportTests.swift     # pure formatter: totals, sanitizer, best-month, JSON determinism
 Fixtures/               # synthetic samples only, safe to commit
 scripts/verify_logic.py # host-side mirror of core semantics (no Swift here)
+scripts/show-usage.sh   # one-command CLI wrapper: swift run TokenBarCLI "$@"
+scripts/run-token-bar.sh # one-command menu bar launcher: swift run TokenBarApp
 ```
 
 ## Design decisions
@@ -41,6 +47,14 @@ scripts/verify_logic.py # host-side mirror of core semantics (no Swift here)
 - **App is thin**: all semantics live in `TokenBarCore`; the SwiftUI dashboard
   only renders `AggregatedStats` and forwards refresh. AppKit appears solely
   as the accessory-policy delegate + `MenuBarExtra` host.
+- **CLI is thin**: `TokenBarCLI/main.swift` only parses
+  `--preset/--source/--all-presets/--json`, calls `TokenBarStore.load`, then
+  `ReportFormatter.section/render/encodeJSON`. All formatting lives in pure
+  `Report.swift` so it is unit-testable without touching the filesystem.
+- **Privacy by construction**: `ReportFormatter` sanitizes every warning to
+  generic location labels (`TOKENBAR_CODEX_ROOT` / `TOKENBAR_OPENCODE_DB`
+  hints). No absolute paths, prompt text, or message bodies ever reach
+  terminal output or JSON.
 
 ## Data flow
 
@@ -48,6 +62,7 @@ scripts/verify_logic.py # host-side mirror of core semantics (no Swift here)
 files/db --CodexParser/OpenCodeStore--> [NormalizedUsage]
   --TokenBarStore.dedupe--> LoadReport --Aggregator.filter--> scoped
   --Aggregator.aggregate / .bestMonth--> AggregatedStats --> DashboardView
+  --ReportFormatter.section/render--> TokenBarCLI terminal report
 ```
 
 ## Failure model

@@ -23,6 +23,59 @@ Xcode alternative: open the folder in Xcode (`File > Open`), select the
 `TokenBarApp` scheme, Run. The app lives in the menu bar (accessory policy,
 `MenuBarExtra` + `NSApplicationDelegate`).
 
+## Direct terminal usage (no menu bar)
+
+Default report is **lifetime / all sources**: total/input/output/cached/
+reasoning tokens, requests, sessions, clearly labelled estimated cost,
+last updated, plus Codex/OpenCode source splits and top models. Output never
+includes file paths or prompt text.
+
+```sh
+./scripts/show-usage.sh
+./scripts/show-usage.sh --preset today
+./scripts/show-usage.sh --preset 7d --source codex
+./scripts/show-usage.sh --all-presets
+./scripts/show-usage.sh --preset lifetime --json
+./scripts/run-token-bar.sh   # menu bar launcher (macOS 14+)
+```
+
+Raw Swift equivalents:
+
+```sh
+swift run TokenBarCLI
+swift run TokenBarCLI --preset today --source all
+swift run TokenBarCLI --preset 24h --source codex
+swift run TokenBarCLI --all-presets --source all
+swift run TokenBarCLI --preset lifetime --json
+swift run TokenBarApp
+```
+
+Flags:
+
+- `--preset today | 24h | 7d | 30d | best-month | lifetime`
+  (default `lifetime`).
+- `--source all | codex | opencode` (default `all`).
+- `--all-presets`: print today, 24h, 7d, 30d, best month, lifetime in one
+  fixed-order pass for the chosen source.
+- `--json`: machine-readable array of per-preset objects (same totals plus
+  `bestMonth`, `bySource`, `byModel`, sanitized `warnings`).
+- `--help` / `-h`: usage.
+
+What each report means:
+
+- **today**: local calendar day `[startOfDay(now), now]`.
+- **24h / 7d / 30d**: rolling windows ending at `now`, inclusive.
+- **best month**: the local `yyyy-MM` month with max total tokens over the
+  filtered lifetime set (ties go to the earliest month); header shows the
+  winning month key.
+- **lifetime**: everything, no date filter.
+- **source splits**: per-source tokens/requests/cost, sorted tokens desc.
+- **cost**: always labelled `Estimated cost ... (estimate ...)`; static
+  per-1M table in `Pricing.swift`, unknown models use the fallback rate.
+- **warnings**: sanitized counts only (for example `Codex sessions not
+  found (checked default location or TOKENBAR_CODEX_ROOT)`). No absolute
+  paths are ever printed.
+
 ## Data sources (local only)
 
 | Source  | Path | Format |
@@ -88,14 +141,16 @@ figure as an estimate.
 
 ```sh
 swift test            # Mac / any host with Swift 5.9+
-python3 scripts/verify_logic.py   # this Linux host (mirrors core semantics)
+python3 scripts/verify_logic.py   # this Linux host (mirrors core semantics + report format)
 ```
 
 Covers: Codex valid/alias/nested/type-gate/malformed/epoch/unknown-model,
 OpenCode column-form/legacy/JSON-blob/missing-timestamp/no-counts/fallback/
 nulls, plus filtering (source, today-vs-24h, 7d/30d, inclusive bounds),
 best-month max + earliest-tiebreak, totals/sessions/cost/breakdowns,
-cached-subset accounting, dedupe, empty aggregation.
+cached-subset accounting, dedupe, empty aggregation, plus CLI report
+formatting (lifetime totals labels, warning path sanitizing, best-month key,
+deterministic JSON, no raw paths in output).
 
 ## Limitations
 
@@ -104,6 +159,23 @@ cached-subset accounting, dedupe, empty aggregation.
   skip rows (counted, visible).
 - No live sync, no multi-machine merge, no export in the MVP.
 - App target needs macOS 14+; Linux runs logic verification only.
+
+## Troubleshooting missing data
+
+- `No usage records in this scope`: the filter/preset matched zero records.
+  Retry `./scripts/show-usage.sh --preset lifetime --source all`.
+- `Codex sessions not found (...)`: default `~/.codex/sessions/**/*.jsonl`
+  is absent. Point testing data with
+  `TOKENBAR_CODEX_ROOT=/tmp/fake-codex ./scripts/show-usage.sh`.
+- `OpenCode database not found (...)`: default
+  `~/.local/share/opencode/opencode.db` is absent. Point testing data with
+  `TOKENBAR_OPENCODE_DB=/tmp/fake.db ./scripts/show-usage.sh`.
+- `N Codex line(s) skipped` / `N OpenCode row(s) skipped`: malformed or
+  non-usage entries were counted, not fatal. CLI output never prints paths
+  or prompt text, only sanitized warning counts and labels.
+- Linux worker host: `swift` is not installed, so use
+  `python3 scripts/verify_logic.py`. Build and run `TokenBarCLI` /
+  `TokenBarApp` on a Mac with Xcode 15+.
 
 ## Contributing
 

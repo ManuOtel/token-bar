@@ -252,6 +252,46 @@ def run():
             unique.append(key)
     check("dedupe per source+request", unique == ["codex:dup", "opencode:dup"])
 
+    # Report formatter mirror (matches Report.swift semantics)
+    def sanitize(w):
+        if "Codex sessions not found" in w:
+            return "Codex sessions not found (checked default location or TOKENBAR_CODEX_ROOT)."
+        if "OpenCode database not found" in w:
+            return "OpenCode database not found (checked default location or TOKENBAR_OPENCODE_DB)."
+        return " ".join("<path>" if t.strip(".,:;()[]\"'").startswith(("/", "~")) else t
+                        for t in w.split(" "))
+
+    def render_section(total, inp, out, cached, reasoning, req, sess, cost_v, by_source):
+        lines = ["Token Bar -- lifetime / all",
+                 f"Total tokens: {total}", f"Input tokens: {inp}", f"Output tokens: {out}",
+                 f"Cached tokens: {cached} (subset of input)",
+                 f"Reasoning tokens: {reasoning} (subset of output)",
+                 f"Requests: {req}", f"Sessions: {sess}",
+                 f"Estimated cost: ${cost_v:.4f} USD (estimate, static price table)",
+                 "By source:"]
+        for k, v in by_source:
+            lines.append(f"  {k}: {v} tokens")
+        return "\n".join(lines)
+
+    check("sanitize codex path",
+          sanitize("Codex sessions not found at /Users/someone/.codex/sessions.") ==
+          "Codex sessions not found (checked default location or TOKENBAR_CODEX_ROOT).")
+    check("sanitize opencode path",
+          "/Users/" not in sanitize("OpenCode database not found at /Users/someone/opencode.db"))
+    check("sanitize generic path",
+          "/tmp/secret/x.db" not in sanitize("Read failed at /tmp/secret/x.db today")
+          and "<path>" in sanitize("Read failed at /tmp/secret/x.db today"))
+    text = render_section(1800, 1500, 300, 0, 0, 2, 1, 0.0008,
+                          [("codex", 1200), ("opencode", 600)])
+    check("report labels lifetime totals",
+          all(s in text for s in ("Total tokens: 1800", "Input tokens: 1500",
+                                  "Estimated cost:", "estimate", "codex", "opencode")))
+    check("report no raw paths", "/Users/" not in sanitize(text) and "/tmp/" not in text)
+    import json as _json
+    payload = [{"preset": "lifetime", "totalTokens": 1800}]
+    check("report json deterministic",
+          _json.dumps(payload, sort_keys=True) == _json.dumps(payload, sort_keys=True))
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")
