@@ -149,7 +149,7 @@ Base for this follow-up: `origin/main` at `7cb4c71` (merge of PR #10). Branch: `
 
 - Task 2 full tests (Mac): PASS.
   - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build`: passed.
-  - `swift test`: passed with 79 tests and 0 failures.
+  - `swift test`: passed with 88 tests and 0 failures.
 - Task 4 menu-bar app build / launch / quit smoke (Mac, reversible): PASS.
   - `./scripts/build-app.sh --version 0.1.0 --build 1`: built `dist/TokenBar.app` (git-ignored).
   - `Info.plist` verified: bundle id `com.manuotel.TokenBar`, version `0.1.0 (1)`, minimum macOS `14.0`, `LSUIElement` true.
