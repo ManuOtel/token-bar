@@ -135,8 +135,10 @@ public enum CodexParser {
         }
 
         let model = firstString(merged, keys: ["model", "model_name", "modelname"]) ?? "unknown"
+        // thread_id is session-scoped, so it only informs sessionId, never
+        // request identity (which stays response/turn/request/message IDs).
         let sessionId = firstString(merged, keys: ["session_id", "sessionid", "thread_id", "threadid", "conversation_id", "conversationid"]) ?? ""
-        let requestId = firstString(merged, keys: ["response_id", "responseid", "request_id", "requestid", "message_id", "messageid", "turn_id", "turnid", "thread_id", "threadid", "id"]) ?? ""
+        let requestId = firstString(merged, keys: ["response_id", "responseid", "request_id", "requestid", "message_id", "messageid", "turn_id", "turnid", "id"]) ?? ""
         let fallbackId = "\(fileId):\(lineNumber)"
         let id = requestId.isEmpty ? "codex:\(fallbackId)" : "codex:\(requestId)"
         return NormalizedUsage(

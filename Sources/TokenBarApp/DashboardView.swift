@@ -159,9 +159,12 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var warnings: some View {
-        if !report.warnings.isEmpty {
+        // Sanitized: raw Store warnings carry absolute home paths, which must
+        // never reach the menu bar UI.
+        let clean = ReportFormatter.sanitizeWarnings(report.warnings)
+        if !clean.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(report.warnings, id: \.self) { warning in
+                ForEach(clean, id: \.self) { warning in
                     Text(warning).font(.caption).foregroundStyle(.secondary)
                 }
             }

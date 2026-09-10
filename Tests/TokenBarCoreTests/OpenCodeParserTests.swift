@@ -104,9 +104,10 @@ final class OpenCodeParserTests: XCTestCase {
         XCTAssertEqual(record?.totalTokens, 1250) // input + output fallback
         XCTAssertEqual(record?.model, "openai/gpt-5-mini")
         XCTAssertEqual(record?.sessionId, "sess-1")
-        // No per-message ID: session ID doubles as request ID so the
-        // session_v2/session mirror pair dedupes downstream.
-        XCTAssertEqual(record?.requestId, "sess-1")
+        // No per-message ID: sessionID#epochSeconds doubles as request ID so
+        // the session_v2/session mirror pair dedupes downstream while rows at
+        // different timestamps stay distinct.
+        XCTAssertEqual(record?.requestId, "sess-1#1757325600")
     }
 
     func testModelJSONIdOnly() {
@@ -131,5 +132,28 @@ final class OpenCodeParserTests: XCTestCase {
         XCTAssertNotNil(first)
         XCTAssertNotNil(second)
         XCTAssertEqual(TokenBarStore.dedupe([first!, second!]).count, 1)
+    }
+
+    func testSameSessionDifferentTimestampsStayDistinct() {
+        let older: [String: String?] = [
+            "id": "sess-multi",
+            "time_created": "1757325600000",
+            "tokens_input": "100",
+            "tokens_output": "50",
+            "model": "m",
+        ]
+        let newer: [String: String?] = [
+            "id": "sess-multi",
+            "time_created": "1757325660000",
+            "tokens_input": "100",
+            "tokens_output": "50",
+            "model": "m",
+        ]
+        let first = OpenCodeStore.decodeRow(older, table: "session_v2")
+        let second = OpenCodeStore.decodeRow(newer, table: "session_v2")
+        XCTAssertNotNil(first)
+        XCTAssertNotNil(second)
+        XCTAssertNotEqual(first?.requestId, second?.requestId)
+        XCTAssertEqual(TokenBarStore.dedupe([first!, second!]).count, 2)
     }
 }

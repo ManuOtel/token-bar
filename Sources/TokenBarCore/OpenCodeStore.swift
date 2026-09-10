@@ -18,8 +18,11 @@ import SQLite3
 /// `value`). The `model` column may be a JSON string like
 /// `{"id": "...", "providerID": "..."}` and is reduced to a concise stable
 /// label. Rows mirrored across `session_v2` / `session` collapse downstream
-/// via `TokenBarStore.dedupe` because `decodeRow` falls back to the session
-/// ID as the request ID when no per-message ID exists.
+/// via `TokenBarStore.dedupe`: per-session rollup rows carry no per-message
+/// ID, so `decodeRow` falls back to `sessionID#epochSeconds` as the request
+/// ID. This assumes the mirror pair shares one row per session with the same
+/// `time_created` (observed: 22 rows in each table); genuine rows for one
+/// session at different timestamps keep distinct keys and are never merged.
 public enum OpenCodeStore {
     public static let tableNames = ["session_v2", "session"]
 
@@ -75,10 +78,13 @@ public enum OpenCodeStore {
         let sessionId = firstString(merged, keys: ["session_id", "sessionid", "session", "id", "key"]) ?? ""
         var requestId = firstString(merged, keys: ["request_id", "requestid", "message_id", "messageid", "rowid"]) ?? ""
         // Per-session rollup rows carry no per-message ID and are mirrored
-        // across session_v2/session. Falling back to the session ID lets the
-        // existing source+requestId dedupe collapse the mirror pair instead
-        // of double-counting it.
-        if requestId.isEmpty { requestId = sessionId }
+        // across session_v2/session (one row per session per table). Falling
+        // back to sessionID#epochSeconds lets the existing source+requestId
+        // dedupe collapse each mirror pair while keeping genuine rows for one
+        // session at different timestamps distinct.
+        if requestId.isEmpty, !sessionId.isEmpty {
+            requestId = "\(sessionId)#\(Int(timestamp.timeIntervalSince1970))"
+        }
         let fallback = "\(table):\(sessionId.isEmpty ? UUID().uuidString : sessionId):\(Int(timestamp.timeIntervalSince1970))"
         let id = requestId.isEmpty ? "opencode:\(fallback)" : "opencode:\(requestId)"
         return NormalizedUsage(

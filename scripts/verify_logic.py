@@ -124,13 +124,14 @@ def parse_codex_line(line):
                      "tokens_input", "tokensinput", "input"))
     o = to_int(get(usage, "output_tokens", "outputtokens", "completion_tokens", "completiontokens",
                      "tokens_output", "tokensoutput", "output"))
-    c_read = to_int(get(usage, "cached_tokens", "cachedtokens", "cached_input_tokens",
-                          "tokens_cache_read"))
-    c_write = to_int(get(usage, "cache_write_input_tokens", "tokens_cache_write"))
+    c_read = to_int(get(usage, "cached_tokens", "cachedtokens", "cached_input_tokens", "cachedinputtokens",
+                          "tokens_cache_read", "tokenscacheread"))
+    c_write = to_int(get(usage, "cache_write_input_tokens", "cachewriteinputtokens",
+                           "tokens_cache_write", "tokenscachewrite"))
     c = None if (c_read is None and c_write is None) else (c_read or 0) + (c_write or 0)
     r = to_int(get(usage, "reasoning_tokens", "reasoningtokens", "reasoning_output_tokens",
-                     "tokens_reasoning"))
-    tot = to_int(get(usage, "total_tokens", "totaltokens", "tokens_total", "total"))
+                     "reasoningoutputtokens", "tokens_reasoning", "tokensreasoning"))
+    tot = to_int(get(usage, "total_tokens", "totaltokens", "tokens_total", "tokenstotal", "total"))
     if all(v is None for v in (i, o, c, r, tot)):
         return None
     i, o = i or 0, o or 0
@@ -140,7 +141,7 @@ def parse_codex_line(line):
             "total": tot_val if tot_val else i + o,
             "session": get(merged, "session_id", "sessionid", "thread_id", "conversation_id") or "",
             "request": get(merged, "response_id", "responseid", "request_id", "requestid",
-                           "message_id", "turn_id", "thread_id", "id") or ""}
+                           "message_id", "turn_id", "id") or ""}
 
 
 def model_label(raw):
@@ -195,25 +196,34 @@ def decode_opencode_row(cols, table="session_v2"):
             for k, v in blob.items():
                 merged.setdefault(k.lower(), v)
                 merged.setdefault(k, v)
-    ts = parse_ts(get(merged, "timestamp", "time", "time_created", "created_at", "createdAt", "created",
-                        "updated_at", "updated", "time_updated", "date"))
+    ts = parse_ts(get(merged, "timestamp", "time", "time_created", "timecreated", "created_at",
+                        "createdat", "createdAt", "created",
+                        "updated_at", "updatedat", "updated", "time_updated", "timeupdated", "date"))
     if ts is None:
         return None
-    i = to_int(get(merged, "input_tokens", "prompt_tokens", "tokens_input", "input"))
-    o = to_int(get(merged, "output_tokens", "completion_tokens", "tokens_output", "output"))
-    c_read = to_int(get(merged, "cached_tokens", "cached_input_tokens", "tokens_cache_read"))
-    c_write = to_int(get(merged, "cache_write_input_tokens", "tokens_cache_write"))
+    i = to_int(get(merged, "input_tokens", "inputtokens", "prompt_tokens", "prompttokens",
+                     "tokens_input", "tokensinput", "input"))
+    o = to_int(get(merged, "output_tokens", "outputtokens", "completion_tokens", "completiontokens",
+                     "tokens_output", "tokensoutput", "output"))
+    c_read = to_int(get(merged, "cached_tokens", "cachedtokens", "cached_input_tokens", "cachedinputtokens",
+                          "tokens_cache_read", "tokenscacheread"))
+    c_write = to_int(get(merged, "cache_write_input_tokens", "cachewriteinputtokens",
+                           "tokens_cache_write", "tokenscachewrite"))
     c = None if (c_read is None and c_write is None) else (c_read or 0) + (c_write or 0)
-    r = to_int(get(merged, "reasoning_tokens", "reasoning_output_tokens", "tokens_reasoning"))
-    tot = to_int(get(merged, "total_tokens", "tokens_total", "total", "tokens"))
+    r = to_int(get(merged, "reasoning_tokens", "reasoningtokens", "reasoning_output_tokens",
+                     "reasoningoutputtokens", "tokens_reasoning", "tokensreasoning"))
+    tot = to_int(get(merged, "total_tokens", "totaltokens", "tokens_total", "tokenstotal",
+                       "total", "tokens"))
     if all(v is None for v in (i, o, c, r, tot)):
         return None
     i, o = i or 0, o or 0
     tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
     session = get(merged, "session_id", "sessionid", "session", "id", "key") or ""
     request = get(merged, "request_id", "requestid", "message_id", "rowid") or ""
-    if not request:
-        request = session
+    if not request and session:
+        # Mirror-pair dedupe key: same session + same second collapses,
+        # different timestamps stay distinct (mirrors OpenCodeStore.decodeRow).
+        request = f"{session}#{int(ts.timestamp())}"
     return {"ts": ts, "model": model_label(get(merged, "model", "model_name")) or "unknown",
             "input": i, "output": o, "cached": c or 0, "reasoning": r or 0,
             "total": tot_val if tot_val else i + o,
@@ -361,7 +371,7 @@ def run():
     check("opencode real columns + model json",
           real is not None and real["input"] == 1000 and real["cached"] == 120
           and real["reasoning"] == 50 and real["total"] == 1250
-          and real["model"] == "openai/gpt-5-mini" and real["request"] == "sess-1")
+          and real["model"] == "openai/gpt-5-mini" and real["request"] == "sess-1#1757325600")
     check("opencode model id-only",
           decode_opencode_row({"id": "s", "time_created": "1757325600000",
                                "tokens_input": "10", "tokens_output": "5",
@@ -372,7 +382,12 @@ def run():
                               table="session_v2")["request"] ==
           decode_opencode_row({"id": "sess-dup", "time_created": "1757325600000",
                                "tokens_input": "100", "tokens_output": "50"},
-                              table="session")["request"] == "sess-dup")
+                              table="session")["request"] == "sess-dup#1757325600")
+    check("opencode same session different timestamps stay distinct",
+          decode_opencode_row({"id": "sess-multi", "time_created": "1757325600000",
+                               "tokens_input": "100", "tokens_output": "50"})["request"] !=
+          decode_opencode_row({"id": "sess-multi", "time_created": "1757325660000",
+                               "tokens_input": "100", "tokens_output": "50"})["request"])
 
     # Dedupe earliest kept
     seen, unique = set(), []
@@ -412,6 +427,10 @@ def run():
     check("sanitize generic path",
           "/tmp/secret/x.db" not in sanitize("Read failed at /tmp/secret/x.db today")
           and "<path>" in sanitize("Read failed at /tmp/secret/x.db today"))
+    check("sanitize plural covers store messages",
+          all("/Users/private" not in w for w in
+              [sanitize("Codex sessions not found at /Users/private/.codex/sessions."),
+               sanitize("OpenCode database not found at /Users/private/opencode.db")]))
     text = render_section(1800, 1500, 300, 0, 0, 2, 1, 0.0008,
                           [("codex", 1200), ("opencode", 600)])
     check("report labels lifetime totals",

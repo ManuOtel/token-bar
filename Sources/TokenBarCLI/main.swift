@@ -90,6 +90,7 @@ func usageText(executable: String = "token-bar") -> String {
       --preset <name>   today | 24h | 7d | 30d | best-month | lifetime (default: lifetime)
       --source <name>   all | codex | opencode (default: all)
       --all-presets     print every preset for the chosen source, in fixed order
+                        (today, 24h, 7d, 30d, best-month, lifetime); ignores --preset
       --json            emit machine-readable JSON instead of human-readable text
       --help, -h        show this help
 

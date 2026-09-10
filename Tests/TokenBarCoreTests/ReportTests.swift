@@ -75,6 +75,20 @@ final class ReportTests: XCTestCase {
         XCTAssertTrue(text.contains("No usage records"))
     }
 
+    func testSanitizeWarningsPluralCoversStoreMessages() {
+        // Mirrors exactly what DashboardView renders: the raw Store warnings
+        // (which embed absolute home paths) after sanitizeWarnings.
+        let raw = [
+            "Codex sessions not found at /Users/private/.codex/sessions.",
+            "OpenCode database not found at /Users/private/.local/share/opencode/opencode.db.",
+        ]
+        let clean = ReportFormatter.sanitizeWarnings(raw)
+        XCTAssertEqual(clean.count, 2)
+        XCTAssertFalse(clean.joined(separator: "\n").contains("/Users/private"))
+        XCTAssertTrue(clean[0].contains("TOKENBAR_CODEX_ROOT"))
+        XCTAssertTrue(clean[1].contains("TOKENBAR_OPENCODE_DB"))
+    }
+
     func testBestMonthSectionCarriesMonthKey() {
         let formatter = ISO8601DateFormatter()
         func dated(_ id: String, _ iso: String, total: Int) -> NormalizedUsage {
