@@ -72,4 +72,12 @@ final class OpenCodeParserTests: XCTestCase {
         XCTAssertEqual(record?.inputTokens, 50)
         XCTAssertEqual(record?.outputTokens, 0)
     }
+
+    func testNegativeTotalFallsBack() {
+        let columns: [String: String?] = [
+            "id": "n", "created_at": "2026-09-10T08:15:00Z",
+            "input_tokens": "10", "output_tokens": "5", "total_tokens": "-3",
+        ]
+        XCTAssertEqual(OpenCodeStore.decodeRow(columns)?.totalTokens, 15)
+    }
 }
