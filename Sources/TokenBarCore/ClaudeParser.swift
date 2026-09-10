@@ -33,25 +33,27 @@ public enum ClaudeParser {
         ) else {
             return Result(records: [], skippedLines: 0)
         }
+        let rootPath = root.standardizedFileURL.path
         for case let url as URL in enumerator {
             guard url.pathExtension.lowercased() == "jsonl" else { continue }
-            let file = parseFile(at: url)
+            let file = parseFile(at: url, fileId: relativePath(of: url, to: rootPath))
             records.append(contentsOf: file.records)
             skipped += file.skippedLines
         }
         return Result(records: records, skippedLines: skipped)
     }
 
-    public static func parseFile(at url: URL) -> Result {
+    public static func parseFile(at url: URL, fileId: String? = nil) -> Result {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else {
             return Result(records: [], skippedLines: 0)
         }
+        let label = fileId ?? url.lastPathComponent
         var records: [NormalizedUsage] = []
         var skipped = 0
         for (index, rawLine) in text.components(separatedBy: .newlines).enumerated() {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.isEmpty { continue }
-            if let record = parseLine(line, fileId: url.lastPathComponent, lineNumber: index + 1) {
+            if let record = parseLine(line, fileId: label, lineNumber: index + 1) {
                 records.append(record)
             } else {
                 skipped += 1
@@ -126,8 +128,11 @@ public enum ClaudeParser {
             ?? firstString(merged, keys: ["requestId", "request_id", "requestid"])
             ?? ""
         // Empty requestId stays unique by id downstream (TokenBarStore.dedupe
-        // keeps records without a requestId); the file:line fallback keeps the
-        // id itself stable and deterministic.
+        // keeps records without a requestId); the root-relative path:line
+        // fallback keeps the id itself stable and deterministic across files
+        // that share a basename. Ids are process-internal (sort/dedupe
+        // keys only, never rendered in terminal, JSON, or UI output), so no
+        // filesystem layout leaks through them.
         let fallbackId = "\(fileId):\(lineNumber)"
         let id = requestId.isEmpty ? "claude:\(fallbackId)" : "claude:\(requestId)"
         return NormalizedUsage(
@@ -146,6 +151,20 @@ public enum ClaudeParser {
     }
 
     // MARK: - Private helpers
+
+    /// Root-relative label for fallback ids (`sub/dir.jsonl`), so files
+    /// sharing a basename in different subdirectories stay distinct. Never
+    /// an absolute path: falls back to the basename when the file escapes
+    /// the root.
+    static func relativePath(of url: URL, to rootPath: String) -> String {
+        let path = url.standardizedFileURL.path
+        var base = rootPath
+        if !base.hasSuffix("/") { base += "/" }
+        if path.hasPrefix(base) {
+            return String(path.dropFirst(base.count))
+        }
+        return url.lastPathComponent
+    }
 
     private static func firstString(_ dict: [String: Any], keys: [String]) -> String? {
         for key in keys {

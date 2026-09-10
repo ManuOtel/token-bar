@@ -74,7 +74,11 @@ public struct NormalizedUsage: Codable, Hashable, Sendable {
         self.model = model.isEmpty ? "unknown" : model
         self.inputTokens = max(0, inputTokens)
         self.outputTokens = max(0, outputTokens)
-        self.cachedTokens = max(0, cachedTokens)
+        // Cached is a subset of input by construction: clamp adversarial
+        // counts (e.g. negative input beside positive cached) so the
+        // invariant holds for every record. No-op for real provider data,
+        // where parsers already fold cache into input.
+        self.cachedTokens = min(max(0, cachedTokens), self.inputTokens)
         self.reasoningTokens = max(0, reasoningTokens)
         // total is authoritative when positive, otherwise input + output.
         // cached/reasoning are subsets and never added on top.
@@ -154,6 +158,25 @@ public struct LoadReport: Codable, Hashable, Sendable {
         self.skippedOpenCodeRows = skippedOpenCodeRows
         self.skippedClaudeLines = skippedClaudeLines
         self.warnings = warnings
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case records
+        case skippedCodexLines
+        case skippedOpenCodeRows
+        case skippedClaudeLines
+        case warnings
+    }
+
+    /// Decodes reports written before `skippedClaudeLines` existed: the key
+    /// defaults to zero instead of failing. Encoding is unchanged.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        records = try container.decode([NormalizedUsage].self, forKey: .records)
+        skippedCodexLines = try container.decode(Int.self, forKey: .skippedCodexLines)
+        skippedOpenCodeRows = try container.decode(Int.self, forKey: .skippedOpenCodeRows)
+        skippedClaudeLines = try container.decodeIfPresent(Int.self, forKey: .skippedClaudeLines) ?? 0
+        warnings = try container.decode([String].self, forKey: .warnings)
     }
 }
 

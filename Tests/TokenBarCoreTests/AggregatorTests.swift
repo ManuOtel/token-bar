@@ -160,6 +160,26 @@ final class AggregatorTests: XCTestCase {
         XCTAssertEqual(rec.totalTokens, 10)
     }
 
+    func testCachedClampedToInputForAdversarialCounts() {
+        // Negative input beside positive cached must not violate the
+        // cached-subset-of-input invariant. Real provider data is unaffected
+        // (parsers already fold cache into input, so the clamp is a no-op).
+        let negative = NormalizedUsage(
+            id: "adv", source: .claude, timestamp: now, model: "m",
+            inputTokens: -5, outputTokens: 10, cachedTokens: 50,
+            reasoningTokens: 0, totalTokens: 0, sessionId: "s", requestId: "r"
+        )
+        XCTAssertEqual(negative.inputTokens, 0)
+        XCTAssertEqual(negative.cachedTokens, 0)
+        let oversized = NormalizedUsage(
+            id: "over", source: .claude, timestamp: now, model: "m",
+            inputTokens: 100, outputTokens: 10, cachedTokens: 500,
+            reasoningTokens: 0, totalTokens: 0, sessionId: "s", requestId: "r"
+        )
+        XCTAssertEqual(oversized.cachedTokens, 100)
+        XCTAssertLessThanOrEqual(oversized.cachedTokens, oversized.inputTokens)
+    }
+
     func testPricingMiniOrderBeforeBase() {
         XCTAssertEqual(Pricing.cost(model: "gpt-4o-mini", inputTokens: 1_000_000, outputTokens: 0, cachedTokens: 0), 0.15, accuracy: 0.0001)
         XCTAssertEqual(Pricing.cost(model: "gpt-4o", inputTokens: 1_000_000, outputTokens: 0, cachedTokens: 0), 2.5, accuracy: 0.0001)
@@ -190,5 +210,22 @@ final class AggregatorTests: XCTestCase {
         XCTAssertEqual(report.skippedCodexLines, 0)
         XCTAssertEqual(report.skippedOpenCodeRows, 0)
         XCTAssertTrue(report.warnings.isEmpty)
+    }
+
+    func testLoadReportDecodesOldReportsWithoutClaudeSkips() throws {
+        // Reports encoded before skippedClaudeLines existed must decode
+        // with the new key defaulting to zero, not throw keyNotFound.
+        let oldJSON = """
+        {"records":[],"skippedCodexLines":2,"skippedOpenCodeRows":3,"warnings":["w"]}
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(LoadReport.self, from: oldJSON)
+        XCTAssertEqual(decoded.skippedCodexLines, 2)
+        XCTAssertEqual(decoded.skippedOpenCodeRows, 3)
+        XCTAssertEqual(decoded.skippedClaudeLines, 0)
+        // New reports round-trip with the key preserved.
+        let fresh = LoadReport(records: [], skippedCodexLines: 1, skippedOpenCodeRows: 2, warnings: [], skippedClaudeLines: 4)
+        let roundTripped = try JSONDecoder().decode(
+            LoadReport.self, from: try JSONEncoder().encode(fresh))
+        XCTAssertEqual(roundTripped.skippedClaudeLines, 4)
     }
 }

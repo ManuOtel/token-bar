@@ -150,7 +150,7 @@ figure as an estimate.
   `(timestamp, id)` record. Records without a `requestId` are unique by `id`.
   Claude `requestId` prefers the per-message API id (`message.id`), then the
   outer request id; lines without either stay unique via a stable
-  `file:line` id.
+  root-relative `path:line` id.
 - Malformed JSONL lines, unknown types without token fields, bad timestamps,
   and undecodable DB rows are skipped and counted (`LoadReport`), surfaced in
   the dashboard as warnings. Missing files/tables degrade to empty + warning.

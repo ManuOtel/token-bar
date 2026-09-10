@@ -79,8 +79,14 @@ New third source. Real local shape (Mac-observed, generic default only):
 Acceptance:
 
 - New `UsageSource.claude` + `SourceFilter` gains `claude` (keep `all`). CLI `--source all|codex|opencode|claude`. Dashboard filter adds Claude.
-- Parser: recursive `*.jsonl` walk, read-only. Map `cache_read + cache_creation` into normalized `cachedTokens` (subset of input); `input_tokens` already includes cache, so no fold-in (same rule as Codex, unlike OpenCode). `total = input + output` unless an explicit positive total exists.
-- Dedupe: reuse `TokenBarStore.dedupe` (`source:requestId`, earliest `(timestamp,id)` wins). Derive `requestId` from message/request id when present; else stable `file:line` fallback; empty `requestId` stays unique by `id`. Session count from distinct non-empty `sessionId`.
+- Parser: recursive `*.jsonl` walk, read-only. Raw `input_tokens` excludes
+  the cache counters, so normalized `input = input_tokens + cache_read +
+  cache_creation` (fold-in, same rule as OpenCode); Codex is the exception
+  where `payload.usage` input already includes cached input and needs no
+  fold. Normalized `cached = cache_read + cache_creation` (subset of
+  input); `total = normalized input + output` unless an explicit positive
+  total exists.
+- Dedupe: reuse `TokenBarStore.dedupe` (`source:requestId`, earliest `(timestamp,id)` wins). Derive `requestId` from message/request id when present; else stable root-relative `path:line` fallback; empty `requestId` stays unique by `id`. Session count from distinct non-empty `sessionId`.
 - Privacy: warnings sanitized to generic labels (`TOKENBAR_CLAUDE_ROOT` hint). No paths, prompts, or message bodies in output or JSON.
 - Missing root/table degrades to empty + warning, same as Codex/OpenCode.
 - Tests + fixtures: synthetic assistant valid, cache pair, missing usage skipped, malformed line counted, epoch/ISO timestamps, dedupe, source-filter isolation. Fixtures under `Fixtures/` only, never real logs.

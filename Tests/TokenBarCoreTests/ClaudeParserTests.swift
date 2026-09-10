@@ -91,7 +91,7 @@ final class ClaudeParserTests: XCTestCase {
     }
 
     func testRequestIdFallbackStaysUniqueById() {
-        // No message/request id: requestId empty, id falls back to file:line.
+        // No message/request id: requestId empty, id falls back to path:line.
         let first = ClaudeParser.parseLine(
             #"{"type":"assistant","timestamp":"2026-09-10T08:15:00Z","sessionId":"s","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":1}}}"#,
             fileId: "f.jsonl", lineNumber: 1)
@@ -143,6 +143,32 @@ final class ClaudeParserTests: XCTestCase {
         XCTAssertFalse(clean.contains("/Users/someone"))
         XCTAssertFalse(clean.contains("/.claude/"))
         XCTAssertTrue(clean.contains("TOKENBAR_CLAUDE_ROOT"))
+    }
+
+    func testFallbackIdsAreRootRelative() throws {
+        // Two subdirectories sharing a basename must yield distinct stable
+        // ids; labels stay root-relative, never absolute.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tokenbar-claude-\(UUID().uuidString)", isDirectory: true)
+        let subA = root.appendingPathComponent("proj-a", isDirectory: true)
+        let subB = root.appendingPathComponent("proj-b", isDirectory: true)
+        try FileManager.default.createDirectory(at: subA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: subB, withIntermediateDirectories: true)
+        let line = #"{"type":"assistant","timestamp":"2026-09-10T08:15:00Z","sessionId":"s","message":{"model":"m","usage":{"input_tokens":1,"output_tokens":1}}}"# + "\n"
+        try line.write(to: subA.appendingPathComponent("s.jsonl"), atomically: true, encoding: .utf8)
+        try line.write(to: subB.appendingPathComponent("s.jsonl"), atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let result = ClaudeParser.parseDirectory(root: root)
+        XCTAssertEqual(result.records.count, 2)
+        let ids = result.records.map(\.id).sorted()
+        XCTAssertEqual(ids, ["claude:proj-a/s.jsonl:1", "claude:proj-b/s.jsonl:1"])
+        XCTAssertFalse(ids.joined(separator: "\n").contains(root.path))
+        // Dedupe keeps both (empty requestId => unique by id).
+        XCTAssertEqual(TokenBarStore.dedupe(result.records).count, 2)
+        // Outside-root files fall back to the basename, still relative.
+        XCTAssertEqual(
+            ClaudeParser.relativePath(of: URL(fileURLWithPath: "/elsewhere/x.jsonl"), to: root.path),
+            "x.jsonl")
     }
 
     func testParseFileCountsSkipped() {

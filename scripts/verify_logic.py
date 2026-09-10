@@ -136,8 +136,10 @@ def parse_codex_line(line):
         return None
     i, o = i or 0, o or 0
     tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
+    # NormalizedUsage init clamps cached to input (subset invariant).
+    cc = min(max(0, c or 0), i)
     return {"ts": ts, "model": get(merged, "model", "model_name") or "unknown",
-            "input": i, "output": o, "cached": c or 0, "reasoning": r or 0,
+            "input": i, "output": o, "cached": cc, "reasoning": r or 0,
             "total": tot_val if tot_val else i + o,
             "session": get(merged, "session_id", "sessionid", "thread_id", "conversation_id") or "",
             "request": get(merged, "response_id", "responseid", "request_id", "requestid",
@@ -228,8 +230,10 @@ def decode_opencode_row(cols, table="session_v2"):
         # Mirror-pair dedupe key: same session + same second collapses,
         # different timestamps stay distinct (mirrors OpenCodeStore.decodeRow).
         request = f"{session}#{int(ts.timestamp())}"
+    # NormalizedUsage init clamps cached to input (subset invariant).
+    cc = min(max(0, c or 0), i)
     return {"ts": ts, "model": model_label(get(merged, "model", "model_name")) or "unknown",
-            "input": i, "output": o, "cached": c or 0, "reasoning": r or 0,
+            "input": i, "output": o, "cached": cc, "reasoning": r or 0,
             "total": tot_val if tot_val else i + o,
             "session": session, "request": request}
 
@@ -282,13 +286,30 @@ def parse_claude_line(line, file_id="", line_no=0):
     session = (get(merged, "sessionId", "session_id", "sessionid") or "")
     model = get(merged, "model", "model_name") or "unknown"
     i, o = i or 0, o or 0
+    # NormalizedUsage clamps cached to input so adversarial counts keep the
+    # cached-subset-of-input invariant (no-op for real provider data, where
+    # parsers already fold cache into input).
+    cc = min(max(0, c or 0), i)
     tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
     rid = f"{file_id}:{line_no}"
     return {"ts": ts, "model": model,
-            "input": i, "output": o, "cached": c or 0, "reasoning": 0,
+            "input": i, "output": o, "cached": cc, "reasoning": 0,
             "total": tot_val if tot_val else i + o,
             "session": session, "request": request,
             "id": f"claude:{request}" if request else f"claude:{rid}"}
+
+
+def claude_relative(root, path):
+    """Mirror of ClaudeParser.relativePath: root-relative label, never absolute."""
+    base = root if root.endswith("/") else root + "/"
+    if path.startswith(base):
+        return path[len(base):]
+    return os.path.basename(path)
+
+
+def normalize_cached(input_tokens, cached_tokens):
+    """Mirror of the NormalizedUsage init clamp: cached stays a subset of input."""
+    return min(max(0, cached_tokens), max(0, input_tokens))
 
 
 FALLBACK = (3.0, 12.0, 1.5)
@@ -570,6 +591,17 @@ def run():
           [r for r in
            [{"source": "codex"}, {"source": "opencode"}, {"source": "claude"}]
            if r["source"] == "claude"] == [{"source": "claude"}])
+    check("claude fallback ids are root-relative",
+          claude_relative("/root", "/root/proj-a/s.jsonl") == "proj-a/s.jsonl"
+          and claude_relative("/root", "/root/proj-b/s.jsonl") == "proj-b/s.jsonl")
+    check("claude fallback outside root uses basename",
+          claude_relative("/root", "/elsewhere/x.jsonl") == "x.jsonl"
+          and not claude_relative("/root", "/root/a.jsonl").startswith("/"))
+    check("cached clamped to input for adversarial counts",
+          normalize_cached(-5, 50) == 0 and normalize_cached(100, 500) == 100
+          and normalize_cached(1000, 250) == 250)
+    check("old report without claude skips defaults to zero",
+          {"skippedCodexLines": 2}.get("skippedClaudeLines", 0) == 0)
 
     # Report formatter mirror (matches Report.swift semantics)
     def sanitize(w):
