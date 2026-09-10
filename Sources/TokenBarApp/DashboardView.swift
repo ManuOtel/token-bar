@@ -10,6 +10,7 @@ struct DashboardView: View {
     var scopedCount: Int
     @Binding var isLoading: Bool
     var onRefresh: () -> Void
+    @ObservedObject var loginItem: LaunchAtLoginController
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -26,6 +27,7 @@ struct DashboardView: View {
                 trend
             }
             warnings
+            loginSection
             Spacer(minLength: 0)
         }
         .padding(12)
@@ -171,5 +173,28 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    private var loginSection: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(
+                "Launch at login",
+                isOn: Binding(
+                    get: { loginItem.isEnabled },
+                    set: { loginItem.setEnabled($0) }
+                )
+            )
+            .disabled(!loginItem.isBundled || !loginItem.isAvailable)
+            Text(loginItem.statusMessage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(loginItem.helpText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            if let error = loginItem.errorMessage {
+                Text(error).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.top, 4)
     }
 }

@@ -16,6 +16,7 @@ struct TokenBarApp: App {
     @State private var source: SourceFilter = .all
     @State private var preset: DatePreset = .today
     @State private var isLoading = false
+    @StateObject private var loginItem = LaunchAtLoginController()
 
     private var scoped: [NormalizedUsage] {
         Aggregator.filter(report.records, source: source, preset: preset, now: Date())
@@ -47,7 +48,8 @@ struct TokenBarApp: App {
                 stats: stats,
                 scopedCount: scoped.count,
                 isLoading: $isLoading,
-                onRefresh: refresh
+                onRefresh: refresh,
+                loginItem: loginItem
             )
             .frame(width: 360, height: 520)
         }

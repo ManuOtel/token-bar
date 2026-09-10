@@ -656,6 +656,43 @@ def run():
     check("report json deterministic",
           _json.dumps(payload, sort_keys=True) == _json.dumps(payload, sort_keys=True))
 
+    # Launch-at-login policy mirror (matches LaunchAtLogin.swift semantics)
+    def is_bundled(bundle_id, ext):
+        return bool(bundle_id) and ext == "app"
+
+    def login_status(bundled, enabled, available):
+        if not available:
+            return "Launch at login unavailable on this macOS version."
+        if not bundled:
+            return "Dev run (unbundled): launch at login needs TokenBar.app in Applications."
+        return "Launch at login: on." if enabled else "Launch at login: off."
+
+    def login_help(bundled, available):
+        if not available:
+            return "Requires macOS 13 or later."
+        if not bundled:
+            return "Build the app with scripts/build-app.sh, move it to Applications, then toggle."
+        return "Starts TokenBar when you log in. Manage also in System Settings under Login Items."
+
+    check("login bundled needs id + app ext",
+          is_bundled("com.manuotel.TokenBar", "app")
+          and not is_bundled(None, "app") and not is_bundled("", "app")
+          and not is_bundled("com.manuotel.TokenBar", None)
+          and not is_bundled("com.manuotel.TokenBar", "xctest"))
+    check("login unbundled points at app",
+          "unbundled" in login_status(False, False, True)
+          and "TokenBar.app" in login_status(False, False, True)
+          and "/" not in login_status(False, False, True))
+    check("login bundled reflects toggle",
+          "on" in login_status(True, True, True)
+          and "off" in login_status(True, False, True))
+    check("login unavailable wins",
+          "unavailable" in login_status(True, True, False))
+    check("login help no paths",
+          all("/Users" not in m and "/tmp" not in m for m in
+              [login_help(False, True), login_help(True, True), login_help(True, False)])
+          and "build-app.sh" in login_help(False, True))
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")
