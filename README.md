@@ -26,6 +26,20 @@ Xcode alternative: open the folder in Xcode (`File > Open`), select the
 `TokenBarApp` scheme, Run. The app lives in the menu bar (accessory policy,
 `MenuBarExtra` + `NSApplicationDelegate`).
 
+## Install (packaged app)
+
+```sh
+./scripts/build-app.sh --version 0.1.0            # dist/TokenBar.app
+./scripts/package-release.sh --version 0.1.0 --format zip
+(cd dist && shasum -a 256 -c TokenBar-0.1.0-macos.zip.sha256)
+```
+
+Unzip, drag `TokenBar.app` to Applications, open. Dev loop needs no bundle:
+`./scripts/run-token-bar.sh`. The dashboard has a launch-at-login toggle
+(`SMAppService.mainApp`); under `swift run` it stays disabled with dev-run
+copy. Uninstall: toggle login off, quit, delete the app. Full path
+(signing, `notarytool`, staple, DMG, troubleshooting): `docs/MACOS_PACKAGING.md`.
+
 ## Direct terminal usage (no menu bar)
 
 Default report is **lifetime / all sources**: total/input/output/cached/

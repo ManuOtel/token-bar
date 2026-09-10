@@ -19,6 +19,8 @@ Sources/TokenBarCLI/    # thin terminal front-end (Foundation only)
 Sources/TokenBarApp/    # SwiftUI + AppKit menu bar shell (macOS 14+)
   TokenBarApp.swift     # @main App, MenuBarExtra, accessory AppDelegate, refresh
   DashboardView.swift   # filters, presets, stats, breakdowns, trend, empty states
+  LaunchAtLoginController.swift # SMAppService.mainApp wrapper, unbundled fallback
+Sources/TokenBarCore/LaunchAtLogin.swift # pure bundled/status policy (tested)
 Tests/TokenBarCoreTests/
   CodexParserTests.swift / OpenCodeParserTests.swift / AggregatorTests.swift
   ReportTests.swift     # pure formatter: totals, sanitizer, best-month, JSON determinism
@@ -26,6 +28,9 @@ Fixtures/               # synthetic samples only, safe to commit
 scripts/verify_logic.py # host-side mirror of core semantics (no Swift here)
 scripts/show-usage.sh   # one-command CLI wrapper: swift run TokenBarCLI "$@"
 scripts/run-token-bar.sh # one-command menu bar launcher: swift run TokenBarApp
+scripts/build-app.sh     # versioned TokenBar.app bundle into dist/ (Info.plist, LSUIElement)
+scripts/package-release.sh # zip/DMG + .sha256 (sign + staple before packaging)
+docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
 ```
 
 ## Design decisions
@@ -55,7 +60,9 @@ scripts/run-token-bar.sh # one-command menu bar launcher: swift run TokenBarApp
   without SQLite (like this Linux worker).
 - **App is thin**: all semantics live in `TokenBarCore`; the SwiftUI dashboard
   only renders `AggregatedStats` and forwards refresh. AppKit appears solely
-  as the accessory-policy delegate + `MenuBarExtra` host.
+  as the accessory-policy delegate + `MenuBarExtra` host. Launch at login is
+  split the same way: pure `LaunchAtLoginPolicy` in Core, thin
+  `SMAppService.mainApp` controller in the App target (no entitlements).
 - **CLI is thin**: `TokenBarCLI/main.swift` only parses
   `--preset/--source/--all-presets/--json`, calls `TokenBarStore.load`, then
   `ReportFormatter.section/render/encodeJSON`. All formatting lives in pure

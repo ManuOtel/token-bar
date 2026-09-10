@@ -35,10 +35,16 @@ jobs:
           set -eu
           bash -n scripts/show-usage.sh
           bash -n scripts/run-token-bar.sh
+          bash -n scripts/build-app.sh
+          bash -n scripts/package-release.sh
           sh -n scripts/show-usage.sh
           sh -n scripts/run-token-bar.sh
+          sh -n scripts/build-app.sh
+          sh -n scripts/package-release.sh
           test -x scripts/show-usage.sh
           test -x scripts/run-token-bar.sh
+          test -x scripts/build-app.sh
+          test -x scripts/package-release.sh
 
   privacy:
     name: Privacy gate (no network indicators)
