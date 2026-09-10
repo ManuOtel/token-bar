@@ -52,7 +52,10 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
 - **Deterministic aggregation**: explicit `now` + `Calendar` inputs, stable
   `(timestamp, id)` sort, documented tie-breaks (earliest month, key asc).
 - **Pricing separated**: `Pricing.swift` owns all money math; aggregation only
-  sums. Fallback rate keeps unknown models visible instead of zeroed.
+  sums. Resolution is explicit provider-aware: exact normalized
+  `provider/model` first, then family/substring, then fallback. Static
+  estimate only, never a bill; subscription use is not an API invoice.
+  Fallback rate keeps unknown models visible instead of zeroed.
 - **File reads only**: adapters use `FileManager` / read-only `sqlite3_open_v2`.
   No `URLSession`, no keychain, no cookies anywhere.
 - **Test roots overrideable**: `TOKENBAR_CODEX_ROOT` / `TOKENBAR_OPENCODE_DB`

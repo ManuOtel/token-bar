@@ -88,8 +88,10 @@ What each report means:
   winning month key.
 - **lifetime**: everything, no date filter.
 - **source splits**: per-source tokens/requests/cost, sorted tokens desc.
-- **cost**: always labelled `Estimated cost ... (estimate ...)`; static
-  per-1M table in `Pricing.swift`, unknown models use the fallback rate.
+- **cost**: always labelled `Estimated cost ... (estimate only; static table,
+  not a bill; subscription use is not an API invoice)`; static per-1M
+  table in `Pricing.swift` with exact provider/model first, then
+  family/substring, then fallback. Unknown models use the fallback rate.
 - **warnings**: sanitized counts only (for example `Codex sessions not
   found (checked default location or TOKENBAR_CODEX_ROOT)`). No absolute
   paths are ever printed.
@@ -156,13 +158,26 @@ Filters: **All / Codex / OpenCode / Claude**.
 - Breakdowns group by model and by source (tokens desc, key asc on ties).
 - Daily trend buckets by local calendar day (`yyyy-MM-dd`), ascending.
 
-### Cost (estimate)
+### Cost (static estimate only, never a bill)
 
 Per model per 1M tokens: `(input-cached)*inputRate + cached*cachedRate +
 output*outputRate`, all /1M, USD. Reasoning rides inside output, never extra.
-Rates are hardcoded public-listing approximations in `Pricing.swift`;
-unknown models use the fallback ($3.00 / $12.00 / $1.50). Treat every dollar
-figure as an estimate.
+Cached is capped with `min(cached, input)`; `total` is never used for cost.
+
+Resolution order in `Pricing.swift` (deterministic, case-insensitive):
+1. exact normalized `provider/model` match (for example
+`github-copilot/gpt-5.6-sol`, `openai/gpt-5.6-luna`,
+`opencode-go/muse-spark-1.3-contributor`), 2. family/substring match
+(`gpt-5`, `claude-sonnet`, ...), 3. fallback. Unknown models use the
+fallback ($3.00 / $12.00 / $1.50), never zero, and stay visible in the
+report. Every dollar figure is labelled `Estimated cost ... (estimate
+only; static table, not a bill; subscription use is not an API invoice)`.
+
+Rates are hardcoded static approximations in `Pricing.swift` (one place to
+bump them) and drift from provider price lists. Subscription or flat-rate
+usage is not an API invoice: Copilot / Luna / Muse Spark contributor
+entries reuse the nearest family rate already in the project and are
+clearly labeled approximations.
 
 ### Dedup and malformed data
 
