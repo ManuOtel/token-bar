@@ -76,13 +76,9 @@ public enum CodexParser {
         }
 
         let merged = payload.merging(top) { payloadValue, _ in payloadValue }
-        guard let timestamp = parseTimestamp(merged["timestamp"] ?? merged["time"] ?? merged["created_at"] ?? merged["createdat"] ?? merged["createdat".lowercased()] ?? merged["date"]) else {
-            // Fall back to other alias spellings before giving up.
-            guard let ts = parseTimestamp(
-                firstRaw(merged, keys: ["timestamp", "time", "created_at", "createdat", "createdAt", "date"])
-            ) else { return nil }
-            return buildRecord(merged: merged, timestamp: ts, fileId: fileId, lineNumber: lineNumber)
-        }
+        guard let timestamp = parseTimestamp(
+            firstRaw(merged, keys: ["timestamp", "time", "created_at", "createdAt", "date"])
+        ) else { return nil }
         return buildRecord(merged: merged, timestamp: timestamp, fileId: fileId, lineNumber: lineNumber)
     }
 

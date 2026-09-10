@@ -11,7 +11,7 @@ final class AggregatorTests: XCTestCase {
 
     private var now: Date {
         // 2026-09-10T12:00:00Z fixed clock.
-        Date(timeIntervalSince1970: 1_788_292_800)
+        Date(timeIntervalSince1970: 1_789_041_600)
     }
 
     private func record(
