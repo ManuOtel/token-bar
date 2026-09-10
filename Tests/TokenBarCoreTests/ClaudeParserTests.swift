@@ -49,6 +49,18 @@ final class ClaudeParserTests: XCTestCase {
             #"{"type":"assistant","timestamp":"2026-09-10T08:15:00Z","message":{"model":"m","id":"x","usage":{}}}"#))
     }
 
+    func testNumericOneAcceptedAndTrueRejected() {
+        // Darwin bridges any NSNumber holding 0/1 as Bool, so the count
+        // gate must use objCType, never `is Bool` (Mac CI regression).
+        let ones = ClaudeParser.parseLine(
+            #"{"type":"assistant","timestamp":"2026-09-10T08:15:00Z","sessionId":"s","message":{"model":"m","id":"one","usage":{"input_tokens":1,"output_tokens":1}}}"#)
+        XCTAssertEqual(ones?.inputTokens, 1)
+        XCTAssertEqual(ones?.outputTokens, 1)
+        XCTAssertEqual(ones?.totalTokens, 2)
+        XCTAssertNil(ClaudeParser.parseLine(
+            #"{"type":"assistant","timestamp":"2026-09-10T08:15:00Z","sessionId":"s","message":{"model":"m","id":"bool","usage":{"input_tokens":true,"output_tokens":true}}}"#))
+    }
+
     func testEpochAndISOTimestamps() {
         let epoch = ClaudeParser.parseLine(
             #"{"type":"assistant","timestamp":1757325600,"sessionId":"s","message":{"model":"m","id":"a","usage":{"input_tokens":1,"output_tokens":1}}}"#)

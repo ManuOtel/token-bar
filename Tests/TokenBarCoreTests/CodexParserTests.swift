@@ -61,6 +61,15 @@ final class CodexParserTests: XCTestCase {
         XCTAssertNil(CodexParser.parseLine(#"{"timestamp":"2026-09-10T08:15:00Z","input_tokens":true}"#))
     }
 
+    func testNumericOneAcceptedAndTrueRejected() {
+        // Darwin bridges any NSNumber holding 0/1 as Bool, so the count
+        // gate must use objCType, never `is Bool` (Mac CI regression).
+        let ones = CodexParser.parseLine(#"{"timestamp":"2026-09-10T08:15:00Z","input_tokens":1,"output_tokens":1}"#)
+        XCTAssertEqual(ones?.inputTokens, 1)
+        XCTAssertEqual(ones?.totalTokens, 2)
+        XCTAssertNil(CodexParser.parseLine(#"{"timestamp":"2026-09-10T08:15:00Z","input_tokens":true,"output_tokens":true}"#))
+    }
+
     func testResponseShapeUsesPerRecordUsageNotCumulative() {
         // Real-world Codex shape: top-level response marker + timestamp, payload
         // IDs plus nested usage (per-record) beside cumulative turn/thread rollups.

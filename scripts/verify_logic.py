@@ -553,6 +553,10 @@ def run():
           parse_claude_line('{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
                             '"message":{"model":"m","id":"x"}}') is None)
     check("claude malformed skipped", parse_claude_line("not json") is None)
+    check("claude bool counts rejected",
+          parse_claude_line('{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+                            '"message":{"model":"m","id":"b",'
+                            '"usage":{"input_tokens":true,"output_tokens":true}}}') is None)
     check("claude epoch timestamp",
           parse_claude_line('{"type":"assistant","timestamp":1757325600,"sessionId":"s",'
                             '"message":{"model":"m","id":"e",'

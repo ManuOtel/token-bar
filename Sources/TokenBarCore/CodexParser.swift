@@ -194,7 +194,9 @@ public enum CodexParser {
         for key in keys {
             for variant in [key, key.lowercased()] {
                 guard let raw = dict[variant] else { continue }
-                if raw is Bool { continue }
+                // Reject JSON booleans by objCType, never via `raw is Bool`:
+                // on Darwin every NSNumber holding 0/1 bridges as Bool, so
+                // the `is` gate wrongly rejects valid small counts (Mac CI).
                 if let number = raw as? NSNumber, String(cString: number.objCType) == "c" { continue }
                 if let int = raw as? Int { return int }
                 if let double = raw as? Double { return Int(double) }

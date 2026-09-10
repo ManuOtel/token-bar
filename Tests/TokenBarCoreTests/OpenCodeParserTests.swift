@@ -45,6 +45,22 @@ final class OpenCodeParserTests: XCTestCase {
         XCTAssertEqual(record?.totalTokens, 1000)
     }
 
+    func testNumericOneAcceptedAndTrueRejected() {
+        // Darwin bridges any NSNumber holding 0/1 as Bool, so the count
+        // gate must use objCType, never `is Bool` (Mac CI regression).
+        // Blob values reach intField as raw JSONSerialization output.
+        let ones: [String: String?] = [
+            "id": "one",
+            "data": #"{"input_tokens":1,"output_tokens":1,"timestamp":"2026-09-10T08:15:00Z"}"#,
+        ]
+        XCTAssertEqual(OpenCodeStore.decodeRow(ones)?.inputTokens, 1)
+        let bools: [String: String?] = [
+            "id": "bool",
+            "data": #"{"input_tokens":true,"output_tokens":true,"timestamp":"2026-09-10T08:15:00Z"}"#,
+        ]
+        XCTAssertNil(OpenCodeStore.decodeRow(bools))
+    }
+
     func testMissingTimestampSkipped() {
         let columns: [String: String?] = ["id": "x", "model": "m", "input_tokens": "10"]
         XCTAssertNil(OpenCodeStore.decodeRow(columns))
