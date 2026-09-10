@@ -98,6 +98,14 @@ Per record: `input`, `output`, `cached`, `reasoning`, `total`.
 `cached` is a subset of input; `reasoning` a subset of output. Neither is
 ever added on top of the total.
 
+OpenCode note: the schema stores `tokens_input` separately from
+`tokens_cache_read`/`tokens_cache_write`, so normalized `input` folds
+cache back in (`tokens_input + cache_read + cache_write`) and the total
+fallback includes cached usage. Codex needs no fold: its
+`payload.usage` input already includes cached input. Cost stays
+consistent either way: cached is billed at the cached rate on
+`min(cached, input)`.
+
 Field aliases are accepted (`prompt_tokens`, `completion_tokens`,
 `cached_input_tokens`, ...). Unknown models are kept as-is (empty becomes
 `"unknown"`) and priced at fallback rates.
@@ -148,7 +156,8 @@ Covers: Codex valid/alias/nested/type-gate/malformed/epoch/unknown-model,
 OpenCode column-form/legacy/JSON-blob/missing-timestamp/no-counts/fallback/
 nulls, plus filtering (source, today-vs-24h, 7d/30d, inclusive bounds),
 best-month max + earliest-tiebreak, totals/sessions/cost/breakdowns,
-cached-subset accounting, dedupe, empty aggregation, plus CLI report
+cached-subset accounting (OpenCode cache fold-in, explicit-total-wins),
+dedupe, empty aggregation, plus CLI report
 formatting (lifetime totals labels, warning path sanitizing, best-month key,
 deterministic JSON, no raw paths in output).
 

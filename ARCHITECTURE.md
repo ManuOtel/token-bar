@@ -33,6 +33,9 @@ scripts/run-token-bar.sh # one-command menu bar launcher: swift run TokenBarApp
   share code except the `NormalizedUsage` struct. Each degrades independently.
 - **Normalized records**: every event becomes one `NormalizedUsage` with
   clamped non-negative counts and `total` derived deterministically.
+  OpenCode folds `tokens_cache_read`/`tokens_cache_write` into normalized
+  input (the schema stores them separately); Codex input already includes
+  cached input, so cached stays a subset of input on both sources.
 - **Deterministic aggregation**: explicit `now` + `Calendar` inputs, stable
   `(timestamp, id)` sort, documented tie-breaks (earliest month, key asc).
 - **Pricing separated**: `Pricing.swift` owns all money math; aggregation only

@@ -201,8 +201,8 @@ def decode_opencode_row(cols, table="session_v2"):
                         "updated_at", "updatedat", "updated", "time_updated", "timeupdated", "date"))
     if ts is None:
         return None
-    i = to_int(get(merged, "input_tokens", "inputtokens", "prompt_tokens", "prompttokens",
-                     "tokens_input", "tokensinput", "input"))
+    raw = to_int(get(merged, "input_tokens", "inputtokens", "prompt_tokens", "prompttokens",
+                       "tokens_input", "tokensinput", "input"))
     o = to_int(get(merged, "output_tokens", "outputtokens", "completion_tokens", "completiontokens",
                      "tokens_output", "tokensoutput", "output"))
     c_read = to_int(get(merged, "cached_tokens", "cachedtokens", "cached_input_tokens", "cachedinputtokens",
@@ -210,6 +210,10 @@ def decode_opencode_row(cols, table="session_v2"):
     c_write = to_int(get(merged, "cache_write_input_tokens", "cachewriteinputtokens",
                            "tokens_cache_write", "tokenscachewrite"))
     c = None if (c_read is None and c_write is None) else (c_read or 0) + (c_write or 0)
+    # Schema stores tokens_input separately from cache: fold cache into
+    # normalized input so cached stays a subset and totals include it.
+    # (Codex needs no fold: its usage input already includes cached input.)
+    i = None if (raw is None and c is None) else (raw or 0) + (c or 0)
     r = to_int(get(merged, "reasoning_tokens", "reasoningtokens", "reasoning_output_tokens",
                      "reasoningoutputtokens", "tokens_reasoning", "tokensreasoning"))
     tot = to_int(get(merged, "total_tokens", "totaltokens", "tokens_total", "tokenstotal",
@@ -295,8 +299,8 @@ def run():
 
     # OpenCode rows
     rec = decode_opencode_row({"id": "a", "model": "x", "input_tokens": "1000", "output_tokens": "250",
-                               "created_at": "2026-09-10T08:15:00Z"})
-    check("opencode column form", rec is not None and rec["total"] == 1250)
+                               "cached_tokens": "100", "created_at": "2026-09-10T08:15:00Z"})
+    check("opencode column form", rec is not None and rec["input"] == 1100 and rec["total"] == 1350)
     blob = json.dumps({"model": "m", "input_tokens": 700, "output_tokens": 300,
                        "timestamp": "2026-09-09T10:00:00Z"})
     check("opencode json blob", decode_opencode_row({"id": "r", "data": blob})["total"] == 1000)
@@ -369,9 +373,10 @@ def run():
                                 "tokens_cache_write": "20",
                                 "model": json.dumps({"id": "gpt-5-mini", "providerID": "openai"})})
     check("opencode real columns + model json",
-          real is not None and real["input"] == 1000 and real["cached"] == 120
-          and real["reasoning"] == 50 and real["total"] == 1250
-          and real["model"] == "openai/gpt-5-mini" and real["request"] == "sess-1#1757325600")
+          real is not None and real["input"] == 1120 and real["cached"] == 120
+          and real["reasoning"] == 50 and real["total"] == 1370
+          and real["model"] == "openai/gpt-5-mini" and real["request"] == "sess-1#1757325600"
+          and real["cached"] <= real["input"])
     check("opencode model id-only",
           decode_opencode_row({"id": "s", "time_created": "1757325600000",
                                "tokens_input": "10", "tokens_output": "5",
@@ -388,6 +393,22 @@ def run():
                                "tokens_input": "100", "tokens_output": "50"})["request"] !=
           decode_opencode_row({"id": "sess-multi", "time_created": "1757325660000",
                                "tokens_input": "100", "tokens_output": "50"})["request"])
+    check("opencode cache folded into input and total",
+          (lambda r: r is not None and r["input"] == 1000 and r["cached"] == 200
+           and r["total"] == 1200 and r["cached"] <= r["input"])(
+              decode_opencode_row({"id": "c", "time_created": "1757325600000",
+                                   "tokens_input": "800", "tokens_output": "200",
+                                   "tokens_cache_read": "150", "tokens_cache_write": "50"})))
+    check("opencode cache-only row normalizes input",
+          (lambda r: r is not None and r["input"] == 300 and r["cached"] == 300
+           and r["total"] == 300)(
+              decode_opencode_row({"id": "co", "time_created": "1757325600000",
+                                   "tokens_cache_read": "300"})))
+    check("opencode explicit total still wins",
+          (lambda r: r is not None and r["input"] == 900 and r["total"] == 5000)(
+              decode_opencode_row({"id": "e", "time_created": "1757325600000",
+                                   "tokens_input": "800", "tokens_output": "200",
+                                   "tokens_cache_read": "100", "total_tokens": "5000"})))
 
     # Dedupe earliest kept
     seen, unique = set(), []

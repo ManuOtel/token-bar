@@ -17,7 +17,10 @@ import SQLite3
 /// millis timestamps) and JSON-blob columns (`data`, `payload`, `info`,
 /// `value`). The `model` column may be a JSON string like
 /// `{"id": "...", "providerID": "..."}` and is reduced to a concise stable
-/// label. Rows mirrored across `session_v2` / `session` collapse downstream
+/// label. The schema stores `tokens_input` separately from
+/// `tokens_cache_read`/`tokens_cache_write`, so the normalized input folds
+/// cache back in: cached stays a subset of input and totals include cached
+/// usage. Rows mirrored across `session_v2` / `session` collapse downstream
 /// via `TokenBarStore.dedupe`: per-session rollup rows carry no per-message
 /// ID, so `decodeRow` falls back to `sessionID#epochSeconds` as the request
 /// ID. This assumes the mirror pair shares one row per session with the same
@@ -59,13 +62,23 @@ public enum OpenCodeStore {
         ]))
         guard let timestamp else { return nil }
 
-        let input = intField(merged, keys: ["input_tokens", "inputtokens", "prompt_tokens", "prompttokens", "tokens_input", "tokensinput", "input"])
+        let rawInput = intField(merged, keys: ["input_tokens", "inputtokens", "prompt_tokens", "prompttokens", "tokens_input", "tokensinput", "input"])
         let output = intField(merged, keys: ["output_tokens", "outputtokens", "completion_tokens", "completiontokens", "tokens_output", "tokensoutput", "output"])
         let cachedRead = intField(merged, keys: ["cached_tokens", "cachedtokens", "cached_input_tokens", "cachedinputtokens", "tokens_cache_read", "tokenscacheread"])
         let cachedWrite = intField(merged, keys: ["cache_write_input_tokens", "cachewriteinputtokens", "tokens_cache_write", "tokenscachewrite"])
         let cached: Int? = {
             if cachedRead == nil && cachedWrite == nil { return nil }
             return (cachedRead ?? 0) + (cachedWrite ?? 0)
+        }()
+        // Official OpenCode schema stores tokens_input separately from
+        // tokens_cache_read/write, so the normalized input folds cache back
+        // in. This keeps cached a true subset of input and lets the total
+        // fallback (normalized input + output) include cached usage.
+        // (Codex needs no such fold: its payload.usage input already
+        // includes cached input.)
+        let input: Int? = {
+            if rawInput == nil && cached == nil { return nil }
+            return (rawInput ?? 0) + (cached ?? 0)
         }()
         let reasoning = intField(merged, keys: ["reasoning_tokens", "reasoningtokens", "reasoning_output_tokens", "reasoningoutputtokens", "tokens_reasoning", "tokensreasoning"])
         let total = intField(merged, keys: ["total_tokens", "totaltokens", "tokens_total", "tokenstotal", "total", "tokens"])

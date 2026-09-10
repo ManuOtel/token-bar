@@ -15,9 +15,11 @@ final class OpenCodeParserTests: XCTestCase {
         let record = OpenCodeStore.decodeRow(columns, table: "session_v2")
         XCTAssertNotNil(record)
         XCTAssertEqual(record?.source, .opencode)
-        XCTAssertEqual(record?.inputTokens, 1000)
+        // Cache folds into input: 1000 raw + 100 cached.
+        XCTAssertEqual(record?.inputTokens, 1100)
+        XCTAssertEqual(record?.cachedTokens, 100)
         XCTAssertEqual(record?.outputTokens, 250)
-        XCTAssertEqual(record?.totalTokens, 1250)
+        XCTAssertEqual(record?.totalTokens, 1350) // normalized input + output
     }
 
     func testLegacySessionTableDecode() {
@@ -97,11 +99,13 @@ final class OpenCodeParserTests: XCTestCase {
         ]
         let record = OpenCodeStore.decodeRow(columns, table: "session_v2")
         XCTAssertNotNil(record)
-        XCTAssertEqual(record?.inputTokens, 1000)
+        // tokens_input excludes cache: 1000 raw + 100 read + 20 write.
+        XCTAssertEqual(record?.inputTokens, 1120)
         XCTAssertEqual(record?.outputTokens, 250)
         XCTAssertEqual(record?.reasoningTokens, 50)
         XCTAssertEqual(record?.cachedTokens, 120) // read + write
-        XCTAssertEqual(record?.totalTokens, 1250) // input + output fallback
+        XCTAssertEqual(record?.totalTokens, 1370) // normalized input + output
+        XCTAssertLessThanOrEqual(record?.cachedTokens ?? 0, record?.inputTokens ?? 0)
         XCTAssertEqual(record?.model, "openai/gpt-5-mini")
         XCTAssertEqual(record?.sessionId, "sess-1")
         // No per-message ID: sessionID#epochSeconds doubles as request ID so
@@ -117,6 +121,49 @@ final class OpenCodeParserTests: XCTestCase {
             "model": #"{"id":"claude-sonnet-4"}"#,
         ]
         XCTAssertEqual(OpenCodeStore.decodeRow(columns)?.model, "claude-sonnet-4")
+    }
+
+    func testCacheFoldedIntoInputAndTotal() {
+        // Official schema: tokens_input excludes cache, so normalized input
+        // is raw + cache and the total fallback includes cached usage.
+        // Cost stays consistent: Pricing caps cached at input (subset).
+        let columns: [String: String?] = [
+            "id": "c", "time_created": "1757325600000",
+            "tokens_input": "800", "tokens_output": "200",
+            "tokens_cache_read": "150", "tokens_cache_write": "50",
+            "model": "m",
+        ]
+        let record = OpenCodeStore.decodeRow(columns)
+        XCTAssertEqual(record?.inputTokens, 1000)
+        XCTAssertEqual(record?.cachedTokens, 200)
+        XCTAssertEqual(record?.totalTokens, 1200)
+        XCTAssertLessThanOrEqual(record!.cachedTokens, record!.inputTokens)
+        let expected = Pricing.cost(model: "m", inputTokens: 1000, outputTokens: 200, cachedTokens: 200)
+        XCTAssertEqual(Pricing.cost(for: record!), expected, accuracy: 0.000001)
+    }
+
+    func testCacheOnlyRowNormalizesInput() {
+        let columns: [String: String?] = [
+            "id": "co", "time_created": "1757325600000",
+            "tokens_cache_read": "300",
+            "model": "m",
+        ]
+        let record = OpenCodeStore.decodeRow(columns)
+        XCTAssertEqual(record?.inputTokens, 300)
+        XCTAssertEqual(record?.cachedTokens, 300)
+        XCTAssertEqual(record?.totalTokens, 300)
+    }
+
+    func testExplicitTotalStillWins() {
+        let columns: [String: String?] = [
+            "id": "e", "time_created": "1757325600000",
+            "tokens_input": "800", "tokens_output": "200",
+            "tokens_cache_read": "100", "total_tokens": "5000",
+            "model": "m",
+        ]
+        let record = OpenCodeStore.decodeRow(columns)
+        XCTAssertEqual(record?.inputTokens, 900)
+        XCTAssertEqual(record?.totalTokens, 5000)
     }
 
     func testMirrorRowsAcrossTablesDedupeToOne() {
