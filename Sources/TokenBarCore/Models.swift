@@ -4,6 +4,7 @@ import Foundation
 public enum UsageSource: String, Codable, Hashable, Sendable, CaseIterable {
     case codex
     case opencode
+    case claude
 }
 
 /// Dashboard source filter.
@@ -11,12 +12,14 @@ public enum SourceFilter: String, Codable, Hashable, Sendable, CaseIterable {
     case all
     case codex
     case opencode
+    case claude
 
     public func matches(_ source: UsageSource) -> Bool {
         switch self {
         case .all: return true
         case .codex: return source == .codex
         case .opencode: return source == .opencode
+        case .claude: return source == .claude
         }
     }
 }
@@ -71,11 +74,17 @@ public struct NormalizedUsage: Codable, Hashable, Sendable {
         self.model = model.isEmpty ? "unknown" : model
         self.inputTokens = max(0, inputTokens)
         self.outputTokens = max(0, outputTokens)
-        self.cachedTokens = max(0, cachedTokens)
+        // Cached is a subset of input by construction: clamp adversarial
+        // counts (e.g. negative input beside positive cached) so the
+        // invariant holds for every record. No-op for real provider data,
+        // where parsers already fold cache into input.
+        self.cachedTokens = min(max(0, cachedTokens), self.inputTokens)
         self.reasoningTokens = max(0, reasoningTokens)
         // total is authoritative when positive, otherwise input + output.
         // cached/reasoning are subsets and never added on top.
-        let computed = inputTokens + outputTokens
+        let clampedInput = max(0, inputTokens)
+        let clampedOutput = max(0, outputTokens)
+        let computed = clampedInput + clampedOutput
         self.totalTokens = totalTokens > 0 ? totalTokens : max(0, computed)
         self.sessionId = sessionId
         self.requestId = requestId
@@ -134,7 +143,41 @@ public struct LoadReport: Codable, Hashable, Sendable {
     public var records: [NormalizedUsage]
     public var skippedCodexLines: Int
     public var skippedOpenCodeRows: Int
+    public var skippedClaudeLines: Int
     public var warnings: [String]
+
+    public init(
+        records: [NormalizedUsage],
+        skippedCodexLines: Int,
+        skippedOpenCodeRows: Int,
+        warnings: [String],
+        skippedClaudeLines: Int = 0
+    ) {
+        self.records = records
+        self.skippedCodexLines = skippedCodexLines
+        self.skippedOpenCodeRows = skippedOpenCodeRows
+        self.skippedClaudeLines = skippedClaudeLines
+        self.warnings = warnings
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case records
+        case skippedCodexLines
+        case skippedOpenCodeRows
+        case skippedClaudeLines
+        case warnings
+    }
+
+    /// Decodes reports written before `skippedClaudeLines` existed: the key
+    /// defaults to zero instead of failing. Encoding is unchanged.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        records = try container.decode([NormalizedUsage].self, forKey: .records)
+        skippedCodexLines = try container.decode(Int.self, forKey: .skippedCodexLines)
+        skippedOpenCodeRows = try container.decode(Int.self, forKey: .skippedOpenCodeRows)
+        skippedClaudeLines = try container.decodeIfPresent(Int.self, forKey: .skippedClaudeLines) ?? 0
+        warnings = try container.decode([String].self, forKey: .warnings)
+    }
 }
 
 public enum StoreError: Error, Sendable {

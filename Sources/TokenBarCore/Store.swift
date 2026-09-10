@@ -1,9 +1,10 @@
 import Foundation
 
-/// Orchestrates both file-only adapters into one deterministic record set.
+/// Orchestrates the three file-only adapters into one deterministic record set.
 ///
 /// - Codex root: `TOKENBAR_CODEX_ROOT` or `~/.codex/sessions` (recursive `*.jsonl`)
 /// - OpenCode DB: `TOKENBAR_OPENCODE_DB` or `~/.local/share/opencode/opencode.db`
+/// - Claude root: `TOKENBAR_CLAUDE_ROOT` or `~/.claude/projects` (recursive `*.jsonl`)
 /// - No auth, no cookies, no network. Missing roots yield zero records plus a
 ///   warning, never an error.
 public enum TokenBarStore {
@@ -13,6 +14,10 @@ public enum TokenBarStore {
 
     public static var opencodeDBOverride: String? {
         ProcessInfo.processInfo.environment["TOKENBAR_OPENCODE_DB"]
+    }
+
+    public static var claudeRootOverride: String? {
+        ProcessInfo.processInfo.environment["TOKENBAR_CLAUDE_ROOT"]
     }
 
     public static func defaultCodexRoot(fileManager: FileManager = .default) -> URL {
@@ -31,6 +36,14 @@ public enum TokenBarStore {
             .appendingPathComponent(".local/share/opencode/opencode.db").path
     }
 
+    public static func defaultClaudeRoot(fileManager: FileManager = .default) -> URL {
+        if let override = claudeRootOverride, !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        return fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/projects", isDirectory: true)
+    }
+
     public static func load(
         now _: Date = Date(),
         fileManager: FileManager = .default
@@ -39,6 +52,7 @@ public enum TokenBarStore {
         var warnings: [String] = []
         var skippedCodex = 0
         var skippedOpenCode = 0
+        var skippedClaude = 0
 
         let codexRoot = defaultCodexRoot(fileManager: fileManager)
         if fileManager.fileExists(atPath: codexRoot.path) {
@@ -70,17 +84,33 @@ public enum TokenBarStore {
             warnings.append("OpenCode database not found at \(dbPath).")
         }
 
+        let claudeRoot = defaultClaudeRoot(fileManager: fileManager)
+        if fileManager.fileExists(atPath: claudeRoot.path) {
+            let parsed = ClaudeParser.parseDirectory(root: claudeRoot, fileManager: fileManager)
+            records.append(contentsOf: parsed.records)
+            skippedClaude = parsed.skippedLines
+            if parsed.skippedLines > 0 {
+                warnings.append("\(parsed.skippedLines) Claude line(s) skipped as malformed or non-usage.")
+            }
+        } else {
+            warnings.append("Claude sessions not found at \(claudeRoot.path).")
+        }
+
         return LoadReport(
             records: dedupe(records),
             skippedCodexLines: skippedCodex,
             skippedOpenCodeRows: skippedOpenCode,
-            warnings: warnings
+            warnings: warnings,
+            skippedClaudeLines: skippedClaude
         )
     }
 
     /// Deterministic dedupe: same source + same non-empty requestId collapses
     /// to the earliest (timestamp, id) record. Records without a requestId are
-    /// unique by id and always kept.
+    /// unique by id and always kept. OpenCode per-session rows mirrored across
+    /// `session_v2` / `session` share a `sessionID#epochSeconds` fallback
+    /// request ID (see `OpenCodeStore.decodeRow`), so each mirror pair
+    /// collapses here while rows at different timestamps stay distinct.
     public static func dedupe(_ records: [NormalizedUsage]) -> [NormalizedUsage] {
         var seen = Set<String>()
         var unique: [NormalizedUsage] = []

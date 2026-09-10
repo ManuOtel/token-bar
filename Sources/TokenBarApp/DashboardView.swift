@@ -29,6 +29,9 @@ struct DashboardView: View {
             Spacer(minLength: 0)
         }
         .padding(12)
+        .onAppear {
+            if report.records.isEmpty && !isLoading { onRefresh() }
+        }
     }
 
     private var header: some View {
@@ -48,6 +51,7 @@ struct DashboardView: View {
             Text("All").tag(SourceFilter.all)
             Text("Codex").tag(SourceFilter.codex)
             Text("OpenCode").tag(SourceFilter.opencode)
+            Text("Claude").tag(SourceFilter.claude)
         }
         .pickerStyle(.segmented)
     }
@@ -115,7 +119,7 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Daily trend").font(.subheadline).bold()
             let buckets = stats.dailyTrend.suffix(14)
-            let max = buckets.map(\.totalTokens).max() ?? 1
+            let maxTokens = buckets.map(\.totalTokens).max() ?? 1
             HStack(alignment: .bottom, spacing: 3) {
                 ForEach(buckets, id: \.dayLabel) { bucket in
                     VStack {
@@ -123,7 +127,7 @@ struct DashboardView: View {
                             .fill(.blue)
                             .frame(
                                 width: 12,
-                                height: max(2, CGFloat(bucket.totalTokens) / CGFloat(max(max, 1)) * 60)
+                                height: max(CGFloat(2), CGFloat(bucket.totalTokens) / CGFloat(max(maxTokens, 1)) * 60)
                             )
                         Text(String(bucket.dayLabel.suffix(2)))
                             .font(.caption2)
@@ -141,7 +145,8 @@ struct DashboardView: View {
             Text("Checked:")
             Text("~/.codex/sessions/**/*.jsonl").font(.caption).monospaced()
             Text("~/.local/share/opencode/opencode.db").font(.caption).monospaced()
-            Text("Override with TOKENBAR_CODEX_ROOT / TOKENBAR_OPENCODE_DB for testing.")
+            Text("~/.claude/projects/**/*.jsonl").font(.caption).monospaced()
+            Text("Override with TOKENBAR_CODEX_ROOT / TOKENBAR_OPENCODE_DB / TOKENBAR_CLAUDE_ROOT for testing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -156,9 +161,12 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var warnings: some View {
-        if !report.warnings.isEmpty {
+        // Sanitized: raw Store warnings carry absolute home paths, which must
+        // never reach the menu bar UI.
+        let clean = ReportFormatter.sanitizeWarnings(report.warnings)
+        if !clean.isEmpty {
             VStack(alignment: .leading, spacing: 2) {
-                ForEach(report.warnings, id: \.self) { warning in
+                ForEach(clean, id: \.self) { warning in
                     Text(warning).font(.caption).foregroundStyle(.secondary)
                 }
             }

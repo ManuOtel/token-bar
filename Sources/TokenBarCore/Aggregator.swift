@@ -122,6 +122,7 @@ public enum Aggregator {
         var groups: [String: (start: Date, tokens: Int, requests: Int)] = [:]
         let formatter = DateFormatter()
         formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd"
         for record in records {
