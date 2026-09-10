@@ -1,5 +1,7 @@
 # Token Bar
 
+[![CI](https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml/badge.svg)](https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml)
+
 Native macOS menu bar utility that totals token usage from local Codex,
 OpenCode, and Claude Code history. File reads only. No accounts, no cookies,
 no network.
@@ -161,6 +163,15 @@ figure as an estimate.
 swift test            # Mac / any host with Swift 5.9+
 python3 scripts/verify_logic.py   # this Linux host (mirrors core semantics + report format)
 ```
+
+CI (`.github/workflows/ci.yml`, runs on `main` and PRs) mirrors this split:
+
+- macOS 14 job: `swift build` + `swift test` (source of truth).
+- Linux job: `PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify_logic.py`
+  plus shell syntax checks (`bash -n` / `sh -n`) on `scripts/*.sh`.
+- Privacy gate: fails if `Sources` contains `URLSession` / `http` / `cookie`
+  indicators, except the documented local-only comment
+  (`No auth, no cookies, no network` in `Store.swift`).
 
 Covers: Codex valid/alias/nested/type-gate/malformed/epoch/unknown-model,
 OpenCode column-form/legacy/JSON-blob/missing-timestamp/no-counts/fallback/

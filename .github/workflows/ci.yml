@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: jobs only read the repo.
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS build + test
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Swift build
+        run: swift build
+      - name: Swift test
+        run: swift test
+
+  linux:
+    name: Linux verify + shell syntax
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Mirror logic verification (no Swift required)
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify_logic.py
+      - name: Shell syntax check
+        run: |
+          set -eu
+          bash -n scripts/show-usage.sh
+          bash -n scripts/run-token-bar.sh
+          sh -n scripts/show-usage.sh
+          sh -n scripts/run-token-bar.sh
+          test -x scripts/show-usage.sh
+          test -x scripts/run-token-bar.sh
+
+  privacy:
+    name: Privacy gate (no network indicators)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Fail on networking indicators in Sources
+        run: |
+          set -eu
+          # Allowed exception: the documented local-only comment in
+          # Sources/TokenBarCore/Store.swift ("No auth, no cookies, no network").
+          hits="$(grep -rniE 'URLSession|http|cookie' Sources/ | grep -v 'No auth, no cookies, no network' || true)"
+          if [ -n "$hits" ]; then
+            echo "Privacy gate failed: networking indicators found in Sources/:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "Privacy gate passed: no URLSession/http/cookie indicators in Sources/."
