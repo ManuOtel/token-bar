@@ -40,6 +40,9 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   struct. Each degrades independently.
 - **Normalized records**: every event becomes one `NormalizedUsage` with
   clamped non-negative counts and `total` derived deterministically.
+  Codex resolves models per file (line-local `model|model_name` wins, else
+  latest `turn_context` for the same `turn_id`, else a single-model
+  `thread_id` fallback, else `"unknown"`; ambiguous threads never guess).
   OpenCode folds `tokens_cache_read`/`tokens_cache_write` into normalized
   input (the schema stores them separately); Claude Code folds
   `cache_read_input_tokens`/`cache_creation_input_tokens` into normalized

@@ -98,7 +98,7 @@ What each report means:
 
 | Source  | Path | Format |
 |---|---|---|
-| Codex | `~/.codex/sessions/**/*.jsonl` | JSONL, `token_usage_record` payloads |
+| Codex | `~/.codex/sessions/**/*.jsonl` | JSONL, `token_usage_record` payloads + `turn_context` model map |
 | OpenCode | `~/.local/share/opencode/opencode.db` | SQLite, `session_v2` + legacy `session` |
 | Claude | `~/.claude/projects/**/*.jsonl` | JSONL, assistant `message.usage` records |
 
@@ -130,7 +130,11 @@ consistent either way: cached is billed at the cached rate on
 `min(cached, input)`.
 
 Field aliases are accepted (`prompt_tokens`, `completion_tokens`,
-`cached_input_tokens`, ...). Unknown models are kept as-is (empty becomes
+`cached_input_tokens`, ...). Codex model attribution is file-sequential:
+per-record `model|model_name` wins, else the latest `turn_context` entry for
+the same `turn_id` applies, else a single-model `thread_id` fallback, else
+`"unknown"` (never empty, never invented; raw strings group exactly).
+Unknown models are kept as-is (empty becomes
 `"unknown"`) and priced at fallback rates.
 
 ### Presets (upper bound is always `now`, inclusive)

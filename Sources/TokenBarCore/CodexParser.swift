@@ -15,6 +15,16 @@ import Foundation
 /// `usage`, `turn_token_usage`, and `thread_token_usage` objects. Only
 /// `payload.usage` holds per-record values (turn/thread objects are
 /// cumulative), so token counts always come from `usage` when present.
+///
+/// Model attribution (M2 hardening): real `token_usage_record` payloads
+/// carry IDs plus nested `usage` but often no `model`. The model lives on
+/// nearby top-level `turn_context` records (`payload.turn_id` +
+/// `payload.model`, raw strings preserved verbatim, never invented).
+/// `parseFile`/`parseDirectory` carry a per-file `turn_id -> model` map
+/// (latest wins) plus a thread fallback that only applies when the thread
+/// has shown exactly one model so far; ambiguous threads fall back to
+/// `unknown`. Standalone `parseLine` keeps its old behavior (line-local
+/// `model|model_name`, else `unknown`) so unit tests stay hermetic.
 public enum CodexParser {
     public struct Result {
         public var records: [NormalizedUsage]
@@ -66,10 +76,46 @@ public enum CodexParser {
         }
         var records: [NormalizedUsage] = []
         var skipped = 0
+        // Per-file attribution state: turn exact match first, thread fallback
+        // only while the thread has shown a single model. Latest wins; only
+        // prior lines in the same file apply (no cross-file guessing).
+        var turnModels: [String: String] = [:]
+        var threadModels: [String: String] = [:]
+        var ambiguousThreads = Set<String>()
         for (index, rawLine) in text.components(separatedBy: .newlines).enumerated() {
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
             if line.isEmpty { continue }
-            if let record = parseLine(line, fileId: url.lastPathComponent, lineNumber: index + 1) {
+            guard let data = line.data(using: .utf8),
+                  let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                skipped += 1
+                continue
+            }
+            let payload = payloadDict(from: top)
+            let typeValue = firstString(top, keys: ["type", "payload_type", "kind", "event", "name"])
+                ?? firstString(payload, keys: ["type", "payload_type", "kind", "event", "name"])
+            if isTurnContextType(typeValue) {
+                let merged = payload.merging(top) { payloadValue, _ in payloadValue }
+                let turnId = firstString(merged, keys: ["turn_id", "turnid"])
+                let threadId = firstString(merged, keys: ["thread_id", "threadid"])
+                // Only model strings present on the line are stored; nothing
+                // is invented, no prompts/paths are retained.
+                if let model = firstString(merged, keys: ["model", "model_name", "modelname"]),
+                   turnId != nil || threadId != nil
+                {
+                    noteAttribution(
+                        turnId: turnId, threadId: threadId, model: model,
+                        turnModels: &turnModels, threadModels: &threadModels,
+                        ambiguousThreads: &ambiguousThreads)
+                }
+                skipped += 1
+                continue
+            }
+            let merged = payload.merging(top) { payloadValue, _ in payloadValue }
+            let override = lookupModel(
+                merged: merged, turnModels: turnModels,
+                threadModels: threadModels, ambiguousThreads: ambiguousThreads)
+            if let record = parseTop(top, payload: payload, merged: merged, fileId: url.lastPathComponent, lineNumber: index + 1, modelOverride: override) {
                 records.append(record)
             } else {
                 skipped += 1
@@ -79,12 +125,26 @@ public enum CodexParser {
     }
 
     /// Returns nil for blank / non-JSON / non-usage / malformed lines.
+    /// Standalone behavior: model comes only from the same line
+    /// (`model|model_name`), else `unknown`. File-level `turn_context`
+    /// attribution applies in `parseFile`, never here.
     public static func parseLine(_ line: String, fileId: String = "", lineNumber: Int = 0) -> NormalizedUsage? {
         guard let data = line.data(using: .utf8),
               let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         let payload = payloadDict(from: top)
+        let merged = payload.merging(top) { payloadValue, _ in payloadValue }
+        return parseTop(top, payload: payload, merged: merged, fileId: fileId, lineNumber: lineNumber, modelOverride: nil)
+    }
 
+    private static func parseTop(
+        _ top: [String: Any],
+        payload: [String: Any],
+        merged: [String: Any],
+        fileId: String,
+        lineNumber: Int,
+        modelOverride: String?
+    ) -> NormalizedUsage? {
         // Type gate: when a type discriminator exists it must reference token usage
         // or a response record carrying a nested per-record usage object, unless
         // the object carries bare token fields (schema drift tolerance).
@@ -98,11 +158,68 @@ public enum CodexParser {
             if !mentionsUsage && !hasTokenField && !(mentionsResponse && hasNestedUsage) { return nil }
         }
 
-        let merged = payload.merging(top) { payloadValue, _ in payloadValue }
         guard let timestamp = parseTimestamp(
             firstRaw(merged, keys: ["timestamp", "time", "created_at", "createdAt", "date"])
         ) else { return nil }
-        return buildRecord(top: top, payload: payload, merged: merged, timestamp: timestamp, fileId: fileId, lineNumber: lineNumber)
+        return buildRecord(top: top, payload: payload, merged: merged, timestamp: timestamp, fileId: fileId, lineNumber: lineNumber, modelOverride: modelOverride)
+    }
+
+    // MARK: - Turn-context attribution
+
+    /// Matches `turn_context` spellings (`turn_context`, `turn-context`,
+    /// `turncontext`, case-insensitive). Nil never matches.
+    private static func isTurnContextType(_ raw: String?) -> Bool {
+        guard let raw else { return false }
+        let squashed = raw.lowercased().replacingOccurrences(of: "_", with: "").replacingOccurrences(of: "-", with: "")
+        return squashed.contains("turncontext")
+    }
+
+    private static func noteAttribution(
+        turnId: String?,
+        threadId: String?,
+        model: String,
+        turnModels: inout [String: String],
+        threadModels: inout [String: String],
+        ambiguousThreads: inout Set<String>
+    ) {
+        if let turnId {
+            // Latest turn_context for a turn wins (forward-only, same file).
+            turnModels[turnId] = model
+        }
+        guard let threadId else { return }
+        if ambiguousThreads.contains(threadId) { return }
+        if let seen = threadModels[threadId] {
+            if seen != model {
+                // Thread has carried two different models: fall back to
+                // unknown rather than misattribute.
+                ambiguousThreads.insert(threadId)
+                threadModels.removeValue(forKey: threadId)
+            }
+        } else {
+            threadModels[threadId] = model
+        }
+    }
+
+    private static func lookupModel(
+        merged: [String: Any],
+        turnModels: [String: String],
+        threadModels: [String: String],
+        ambiguousThreads: Set<String>
+    ) -> String? {
+        if let turnId = firstString(merged, keys: ["turn_id", "turnid"]),
+           let mapped = turnModels[turnId]
+        {
+            return mapped
+        }
+        // Safe thread fallback only: single-model threads, and only when the
+        // exact turn lookup missed (or the record carries no turn).
+        if let threadId = firstString(merged, keys: ["thread_id", "threadid"]),
+           !ambiguousThreads.contains(threadId),
+           let mapped = threadModels[threadId]
+        {
+            return mapped
+        }
+        return nil
     }
 
     // MARK: - Private helpers
@@ -113,7 +230,8 @@ public enum CodexParser {
         merged: [String: Any],
         timestamp: Date,
         fileId: String,
-        lineNumber: Int
+        lineNumber: Int,
+        modelOverride: String? = nil
     ) -> NormalizedUsage? {
         // Per-record values live in payload.usage when present. Turn/thread
         // objects are cumulative rollups and must not be summed on top.
@@ -134,7 +252,16 @@ public enum CodexParser {
             return nil
         }
 
-        let model = firstString(merged, keys: ["model", "model_name", "modelname"]) ?? "unknown"
+        // Per-record model wins; file-level turn/thread attribution fills
+        // only missing/empty models. Raw strings are preserved verbatim for
+        // exact grouping; nothing is invented, empty stays `unknown`.
+        // NormalizedUsage init also coerces empty to `unknown` downstream.
+        let ownModel = firstString(merged, keys: ["model", "model_name", "modelname"])
+        let model: String = {
+            if let ownModel { return ownModel }
+            if let modelOverride, !modelOverride.isEmpty { return modelOverride }
+            return "unknown"
+        }()
         // thread_id is session-scoped, so it only informs sessionId, never
         // request identity (which stays response/turn/request/message IDs).
         let sessionId = firstString(merged, keys: ["session_id", "sessionid", "thread_id", "threadid", "conversation_id", "conversationid"]) ?? ""
