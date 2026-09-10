@@ -99,11 +99,10 @@ final class CodexParserTests: XCTestCase {
     }
 
     func testParseFileCountsSkipped() throws {
-        let url = Bundle.module.url(forResource: "synthetic-codex-sample", withExtension: "jsonl")
-            ?? URL(fileURLWithPath: "Fixtures/synthetic-codex-sample.jsonl")
-        // Fall back to repo-relative fixture when run outside SPM resources.
+        // No SPM resources declared in Package.swift (so no Bundle.module):
+        // resolve the repo-root synthetic fixture by relative path,
+        // with an inline fallback when the working directory differs.
         let candidates = [
-            url,
             URL(fileURLWithPath: "Fixtures/synthetic-codex-sample.jsonl"),
             URL(fileURLWithPath: "token-bar/Fixtures/synthetic-codex-sample.jsonl"),
         ]
