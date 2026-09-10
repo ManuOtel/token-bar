@@ -141,3 +141,25 @@ Acceptance evidence:
   - Artifact `ls`/`shasum -c`: BLOCKED (no `dist/` artifact on Linux; must re-verify final signed/stapled artifact on Mac).
 - `RELEASE_CHECKLIST.md`: no edit needed. Checklist remains the M6 gate; this plan records Linux evidence + exact Mac prerequisites without changing checklist semantics.
 - Rollback: app writes no data files; toggle login off, quit from menu bar, delete `/Applications/TokenBar.app`; re-tag/re-publish previous artifact + checksum.
+
+### 2026-09-10 - Verified local Mac evidence (follow-up from origin/main 7cb4c71)
+
+Docs-only update. No product code changed. No secrets printed or committed.
+Base for this follow-up: `origin/main` at `7cb4c71` (merge of PR #10). Branch: `feat/release-evidence`.
+
+- Task 2 full tests (Mac): PASS.
+  - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build`: passed.
+  - `swift test`: passed with 79 tests and 0 failures.
+- Task 4 menu-bar app build / launch / quit smoke (Mac, reversible): PASS.
+  - `./scripts/build-app.sh --version 0.1.0 --build 1`: built `dist/TokenBar.app` (git-ignored).
+  - `Info.plist` verified: bundle id `com.manuotel.TokenBar`, version `0.1.0 (1)`, minimum macOS `14.0`, `LSUIElement` true.
+  - `open dist/TokenBar.app`: started TokenBar process; confirmed running, then cleanly terminated (reversible smoke, no install to /Applications).
+- Task 5 versioned packaging (Mac): PASS.
+  - `package-release.sh` produced `dist/TokenBar-0.1.0-macos.zip` and `dist/TokenBar-0.1.0-macos.zip.sha256` (git-ignored).
+- Task 6 checksum (Mac): PASS.
+  - `shasum` verification of `dist/TokenBar-0.1.0-macos.zip` against its `.sha256` passed.
+- Task 7 signing check (Mac, presence/status only): PENDING external prerequisite.
+  - Found 0 valid code-signing identities, so Developer ID signing not performed. No identities or secrets printed.
+- Task 8 notarization check (Mac, presence/status only): PENDING external prerequisite.
+  - Keychain profile `TOKENBAR-NOTARY` status 44 (not configured), so `notarytool` submit / `stapler` staple not performed. No credentials printed or committed.
+- Conclusion: unsigned versioned artifact verified end-to-end on a local Mac. Signed/notarized release remains pending Apple Developer certificate/profile.
