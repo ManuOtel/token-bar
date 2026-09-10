@@ -62,9 +62,9 @@ Current `Pricing.swift` is one substring table + fallback ($3/$12/$1.50). Keep f
 
 Acceptance:
 
-- Price resolution order documented: exact `provider/model` match, then substring/family match, then fallback. Case-insensitive.
+- Price resolution order documented: exact normalized `provider/model` match (trimmed + lowercased), then substring/family match, then fallback. Case-insensitive. Exact entries: `github-copilot/gpt-5.6-sol`, `openai/gpt-5.6-luna` (GPT-5 family approximations), `opencode-go/muse-spark-1.3-contributor` (Claude Sonnet family approximation). Static estimates only, never a billing claim; subscription use is not an API invoice.
 - Formula unchanged: `(input-cached)*inputRate + cached*cachedRate + output*outputRate`, per 1M, USD. Cached is subset of input (`min(cached,input)`); reasoning rides inside output.
-- Every UI/CLI/JSON dollar figure labelled `Estimated cost ... (estimate)`. Pricing header cites static-table drift.
+- Every UI/CLI/JSON dollar figure labelled `Estimated cost ... (estimate only; static table, not a bill; subscription use is not an API invoice)`. Pricing header cites static-table drift.
 - Add/refresh family entries actually observed (Codex GPT/o-series, Claude, Gemini) with one place to bump rates. Unknown models use fallback, never zero.
 - Tests: cached-subset cap, reasoning-not-double-counted, fallback path, explicit-total-wins for token totals.
 

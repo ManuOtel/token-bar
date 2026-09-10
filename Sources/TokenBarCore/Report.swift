@@ -130,7 +130,7 @@ public enum ReportFormatter {
         lines.append("Reasoning tokens: \(stats.reasoningTokens) (subset of output)")
         lines.append("Requests: \(stats.requests)")
         lines.append("Sessions: \(stats.sessions)")
-        lines.append("Estimated cost: \(costString(stats.estimatedCostUSD)) USD (estimate, static price table)")
+        lines.append("Estimated cost: \(costString(stats.estimatedCostUSD)) USD (estimate only; static table, not a bill; subscription use is not an API invoice)")
         lines.append("Last updated: \(isoString(stats.lastUpdated))")
         if stats.bySource.isEmpty {
             lines.append("By source: none")

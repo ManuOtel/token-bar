@@ -390,6 +390,14 @@ def normalize_cached(input_tokens, cached_tokens):
 
 
 FALLBACK = (3.0, 12.0, 1.5)
+# Exact normalized provider/model matches, checked BEFORE PRICE_TABLE.
+# Static estimates only, never a bill; subscription use is not an API invoice.
+# Approximations reuse the nearest family rate already in the project.
+PRICE_EXACT = {
+    "github-copilot/gpt-5.6-sol": (1.25, 10.0, 0.125),
+    "openai/gpt-5.6-luna": (1.25, 10.0, 0.125),
+    "opencode-go/muse-spark-1.3-contributor": (3.0, 15.0, 0.30),
+}
 PRICE_TABLE = [
     ("gpt-4o-mini", (0.15, 0.60, 0.075)),
     ("gpt-4o", (2.50, 10.0, 1.25)),
@@ -407,8 +415,26 @@ PRICE_TABLE = [
 ]
 
 
+def normalize_key(model):
+    return (model or "").strip().lower()
+
+
+def is_exact(model):
+    return normalize_key(model) in PRICE_EXACT
+
+
+def provider_split(model):
+    key = normalize_key(model)
+    if "/" not in key:
+        return ("", key)
+    provider, _, name = key.partition("/")
+    return (provider, name)
+
+
 def price_for(model):
-    key = (model or "").lower()
+    key = normalize_key(model)
+    if key in PRICE_EXACT:
+        return PRICE_EXACT[key]
     for match, price in PRICE_TABLE:
         if match in key:
             return price
@@ -494,6 +520,37 @@ def run():
           abs(cost("gpt-5", 1_000_000, 0, 0) - 1.25) < 1e-9)
     check("pricing unknown fallback",
           abs(cost("some-future-model-zzz", 1_000_000, 0, 0) - 3.0) < 1e-9)
+    # M3 provider-aware pricing: exact normalized provider/model first.
+    check("pricing exact copilot resolves",
+          abs(cost("github-copilot/gpt-5.6-sol", 1_000_000, 0, 0) - 1.25) < 1e-9 and
+          is_exact("github-copilot/gpt-5.6-sol"))
+    check("pricing exact luna resolves",
+          abs(cost("openai/gpt-5.6-luna", 1_000_000, 0, 0) - 1.25) < 1e-9 and
+          is_exact("openai/gpt-5.6-luna"))
+    check("pricing exact muse-spark resolves",
+          abs(cost("opencode-go/muse-spark-1.3-contributor", 0, 1_000_000, 0) - 15.0) < 1e-9 and
+          is_exact("opencode-go/muse-spark-1.3-contributor"))
+    check("pricing exact case-insensitive + trimmed",
+          is_exact("OPENAI/GPT-5.6-LUNA") and is_exact("  openai/gpt-5.6-luna  ") and
+          abs(cost("OPENAI/GPT-5.6-LUNA", 1_000_000, 0, 0) -
+              cost("openai/gpt-5.6-luna", 1_000_000, 0, 0)) < 1e-12)
+    check("pricing provider prefix matters",
+          not is_exact("gpt-5.6-luna") and
+          not is_exact("other-provider/gpt-5.6-luna") and
+          not is_exact("muse-spark-1.3-contributor") and
+          provider_split("OpenAI/GPT-5.6-Luna") == ("openai", "gpt-5.6-luna") and
+          abs(cost("other-provider/gpt-5.6-luna", 1_000_000, 0, 0) - 1.25) < 1e-9 and
+          abs(cost("muse-spark-1.3-contributor", 0, 1_000_000, 0) - 12.0) < 1e-9)
+    check("pricing exact beats fallback",
+          abs(cost("opencode-go/muse-spark-1.3-contributor", 0, 1_000_000, 0) - 15.0) < 1e-9 and
+          abs(cost("some-future-model-zzz", 0, 1_000_000, 0) - 12.0) < 1e-9)
+    check("pricing exact cached subset cap",
+          abs(cost("openai/gpt-5.6-luna", 1000, 0, 1000) - 1000 / 1e6 * 0.125) < 1e-12 and
+          abs(cost("openai/gpt-5.6-luna", 100, 0, 5000) -
+              cost("openai/gpt-5.6-luna", 100, 0, 100)) < 1e-12)
+    check("pricing reasoning rides inside output",
+          abs(cost("github-copilot/gpt-5.6-sol", 1000, 500, 0) -
+              (1000 / 1e6 * 1.25 + 500 / 1e6 * 10.0)) < 1e-12)
     check("negative total falls back to input+output",
           parse_codex_line('{"timestamp":"2026-09-10T08:15:00Z","input_tokens":10,'
                            '"output_tokens":5,"total_tokens":-3}')['total'] == 15)
@@ -810,7 +867,7 @@ def run():
                  f"Cached tokens: {cached} (subset of input)",
                  f"Reasoning tokens: {reasoning} (subset of output)",
                  f"Requests: {req}", f"Sessions: {sess}",
-                 f"Estimated cost: ${cost_v:.4f} USD (estimate, static price table)",
+                  f"Estimated cost: ${cost_v:.4f} USD (estimate only; static table, not a bill; subscription use is not an API invoice)",
                  "By source:"]
         for k, v in by_source:
             lines.append(f"  {k}: {v} tokens")
@@ -835,7 +892,8 @@ def run():
                           [("codex", 1200), ("opencode", 600)])
     check("report labels lifetime totals",
           all(s in text for s in ("Total tokens: 1800", "Input tokens: 1500",
-                                  "Estimated cost:", "estimate", "codex", "opencode")))
+                                  "Estimated cost:", "estimate only", "not a bill",
+                                  "not an API invoice", "codex", "opencode")))
     check("report no raw paths", "/Users/" not in sanitize(text) and "/tmp/" not in text)
     import json as _json
     payload = [{"preset": "lifetime", "totalTokens": 1800}]

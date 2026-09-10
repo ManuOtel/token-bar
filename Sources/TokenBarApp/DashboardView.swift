@@ -79,7 +79,10 @@ struct DashboardView: View {
             statRow("Reasoning", "\(stats.reasoningTokens)")
             statRow("Requests", "\(stats.requests)")
             statRow("Sessions", "\(stats.sessions)")
-            statRow("Est. cost", String(format: "$%.4f", stats.estimatedCostUSD))
+            statRow("Est. cost (estimate)", String(format: "$%.4f", stats.estimatedCostUSD))
+            Text("Estimate only; static table, not a bill; subscription use is not an API invoice.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
             if let updated = stats.lastUpdated {
                 Text("Updated \(updated.formatted(date: .abbreviated, time: .shortened))")
                     .font(.caption)
