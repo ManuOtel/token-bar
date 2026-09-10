@@ -87,7 +87,7 @@ def nested_usage(top, payload):
     return None
 
 
-def parse_codex_line(line):
+def parse_codex_line(line, model_override=None):
     try:
         top = json.loads(line)
     except (json.JSONDecodeError, ValueError):
@@ -138,12 +138,89 @@ def parse_codex_line(line):
     tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
     # NormalizedUsage init clamps cached to input (subset invariant).
     cc = min(max(0, c or 0), i)
-    return {"ts": ts, "model": get(merged, "model", "model_name") or "unknown",
+    own = get(merged, "model", "model_name")
+    model = own or model_override or "unknown"
+    if not model:
+        model = "unknown"
+    return {"ts": ts, "model": model,
             "input": i, "output": o, "cached": cc, "reasoning": r or 0,
             "total": tot_val if tot_val else i + o,
             "session": get(merged, "session_id", "sessionid", "thread_id", "conversation_id") or "",
             "request": get(merged, "response_id", "responseid", "request_id", "requestid",
                            "message_id", "turn_id", "id") or ""}
+
+
+def is_turn_context(t):
+    if t is None:
+        return False
+    squashed = str(t).lower().replace("_", "").replace("-", "")
+    return "turncontext" in squashed
+
+
+def parse_codex_file_lines(lines, file_id=""):
+    """File-level mirror of CodexParser.parseFile: per-file turn_id -> model
+    map (latest wins) + single-model thread fallback; ambiguous threads stay
+    unknown. turn_context lines are consumed for attribution and counted as
+    skipped. Standalone parse_codex_line stays context-free."""
+    turn_models = {}
+    thread_models = {}
+    ambiguous = set()
+    records = []
+    skipped = 0
+    for raw in lines:
+        line = raw.strip() if isinstance(raw, str) else ""
+        if not line:
+            continue
+        try:
+            top = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            skipped += 1
+            continue
+        if not isinstance(top, dict):
+            skipped += 1
+            continue
+        payload = top
+        for k in ("payload", "data", "record", "usage", "token_usage"):
+            if isinstance(top.get(k), dict):
+                payload = top[k]
+                break
+        t = get(top, "type", "payload_type", "kind", "event", "name")
+        if t is None:
+            t = get(payload, "type", "payload_type", "kind", "event", "name")
+        if is_turn_context(t):
+            merged = dict(top)
+            merged.update(payload)
+            turn = get(merged, "turn_id", "turnid")
+            thread = get(merged, "thread_id", "threadid")
+            model = get(merged, "model", "model_name")
+            if model and (turn or thread):
+                if turn:
+                    turn_models[turn] = model
+                if thread and thread not in ambiguous:
+                    if thread in thread_models:
+                        if thread_models[thread] != model:
+                            ambiguous.add(thread)
+                            del thread_models[thread]
+                    else:
+                        thread_models[thread] = model
+            skipped += 1
+            continue
+        merged = dict(top)
+        merged.update(payload)
+        override = None
+        turn = get(merged, "turn_id", "turnid")
+        if turn and turn in turn_models:
+            override = turn_models[turn]
+        else:
+            thread = get(merged, "thread_id", "threadid")
+            if thread and thread not in ambiguous and thread in thread_models:
+                override = thread_models[thread]
+        rec = parse_codex_line(line, model_override=override)
+        if rec is not None:
+            records.append(rec)
+        else:
+            skipped += 1
+    return records, skipped
 
 
 def model_label(raw):
@@ -443,6 +520,115 @@ def run():
     check("codex response without usage rejected",
           parse_codex_line('{"type":"response","timestamp":"2026-09-10T08:15:00Z",'
                            '"payload":{"response_id":"r1"}}') is None)
+
+    # M2 turn_context attribution (synthetic only): usage payloads carry IDs
+    # + nested usage but no model; turn_context carries turn_id -> model.
+    recs, sk = parse_codex_file_lines([
+        '{"type":"turn_context","timestamp":"2026-09-10T08:14:00Z",'
+        '"payload":{"turn_id":"turn-1","thread_id":"thread-1","model":"gpt-5.6-sol"}}',
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+        '"payload":{"response_id":"resp-1","thread_id":"thread-1","turn_id":"turn-1",'
+        '"usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150}}}',
+    ])
+    check("codex turn_context resolves model",
+          len(recs) == 1 and recs[0]["model"] == "gpt-5.6-sol" and sk == 1)
+    check("codex standalone stays unknown without context",
+          parse_codex_line('{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+                           '"payload":{"response_id":"r","turn_id":"turn-1","thread_id":"thread-1",'
+                           '"usage":{"input_tokens":100,"output_tokens":50}}}')["model"] == "unknown")
+    recs_alias, _ = parse_codex_file_lines([
+        '{"type":"turn_context","timestamp":"2026-09-10T08:14:00Z",'
+        '"payload":{"turn_id":"turn-alias","thread_id":"thread-alias","model_name":"gpt-5.5"}}',
+        '{"type":"token_usage_record","timestamp":1757325600,'
+        '"payload":{"turn_id":"turn-alias","thread_id":"thread-alias",'
+        '"usage":{"prompt_tokens":500,"completion_tokens":150}}}',
+    ])
+    check("codex alias model_name + nested usage",
+          len(recs_alias) == 1 and recs_alias[0]["model"] == "gpt-5.5"
+          and recs_alias[0]["input"] == 500 and recs_alias[0]["total"] == 650)
+    recs_own, _ = parse_codex_file_lines([
+        '{"type":"turn_context","timestamp":"2026-09-10T08:14:00Z",'
+        '"payload":{"turn_id":"turn-own","thread_id":"thread-own","model":"codex-auto-review"}}',
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z","model":"gpt-5-mini",'
+        '"payload":{"turn_id":"turn-own","thread_id":"thread-own",'
+        '"usage":{"input_tokens":10,"output_tokens":5}}}',
+    ])
+    check("codex own model wins over context",
+          len(recs_own) == 1 and recs_own[0]["model"] == "gpt-5-mini")
+    recs_none, _ = parse_codex_file_lines([
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+        '"payload":{"response_id":"r-noctx","turn_id":"turn-missing","thread_id":"thread-missing",'
+        '"usage":{"input_tokens":5,"output_tokens":5}}}',
+    ])
+    check("codex unknown fallback without attribution",
+          len(recs_none) == 1 and recs_none[0]["model"] == "unknown")
+    recs_fb, _ = parse_codex_file_lines([
+        '{"type":"turn_context","timestamp":"2026-09-10T08:14:00Z",'
+        '"payload":{"turn_id":"turn-a","thread_id":"thread-single","model":"synth-model-a"}}',
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+        '"payload":{"response_id":"r-fb","thread_id":"thread-single",'
+        '"usage":{"input_tokens":7,"output_tokens":3}}}',
+    ])
+    check("codex single-model thread fallback",
+          len(recs_fb) == 1 and recs_fb[0]["model"] == "synth-model-a")
+    recs_amb, _ = parse_codex_file_lines([
+        '{"type":"turn_context","timestamp":"2026-09-10T08:13:00Z",'
+        '"payload":{"turn_id":"turn-1","thread_id":"thread-mixed","model":"synth-model-a"}}',
+        '{"type":"turn_context","timestamp":"2026-09-10T08:14:00Z",'
+        '"payload":{"turn_id":"turn-2","thread_id":"thread-mixed","model":"synth-model-b"}}',
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+        '"payload":{"response_id":"r-amb","thread_id":"thread-mixed",'
+        '"usage":{"input_tokens":7,"output_tokens":3}}}',
+    ])
+    check("codex ambiguous thread stays unknown",
+          len(recs_amb) == 1 and recs_amb[0]["model"] == "unknown")
+    recs_latest, _ = parse_codex_file_lines([
+        '{"type":"turn_context","timestamp":"2026-09-10T08:13:00Z",'
+        '"payload":{"turn_id":"turn-latest","thread_id":"t","model":"synth-model-old"}}',
+        '{"type":"turn_context","timestamp":"2026-09-10T08:14:00Z",'
+        '"payload":{"turn_id":"turn-latest","thread_id":"t","model":"synth-model-new"}}',
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+        '"payload":{"response_id":"r-l","turn_id":"turn-latest","thread_id":"t",'
+        '"usage":{"input_tokens":10,"output_tokens":5}}}',
+    ])
+    check("codex latest turn mapping wins",
+          len(recs_latest) == 1 and recs_latest[0]["model"] == "synth-model-new")
+    recs_exact, _ = parse_codex_file_lines([
+        '{"type":"turn_context","timestamp":"2026-09-10T07:00:00Z",'
+        '"payload":{"turn_id":"t1","thread_id":"th1","model":"synth-provider/synth-model-v1"}}',
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+        '"payload":{"response_id":"r1","turn_id":"t1","thread_id":"th1",'
+        '"usage":{"input_tokens":100,"total_tokens":100}}}',
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:16:00Z",'
+        '"model":"synth-provider/synth-model-v1-suffix",'
+        '"payload":{"response_id":"r2","usage":{"input_tokens":50,"total_tokens":50}}}',
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:17:00Z",'
+        '"payload":{"response_id":"r3","usage":{"input_tokens":200,"total_tokens":200}}}',
+    ])
+    groups = {}
+    for r in recs_exact:
+        groups[r["model"]] = groups.get(r["model"], 0) + r["total"]
+    ordered = sorted(groups.items(), key=lambda kv: (-kv[1], kv[0]))
+    check("codex exact model grouping sorted",
+          [k for k, _ in ordered] == ["unknown", "synth-provider/synth-model-v1",
+                                      "synth-provider/synth-model-v1-suffix"]
+          and [v for _, v in ordered] == [200, 100, 50])
+    secret = "SECRET-PROMPT-XYZ"
+    tc_priv = ('{"type":"turn_context","timestamp":"2026-09-10T08:14:00Z",'
+               '"payload":{"turn_id":"turn-priv","thread_id":"thread-priv",'
+               '"model":"synth-model-priv","prompt":"' + secret + '",'
+               '"path":"/Users/someone/.codex/secret"}}')
+    recs_priv, _ = parse_codex_file_lines([
+        tc_priv,
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+        '"payload":{"response_id":"resp-priv","turn_id":"turn-priv","thread_id":"thread-priv",'
+        '"usage":{"input_tokens":10,"output_tokens":5}}}',
+    ])
+    priv_dump = json.dumps(recs_priv, default=str)
+    check("codex attribution privacy",
+          len(recs_priv) == 1 and recs_priv[0]["model"] == "synth-model-priv"
+          and secret not in priv_dump
+          and "/Users/someone" not in priv_dump)
 
     # Real-world OpenCode row shape
     real = decode_opencode_row({"id": "sess-1", "time_created": "1757325600000",
