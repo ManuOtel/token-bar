@@ -108,6 +108,8 @@ public enum OpenCodeStore {
         for key in keys {
             for variant in [key, key.lowercased()] {
                 guard let raw = dict[variant] else { continue }
+                if raw is Bool { continue }
+                if let number = raw as? NSNumber, String(cString: number.objCType) == "c" { continue }
                 if let int = raw as? Int { return int }
                 if let double = raw as? Double { return Int(double) }
                 if let number = raw as? NSNumber { return number.intValue }
@@ -137,11 +139,11 @@ public enum OpenCodeStore {
             guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
                 continue // missing table: skip gracefully
             }
-            defer { sqlite3_finalize(stmt) }
             let columnCount = Int(sqlite3_column_count(stmt))
             var names: [String] = []
             for index in 0..<columnCount {
-                names.append(String(cString: sqlite3_column_name(stmt, Int32(index))).lowercased())
+                guard let namePtr = sqlite3_column_name(stmt, Int32(index)) else { continue }
+                names.append(String(cString: namePtr).lowercased())
             }
             while sqlite3_step(stmt) == SQLITE_ROW {
                 var columns: [String: String?] = [:]
@@ -161,7 +163,6 @@ public enum OpenCodeStore {
                 }
             }
             sqlite3_finalize(stmt)
-            stmt = nil
         }
         return (records, skipped)
     }

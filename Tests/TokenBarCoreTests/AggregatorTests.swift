@@ -149,4 +149,46 @@ final class AggregatorTests: XCTestCase {
         XCTAssertNil(stats.lastUpdated)
         XCTAssertTrue(stats.dailyTrend.isEmpty)
     }
+
+    func testNegativeInputsClampTotal() {
+        let rec = NormalizedUsage(
+            id: "neg", source: .codex, timestamp: now, model: "m",
+            inputTokens: -5, outputTokens: 10, cachedTokens: 0,
+            reasoningTokens: 0, totalTokens: 0, sessionId: "s", requestId: "r"
+        )
+        XCTAssertEqual(rec.inputTokens, 0)
+        XCTAssertEqual(rec.totalTokens, 10)
+    }
+
+    func testPricingMiniOrderBeforeBase() {
+        XCTAssertEqual(Pricing.cost(model: "gpt-4o-mini", inputTokens: 1_000_000, outputTokens: 0, cachedTokens: 0), 0.15, accuracy: 0.0001)
+        XCTAssertEqual(Pricing.cost(model: "gpt-4o", inputTokens: 1_000_000, outputTokens: 0, cachedTokens: 0), 2.5, accuracy: 0.0001)
+        XCTAssertEqual(Pricing.cost(model: "gpt-5-mini", inputTokens: 1_000_000, outputTokens: 0, cachedTokens: 0), 0.25, accuracy: 0.0001)
+    }
+
+    func testDailyTrendRespectsCalendarTimeZone() {
+        var tzCal = Calendar(identifier: .gregorian)
+        tzCal.timeZone = TimeZone(identifier: "America/New_York")!
+        let ts = ISO8601DateFormatter().date(from: "2026-09-10T02:00:00Z")!
+        let rec = NormalizedUsage(
+            id: "t", source: .codex, timestamp: ts, model: "m",
+            inputTokens: 10, outputTokens: 5, cachedTokens: 0,
+            reasoningTokens: 0, totalTokens: 0, sessionId: "s", requestId: "r"
+        )
+        let trend = Aggregator.dailyTrend([rec], calendar: tzCal)
+        XCTAssertEqual(trend.count, 1)
+        // 02:00Z is still Sep 9 in New York.
+        XCTAssertEqual(trend.first?.dayLabel, "2026-09-09")
+    }
+
+    func testLoadReportPublicInitPreservesValues() {
+        // Mirrors TokenBarApp's cross-module construction:
+        // LoadReport(records:skippedCodexLines:skippedOpenCodeRows:warnings:).
+        // Must stay public or swift build fails in the app target.
+        let report = LoadReport(records: [], skippedCodexLines: 0, skippedOpenCodeRows: 0, warnings: [])
+        XCTAssertTrue(report.records.isEmpty)
+        XCTAssertEqual(report.skippedCodexLines, 0)
+        XCTAssertEqual(report.skippedOpenCodeRows, 0)
+        XCTAssertTrue(report.warnings.isEmpty)
+    }
 }

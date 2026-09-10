@@ -148,10 +148,15 @@ public enum CodexParser {
         for key in keys {
             for variant in [key, key.lowercased()] {
                 guard let raw = dict[variant] else { continue }
+                if raw is Bool { continue }
+                if let number = raw as? NSNumber, String(cString: number.objCType) == "c" { continue }
                 if let int = raw as? Int { return int }
                 if let double = raw as? Double { return Int(double) }
                 if let number = raw as? NSNumber { return number.intValue }
-                if let string = raw as? String, let parsed = Int(string) { return parsed }
+                if let string = raw as? String {
+                    if let parsed = Int(string) { return parsed }
+                    if let parsed = Double(string) { return Int(parsed) }
+                }
             }
         }
         return nil
