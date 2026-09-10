@@ -137,6 +137,18 @@ public struct LoadReport: Codable, Hashable, Sendable {
     public var skippedCodexLines: Int
     public var skippedOpenCodeRows: Int
     public var warnings: [String]
+
+    public init(
+        records: [NormalizedUsage],
+        skippedCodexLines: Int,
+        skippedOpenCodeRows: Int,
+        warnings: [String]
+    ) {
+        self.records = records
+        self.skippedCodexLines = skippedCodexLines
+        self.skippedOpenCodeRows = skippedOpenCodeRows
+        self.warnings = warnings
+    }
 }
 
 public enum StoreError: Error, Sendable {

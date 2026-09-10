@@ -180,4 +180,15 @@ final class AggregatorTests: XCTestCase {
         // 02:00Z is still Sep 9 in New York.
         XCTAssertEqual(trend.first?.dayLabel, "2026-09-09")
     }
+
+    func testLoadReportPublicInitPreservesValues() {
+        // Mirrors TokenBarApp's cross-module construction:
+        // LoadReport(records:skippedCodexLines:skippedOpenCodeRows:warnings:).
+        // Must stay public or swift build fails in the app target.
+        let report = LoadReport(records: [], skippedCodexLines: 0, skippedOpenCodeRows: 0, warnings: [])
+        XCTAssertTrue(report.records.isEmpty)
+        XCTAssertEqual(report.skippedCodexLines, 0)
+        XCTAssertEqual(report.skippedOpenCodeRows, 0)
+        XCTAssertTrue(report.warnings.isEmpty)
+    }
 }
