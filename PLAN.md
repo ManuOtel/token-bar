@@ -106,7 +106,7 @@ Acceptance:
 
 Acceptance:
 
-- Release checklist checked in: version bump, `swift test` Mac green, `verify_logic.py` green, CLI smoke (`--all-presets`, `--json`), privacy rg check, signed artifact, release notes with estimate disclaimer.
+- Release checklist checked in (`RELEASE_CHECKLIST.md` is the gate): version bump, `swift test` Mac green, `verify_logic.py` green, CLI smoke (`--all-presets`, `--json`), privacy rg check, signed artifact, release notes with estimate disclaimer.
 - Future sources tracked, not built: Gemini CLI, Copilot, Cursor, other JSONL/SQLite histories. Each needs: default path, record shape, token-field map, cache semantics, dedupe key, privacy review, fixtures + tests.
 - Open follow-up issues per source; close this plan when M0-M5 ship.
 
