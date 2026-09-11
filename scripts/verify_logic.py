@@ -346,10 +346,29 @@ def _msg_int_blob(blob, keys):
     return None
 
 
+def fnv1a_hex(cols):
+    """Mirror of OpenCodeStore.stableRowHash: FNV-1a 64 over sorted key=value."""
+    h = 14695981039346656037
+    for key in sorted(cols):
+        v = cols[key]
+        for byte in f"{key}={v if v is not None else 'null'}".encode("utf-8"):
+            h ^= byte
+            h = (h * 1099511628211) % (1 << 64)
+    return f"{h:016x}"
+
+
+def fallback_message_id(table, cols, msg_id, session, ts_epoch):
+    """Mirror of OpenCodeStore.fallbackMessageID."""
+    if msg_id:
+        return f"{table}:{msg_id}:{ts_epoch}"
+    sess = session if session else "nosession"
+    return f"{table}:{sess}:{ts_epoch}:{fnv1a_hex(cols)}"
+
+
 def decode_opencode_message(cols, table="message"):
     """Mirror of OpenCodeStore.decodeMessageRow: per-message nested tokens,
     flat modelID/providerID or nested model object, assistant-only gate,
-    all-zero rows skipped."""
+    all-zero rows skipped, content-hashed fallback IDs for ID-less rows."""
     blob = {}
     raw = cols.get("data")
     if raw:
@@ -394,9 +413,6 @@ def decode_opencode_message(cols, table="message"):
         return None
     t = blob.get("time") if isinstance(blob.get("time"), dict) else {}
     ts = (parse_ts(t.get("created")) or parse_ts(t.get("completed")) or parse_ts(t.get("updated"))
-          or parse_ts(get(blob, "timestamp", "time", "time_created", "timecreated", "created_at",
-                           "createdat", "createdAt", "created", "updated_at", "updatedat",
-                           "updated", "time_updated", "timeupdated", "date"))
           or parse_ts(get(cols, "time_created", "timecreated", "created_at", "createdat", "created",
                            "time_updated", "timeupdated", "updated_at", "updatedat", "updated",
                            "timestamp", "time")))
@@ -428,29 +444,49 @@ def decode_opencode_message(cols, table="message"):
     rec = {"ts": ts, "model": model or "unknown",
            "input": i, "output": out, "cached": cc, "reasoning": r or 0,
            "total": tot_val if tot_val else i + out,
-           "session": session, "request": msg_id or ""}
+           "session": session, "request": msg_id or "",
+           "id": "opencode:" + fallback_message_id(
+               table, {k: (None if v is None else str(v)) for k, v in cols.items()},
+               msg_id or "", session, int(ts.timestamp()))}
     if all(rec[k] == 0 for k in ("input", "output", "cached", "reasoning", "total")):
         return None
     return rec
 
 
+def select_mirror(best, key, candidate):
+    """Mirror of OpenCodeStore.selectMirror: larger total wins; exact ties
+    break to the earliest (timestamp, id)."""
+    seen = best.get(key)
+    if seen is None:
+        best[key] = candidate
+        return
+    if candidate["total"] != seen["total"]:
+        if candidate["total"] > seen["total"]:
+            best[key] = candidate
+    elif (candidate["ts"], candidate.get("id", "")) < (seen["ts"], seen.get("id", "")):
+        best[key] = candidate
+
+
 def combine_message_and_rollup(messages, rollups):
     """Mirror of OpenCodeStore.combineMessageAndRollup: messages win; rollups
-    fill only sessions with zero message rows; stale rollup mirrors lose to
-    the larger total."""
-    if not messages:
-        covered = set()
-    else:
-        covered = {m["session"] for m in messages if m["session"]}
-    best = {}
+    fill only uncovered sessions; deterministic mirror selection on both
+    levels; empty-request rows pass through untouched."""
+    covered = {m["session"] for m in messages if m["session"]}
+    best_msg, best_roll, passthrough = {}, {}, []
+    for m in messages:
+        if not m["request"]:
+            passthrough.append(m)
+        else:
+            select_mirror(best_msg, "opencode:" + m["request"], m)
     for r in rollups:
         if covered and r["session"] and r["session"] in covered:
             continue
-        key = ("opencode:" + r["request"]) if r["request"] else ("opencode:?:"
-              + r["session"] + "#noid")
-        if key not in best or r["total"] > best[key]["total"]:
-            best[key] = r
-    return list(messages) + sorted(best.values(), key=lambda r: r["ts"])
+        if not r["request"]:
+            passthrough.append(r)
+        else:
+            select_mirror(best_roll, "opencode:" + r["request"], r)
+    return sorted(passthrough + list(best_msg.values()) + list(best_roll.values()),
+                  key=lambda r: (r["ts"], r.get("id", "")))
 
 
 def parse_claude_line(line, file_id="", line_no=0):
@@ -950,6 +986,67 @@ def run():
     no_msg = combine_message_and_rollup([], [dict(old_rollup, session="ses-x")])
     check("opencode combine falls back to rollups",
           len(no_msg) == 1 and no_msg[0]["session"] == "ses-x")
+    # Unified mirror selection: larger total wins on both levels, exact ties
+    # break to the earliest (timestamp, id); order-independent.
+    m_lo = decode_opencode_message(msg_cols(dict(assistant_blob,
+        tokens={"input": 100, "output": 0, "cache": {"read": 0, "write": 0}},
+        time={"created": recent_ms}), session="ses-mm", row_id="msg-mm"))
+    m_hi = decode_opencode_message(msg_cols(dict(assistant_blob,
+        tokens={"input": 200, "output": 0, "cache": {"read": 0, "write": 0}},
+        time={"created": recent_ms}), session="ses-mm", row_id="msg-mm"))
+    for pair in ((m_lo, m_hi), (m_hi, m_lo)):
+        got = combine_message_and_rollup(list(pair), [])
+        check("opencode message mirror max-total wins",
+              len(got) == 1 and got[0]["total"] == 200)
+    tie_a = dict(m_lo, ts=m_lo["ts"] - timedelta(seconds=5))
+    tie_b = dict(m_lo)
+    for pair in ((tie_a, tie_b), (tie_b, tie_a)):
+        got = combine_message_and_rollup(list(pair), [])
+        check("opencode mirror tie breaks earliest",
+              len(got) == 1 and got[0]["ts"] == tie_a["ts"])
+    # ID-less rows: deterministic content-hashed IDs, distinct rows stay
+    # distinct through combine + dedupe.
+    def noid_cols(extra_tokens, suffix):
+        blob = {"role": "assistant", "modelID": "m",
+                "tokens": dict({"input": 10, "output": 5}, **extra_tokens),
+                "time": {"created": recent_ms}, "note": suffix}
+        return {"session_id": "ses-noid", "time_created": str(recent_ms),
+                "data": json.dumps(blob)}
+    noid_a = decode_opencode_message(noid_cols({}, "first"))
+    noid_b = decode_opencode_message(noid_cols({}, "second"))
+    noid_a2 = decode_opencode_message(noid_cols({}, "first"))
+    check("opencode id-less rows distinct ids",
+          noid_a is not None and noid_b is not None
+          and noid_a["request"] == "" and noid_a["id"] != noid_b["id"])
+    check("opencode id-less ids deterministic",
+          noid_a is not None and noid_a2 is not None and noid_a["id"] == noid_a2["id"])
+    seen, kept = set(), []
+    for r in combine_message_and_rollup([noid_a, noid_b], []):
+        if not r["request"]:
+            kept.append(r)  # dedupe keeps empty-request rows by id
+            continue
+        k = "opencode:" + r["request"]
+        if k not in seen:
+            seen.add(k)
+            kept.append(r)
+    check("opencode id-less rows both survive",
+          len(kept) == 2 and kept[0]["id"] != kept[1]["id"])
+    # Timestamp precedence: nested time.created beats a stale column.
+    prec = decode_opencode_message(msg_cols(dict(assistant_blob, time={"created": recent_ms}),
+                                            col_tc=str(old_ms)))
+    check("opencode nested time beats stale column",
+          prec is not None and prec["ts"] >= window_start)
+    # Flat-column drift row without any blob still decodes.
+    drift = decode_opencode_message({"session_id": "ses-d", "time_created": str(recent_ms),
+                                     "tokens_input": "40", "tokens_output": "2", "model": "m"})
+    check("opencode flat-column drift row decodes",
+          drift is not None and drift["total"] == 42 and drift["session"] == "ses-d")
+    # Blob top-level timestamp keys are not probed: without nested time
+    # and without columns there is no timestamp.
+    noto = decode_opencode_message({"id": "x", "data": json.dumps(
+        {"role": "assistant", "modelID": "m", "timestamp": "2026-09-10T08:15:00Z",
+         "tokens": {"input": 1, "output": 1}})})
+    check("opencode top-level blob timestamp ignored", noto is None)
 
     # Dedupe earliest kept
     seen, unique = set(), []

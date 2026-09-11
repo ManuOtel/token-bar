@@ -11,18 +11,18 @@ import XCTest
 final class OpenCodeMessageTests: XCTestCase {
     private func messageColumns(
         _ blob: [String: Any],
-        rowId: String = "msg-1",
+        rowId: String? = "msg-1",
         session: String = "ses-1",
-        columnTime: String = "1757325600000",
+        columnTime: String? = "1757325600000",
         typeColumn: String? = nil
     ) -> [String: String?] {
         let data = String(data: try! JSONSerialization.data(withJSONObject: blob), encoding: .utf8)
         var columns: [String: String?] = [
-            "id": rowId,
             "session_id": session,
-            "time_created": columnTime,
             "data": data,
         ]
+        if let rowId { columns["id"] = rowId }
+        if let columnTime { columns["time_created"] = columnTime }
         if let typeColumn { columns["type"] = typeColumn }
         return columns
     }
@@ -219,5 +219,120 @@ final class OpenCodeMessageTests: XCTestCase {
         let combined = OpenCodeStore.combineMessageAndRollup(messages: [], rollups: [rollup])
         XCTAssertEqual(combined.count, 1)
         XCTAssertEqual(combined.first?.sessionId, "ses-x")
+    }
+
+    func testMessageMirrorMaxTotalWinsBothOrders() {
+        func message(input: Int) -> NormalizedUsage {
+            OpenCodeStore.decodeMessageRow(messageColumns(
+                assistantBlob(tokens: ["input": input, "output": 0,
+                                        "cache": ["read": 0, "write": 0]]),
+                rowId: "msg-mm",
+                session: "ses-mm"))!
+        }
+        let low = message(input: 100)
+        let high = message(input: 200)
+        for pair in [[low, high], [high, low]] {
+            let combined = OpenCodeStore.combineMessageAndRollup(messages: pair, rollups: [])
+            XCTAssertEqual(combined.count, 1)
+            XCTAssertEqual(combined.first?.totalTokens, 200)
+        }
+    }
+
+    func testMirrorTieBreaksToEarliest() {
+        func message(created: Int) -> NormalizedUsage {
+            OpenCodeStore.decodeMessageRow(messageColumns(
+                assistantBlob(tokens: ["input": 100, "output": 0,
+                                        "cache": ["read": 0, "write": 0]],
+                              created: created),
+                rowId: "msg-tie",
+                session: "ses-tie"))!
+        }
+        let earlier = message(created: 1_789_087_080_181)
+        let later = message(created: 1_789_087_086_181)
+        XCTAssertEqual(earlier.totalTokens, later.totalTokens)
+        for pair in [[earlier, later], [later, earlier]] {
+            let combined = OpenCodeStore.combineMessageAndRollup(messages: pair, rollups: [])
+            XCTAssertEqual(combined.count, 1)
+            XCTAssertEqual(combined.first?.timestamp, earlier.timestamp)
+        }
+    }
+
+    func testIDLessRowsGetDistinctDeterministicIDs() {
+        func noidColumns(note: String) -> [String: String?] {
+            var blob = assistantBlob(tokens: ["input": 10, "output": 5])
+            blob["note"] = note
+            return messageColumns(blob, rowId: nil, session: "ses-noid")
+        }
+        let first = OpenCodeStore.decodeMessageRow(noidColumns(note: "first"))!
+        let second = OpenCodeStore.decodeMessageRow(noidColumns(note: "second"))!
+        let repeatFirst = OpenCodeStore.decodeMessageRow(noidColumns(note: "first"))!
+        XCTAssertEqual(first.requestId, "")
+        XCTAssertNotEqual(first.id, second.id)
+        XCTAssertEqual(first.id, repeatFirst.id) // deterministic, no UUID
+        XCTAssertFalse(first.id.contains("nosession"))
+    }
+
+    func testIDLessRowsBothSurviveCombineAndDedupe() {
+        func noidRecord(note: String) -> NormalizedUsage {
+            var blob = assistantBlob(tokens: ["input": 10, "output": 5])
+            blob["note"] = note
+            return OpenCodeStore.decodeMessageRow(
+                messageColumns(blob, rowId: nil, session: "ses-noid"))!
+        }
+        let combined = OpenCodeStore.combineMessageAndRollup(
+            messages: [noidRecord(note: "first"), noidRecord(note: "second")], rollups: [])
+        XCTAssertEqual(combined.count, 2)
+        // Empty requestIds pass through dedupe untouched (unique by id).
+        XCTAssertEqual(TokenBarStore.dedupe(combined).count, 2)
+    }
+
+    func testNestedTimeBeatsStaleColumn() {
+        var blob = assistantBlob(created: 1_789_087_080_181)
+        blob["role"] = "assistant"
+        let record = OpenCodeStore.decodeMessageRow(
+            messageColumns(blob, columnTime: "1757325600000"))!
+        XCTAssertEqual(record.timestamp.timeIntervalSince1970, 1_789_087_080.181, accuracy: 0.001)
+    }
+
+    func testFlatColumnDriftRowDecodes() {
+        let record = OpenCodeStore.decodeMessageRow([
+            "session_id": "ses-d",
+            "time_created": "1757325600000",
+            "tokens_input": "40",
+            "tokens_output": "2",
+            "model": "m",
+        ] as [String: String?])!
+        XCTAssertEqual(record.totalTokens, 42)
+        XCTAssertEqual(record.sessionId, "ses-d")
+        XCTAssertEqual(record.requestId, "")
+    }
+
+    func testTopLevelBlobTimestampIgnored() {
+        // Blob top-level timestamp keys are not probed (dead probe
+        // removed): without nested time.* and without columns there is no
+        // timestamp, so the row is skipped + counted.
+        let blob: [String: Any] = [
+            "role": "assistant",
+            "modelID": "m",
+            "timestamp": "2026-09-10T08:15:00Z",
+            "tokens": ["input": 1, "output": 1],
+        ]
+        XCTAssertNil(OpenCodeStore.decodeMessageRow(
+            ["id": "x", "data": blobString(blob)] as [String: String?]))
+    }
+
+    func testStableRowHashVectors() {
+        // FNV-1a 64 properties: deterministic, order-independent input
+        // (keys sorted), sensitive to content.
+        let columns: [String: String?] = ["b": "2", "a": "1", "n": nil]
+        XCTAssertEqual(OpenCodeStore.stableRowHash(columns), OpenCodeStore.stableRowHash(columns))
+        XCTAssertEqual(OpenCodeStore.stableRowHash(columns).count, 16)
+        XCTAssertNotEqual(
+            OpenCodeStore.stableRowHash(["a": "1"]),
+            OpenCodeStore.stableRowHash(["a": "2"]))
+    }
+
+    private func blobString(_ blob: [String: Any]) -> String {
+        String(data: try! JSONSerialization.data(withJSONObject: blob), encoding: .utf8)!
     }
 }

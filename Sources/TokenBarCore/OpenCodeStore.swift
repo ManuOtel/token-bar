@@ -34,14 +34,34 @@ import SQLite3
 /// `tokens_cache_read`/`tokens_cache_write`, so the normalized input folds
 /// cache back in (`tokens_input + cache_read + cache_write`) and the total
 /// fallback includes cached usage. Rows mirrored across `session_v2` /
-/// `session` collapse downstream via `TokenBarStore.dedupe`: per-session
-/// rollup rows carry no per-message ID, so `decodeRow` falls back to
-/// `sessionID#epochSeconds` as the request ID. This assumes the mirror pair
-/// shares one row per session with the same `time_created` (observed: 22
-/// rows in each table); genuine rows for one session at different
-/// timestamps keep distinct keys and are never merged. Message rows carry
-/// stable message IDs shared across the `message` / `session_message`
-/// mirror pair, so the same dedupe collapses them too.
+/// `session` share one row per session per table; per-session rollup rows
+/// carry no per-message ID, so `decodeRow` falls back to
+/// `sessionID#epochSeconds` as the request ID, and genuine rows for one
+/// session at different timestamps keep distinct keys and are never merged.
+/// Message rows carry stable message IDs shared across the `message` /
+/// `session_message` mirror pair.
+///
+/// Mirror selection is deterministic and identical on both levels (see
+/// `combineMessageAndRollup`): one record per `source + requestId`, the
+/// larger `totalTokens` wins, ties break to the earliest `(timestamp, id)`.
+/// Downstream `TokenBarStore.dedupe` still runs unchanged (earliest wins)
+/// and is a no-op for these keys; records with an empty requestId always
+/// pass through with stable content-hashed IDs (see `decodeMessageRow`).
+///
+/// Load-bearing assumptions (re-validate if the OpenCode schema drifts):
+/// - Message rows link to rollup rows by session ID: `message.session_id`
+///   values match `session.id` values (the live schema enforces this with
+///   a foreign key). The covered-session filter in `combineMessageAndRollup`
+///   depends on it; a mismatch would surface as double counting.
+/// - Nested message input excludes cache: `data.tokens.input` does not
+///   contain `data.tokens.cache.read/write`, same convention as the
+///   rollup `tokens_input` column, so the same fold-in rule applies.
+/// - Validated once on a live 954MB database snapshot: per-session sums of
+///   decoded message tokens equaled the corresponding `session` rollup
+///   columns for the sampled session, and the 7d message-level token total
+///   equaled the 7d rollup total. Single-host observation, not a standing
+///   guarantee: if a future schema breaks any assumption, rows degrade to
+///   skipped + counted (visible as notices) rather than silent misreport.
 ///
 /// Privacy: only token counts, timestamps, model labels, and session /
 /// message IDs are extracted. Prompt text, tool input/output, reasoning
@@ -211,15 +231,13 @@ public enum OpenCodeStore {
             return nil
         }
 
-        // 4. Timestamp: nested data.time.created first (epoch millis), then
-        // flat time_created-style columns/keys.
+        // 4. Timestamp: nested data.time.created first (epoch millis),
+        // then flat time_created-style columns. Blob top-level timestamp
+        // keys are not probed: observed message blobs carry time only
+        // under the nested `time` object, and the flat columns always
+        // exist on the real tables.
         let time = data["time"] as? [String: Any]
         let timestamp = CodexParser.parseTimestamp(timeRaw(time, keys: ["created", "completed", "updated"]))
-            ?? CodexParser.parseTimestamp(firstRaw(data, keys: [
-                "timestamp", "time", "time_created", "timecreated", "created_at", "createdat",
-                "created", "updated_at", "updatedat", "updated", "time_updated", "timeupdated",
-                "createdAt", "date",
-            ]))
             ?? CodexParser.parseTimestamp(stringColumn(columns, keys: [
                 "time_created", "timecreated", "created_at", "createdat", "created",
                 "time_updated", "timeupdated", "updated_at", "updatedat", "updated",
@@ -257,13 +275,14 @@ public enum OpenCodeStore {
         let sessionId = stringColumn(columns, keys: ["session_id", "sessionid", "session"])
             ?? dataString(data, keys: ["session_id", "sessionId", "sessionid", "session"]) ?? ""
         // Stable message identity shared across the message /
-        // session_message mirror pair, so downstream dedupe collapses each
-        // pair while distinct messages stay distinct.
+        // session_message mirror pair. Rows without any message ID get a
+        // deterministic content-hashed fallback (see `fallbackMessageID`):
+        // distinct rows in one session stay distinct, identical rows share
+        // an ID, and no randomness leaks into the record set.
         let messageId = dataString(data, keys: ["id", "message_id", "messageid", "messageId"])
             ?? stringColumn(columns, keys: ["id", "message_id", "messageid"]) ?? ""
         let requestId = messageId
-        let fallback = "\(table):\(messageId.isEmpty ? (sessionId.isEmpty ? UUID().uuidString : sessionId) : messageId):\(Int(timestamp.timeIntervalSince1970))"
-        let id = "opencode:\(fallback)"
+        let id = "opencode:\(fallbackMessageID(table: table, columns: columns, messageId: messageId, sessionId: sessionId, timestamp: timestamp))"
 
         let record = NormalizedUsage(
             id: id,
@@ -289,30 +308,93 @@ public enum OpenCodeStore {
     /// Merges message-level and rollup records without double counting.
     /// Message rows win everywhere they exist; rollup rows fill only
     /// sessions with zero message rows (legacy databases, or sessions whose
-    /// messages were compacted away). Mirror pairs on either level collapse
-    /// via the shared request-ID scheme (see `decodeRow` /
-    /// `decodeMessageRow`); when rollup mirrors disagree on totals (stale
-    /// `session_v2` vs fresher `session`), the larger total wins so stale
-    /// data never shadows fresh data.
+    /// messages were compacted away). Mirror selection is deterministic and
+    /// identical on both levels: one record per `source + requestId`, the
+    /// larger `totalTokens` wins, ties break to the earliest
+    /// `(timestamp, id)`. Records with an empty requestId pass through
+    /// untouched, preserving `TokenBarStore.dedupe` semantics (unique by
+    /// id, always kept).
     public static func combineMessageAndRollup(
         messages: [NormalizedUsage],
         rollups: [NormalizedUsage]
     ) -> [NormalizedUsage] {
         let covered = Set(messages.map(\.sessionId).filter { !$0.isEmpty })
+        var bestMessage: [String: NormalizedUsage] = [:]
+        var passthrough: [NormalizedUsage] = []
+        for message in messages {
+            if message.requestId.isEmpty {
+                passthrough.append(message)
+            } else {
+                selectMirror(&bestMessage, key: "opencode:\(message.requestId)", candidate: message)
+            }
+        }
         var bestRollup: [String: NormalizedUsage] = [:]
         for rollup in rollups {
             if !covered.isEmpty, !rollup.sessionId.isEmpty, covered.contains(rollup.sessionId) { continue }
-            let key = rollup.requestId.isEmpty ? rollup.id : "opencode:\(rollup.requestId)"
-            if let seen = bestRollup[key] {
-                if rollup.totalTokens > seen.totalTokens { bestRollup[key] = rollup }
+            if rollup.requestId.isEmpty {
+                passthrough.append(rollup)
             } else {
-                bestRollup[key] = rollup
+                selectMirror(&bestRollup, key: "opencode:\(rollup.requestId)", candidate: rollup)
             }
         }
-        return messages + bestRollup.values.sorted {
+        return (passthrough + bestMessage.values + bestRollup.values).sorted {
             if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
             return $0.id < $1.id
         }
+    }
+
+    /// Deterministic mirror selection shared by both granularity levels:
+    /// larger `totalTokens` wins so a stale mirror never shadows fresh
+    /// data; exact ties break to the earliest `(timestamp, id)` so repeated
+    /// loads agree byte-for-byte.
+    private static func selectMirror(
+        _ best: inout [String: NormalizedUsage],
+        key: String,
+        candidate: NormalizedUsage
+    ) {
+        guard let seen = best[key] else {
+            best[key] = candidate
+            return
+        }
+        if candidate.totalTokens != seen.totalTokens {
+            if candidate.totalTokens > seen.totalTokens { best[key] = candidate }
+        } else if (candidate.timestamp, candidate.id) < (seen.timestamp, seen.id) {
+            best[key] = candidate
+        }
+    }
+
+    /// Deterministic fallback ID for message rows without a message ID.
+    /// Real tables always carry an `id` column, so this is drift tolerance
+    /// only. The ID folds in table, session, epoch second, and a stable
+    /// FNV-1a hash over the sorted `key=value` column projection: two
+    /// ID-less rows in one session at one timestamp stay distinct unless
+    /// every column matches (true content dupes). No UUID, no randomness,
+    /// stable across runs (Swift's `hashValue` is per-process seeded and
+    /// must never be used here).
+    static func fallbackMessageID(
+        table: String,
+        columns: [String: String?],
+        messageId: String,
+        sessionId: String,
+        timestamp: Date
+    ) -> String {
+        let epoch = Int(timestamp.timeIntervalSince1970)
+        if !messageId.isEmpty { return "\(table):\(messageId):\(epoch)" }
+        let session = sessionId.isEmpty ? "nosession" : sessionId
+        return "\(table):\(session):\(epoch):\(stableRowHash(columns))"
+    }
+
+    /// Stable FNV-1a 64-bit hash rendered as 16 lowercase hex digits.
+    /// Deterministic across processes, architectures, and runs.
+    static func stableRowHash(_ columns: [String: String?]) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for key in columns.keys.sorted() {
+            for byte in "\(key)=\(columns[key] ?? nil ?? "null")".utf8 {
+                hash ^= UInt64(byte)
+                hash &*= 1_099_511_628_211
+            }
+        }
+        return String(format: "%016llx", hash)
     }
 
     /// Loads all decodable rows from the SQLite file. Throws
