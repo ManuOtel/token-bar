@@ -4,6 +4,8 @@ import Foundation
 ///
 /// - Codex root: `TOKENBAR_CODEX_ROOT` or `~/.codex/sessions` (recursive `*.jsonl`)
 /// - OpenCode DB: `TOKENBAR_OPENCODE_DB` or `~/.local/share/opencode/opencode.db`
+///   (per-message `message` / `session_message` tables win where present;
+///   per-session `session_v2` / `session` rollups fill uncovered sessions only)
 /// - Claude root: `TOKENBAR_CLAUDE_ROOT` or `~/.claude/projects` (recursive `*.jsonl`)
 /// - No auth, no cookies, no network. Missing roots yield zero records plus a
 ///   warning, never an error.

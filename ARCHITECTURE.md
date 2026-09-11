@@ -9,7 +9,9 @@ Sources/TokenBarCore/   # pure logic, Foundation only (no network, no auth)
                         # AggregatedStats, BreakdownEntry, DailyBucket, BestMonth, LoadReport
   CodexParser.swift     # recursive *.jsonl reader, tolerant line decoder
   ClaudeParser.swift    # recursive *.jsonl reader for ~/.claude/projects
-  OpenCodeStore.swift   # pure decodeRow + optional SQLite loader (read-only)
+  OpenCodeStore.swift   # pure decodeRow (rollups) + decodeMessageRow
+                        # (per-message) + message-beats-rollup combine;
+                        # optional SQLite loader (read-only)
   Pricing.swift         # static per-1M rates + cost formula
   Aggregator.swift      # filter / aggregate / bestMonth / dailyTrend (pure, clock-injected)
   Store.swift           # orchestrates adapters, env overrides, deterministic dedupe
@@ -18,7 +20,9 @@ Sources/TokenBarCLI/    # thin terminal front-end (Foundation only)
   main.swift            # --preset/--source/--all-presets/--json parsing, prints Report
 Sources/TokenBarApp/    # SwiftUI + AppKit menu bar shell (macOS 14+)
   TokenBarApp.swift     # @main App, MenuBarExtra, accessory AppDelegate, refresh
-  DashboardView.swift   # filters, presets, stats, breakdowns, trend, empty states
+  DashboardView.swift   # dark cockpit: source/range chips, hero total,
+                        # metric cards, always-visible source rows, models,
+                        # trend, empty/notice states (display only)
   LaunchAtLoginController.swift # SMAppService.mainApp wrapper, unbundled fallback
 Sources/TokenBarCore/LaunchAtLogin.swift # pure bundled/status policy (tested)
 Tests/TokenBarCoreTests/
@@ -38,6 +42,12 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
 - **Isolated adapters**: Codex (JSONL walk), Claude Code (JSONL walk), and
   OpenCode (SQLite read) never share code except the `NormalizedUsage`
   struct. Each degrades independently.
+- **Two OpenCode granularities, never double counted**: per-message rows
+  (`message`, `session_message`) win where they exist (accurate day/model
+  attribution); per-session rollups (`session_v2`, `session`) fill only
+  sessions with zero message rows. Stale rollup mirrors lose to the larger
+  total; message mirrors share stable message IDs so existing dedupe
+  collapses them.
 - **Normalized records**: every event becomes one `NormalizedUsage` with
   clamped non-negative counts and `total` derived deterministically.
   Codex resolves models per file (line-local `model|model_name` wins, else

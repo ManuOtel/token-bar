@@ -101,7 +101,7 @@ What each report means:
 | Source  | Path | Format |
 |---|---|---|
 | Codex | `~/.codex/sessions/**/*.jsonl` | JSONL, `token_usage_record` payloads + `turn_context` model map |
-| OpenCode | `~/.local/share/opencode/opencode.db` | SQLite, `session_v2` + legacy `session` |
+| OpenCode | `~/.local/share/opencode/opencode.db` | SQLite, per-message `message` + `session_message` (authoritative); per-session `session_v2` + `session` rollups fill uncovered sessions only |
 | Claude | `~/.claude/projects/**/*.jsonl` | JSONL, assistant `message.usage` records |
 
 Overrides for testing: `TOKENBAR_CODEX_ROOT`, `TOKENBAR_OPENCODE_DB`,
@@ -153,7 +153,9 @@ Filters: **All / Codex / OpenCode / Claude**.
 
 ### Counts
 
-- `requests` = records in scope. `sessions` = distinct non-empty `sessionId`.
+- `requests` = records in scope (Codex/Claude: one per usage line;
+  OpenCode: one per assistant message, or one per session for rollup
+  fallback rows). `sessions` = distinct non-empty `sessionId`.
 - `last updated` = max record timestamp in scope.
 - Breakdowns group by model and by source (tokens desc, key asc on ties).
 - Daily trend buckets by local calendar day (`yyyy-MM-dd`), ascending.
@@ -190,6 +192,18 @@ clearly labeled approximations.
   and undecodable DB rows are skipped and counted (`LoadReport`), surfaced in
   the dashboard as warnings. Missing files/tables degrade to empty + warning.
 
+## Menu bar dashboard
+
+Dark usage cockpit in the macOS menu bar popover. Hero total tokens for
+the active source/range, estimated cost (estimate only), refresh button,
+single-line **Source** chips (All / Codex / OpenCode / Claude, each with
+its token count in the current range) and **Range** chips
+(Today / 24H / 7D / 30D / Best / All), input/output/cached/reasoning
+cards, an always-visible source breakdown (zero sources stay listed as
+`no records`), top models, 14-day trend, sanitized notices, and the
+launch-at-login toggle. An empty range names the active source and range
+and offers one-tap jumps to All sources / Lifetime.
+
 ## Testing
 
 ```sh
@@ -208,7 +222,9 @@ CI (`.github/workflows/ci.yml`, runs on `main` and PRs) mirrors this split:
 
 Covers: Codex valid/alias/nested/type-gate/malformed/epoch/unknown-model,
 OpenCode column-form/legacy/JSON-blob/missing-timestamp/no-counts/fallback/
-nulls, Claude valid/cache-pair/type-gate/missing-usage/malformed/epoch-ISO/
+nulls plus per-message nested-tokens/flat-model-IDs/nested-model-object/
+role-gate/all-zero-skip/message-beats-rollup/stale-mirror/range-attribution,
+Claude valid/cache-pair/type-gate/missing-usage/malformed/epoch-ISO/
 dedupe/source-isolation/sanitizer, plus filtering (source, today-vs-24h, 7d/30d, inclusive bounds),
 best-month max + earliest-tiebreak, totals/sessions/cost/breakdowns,
 cached-subset accounting (OpenCode cache fold-in, explicit-total-wins),
@@ -234,6 +250,11 @@ deterministic JSON, no raw paths in output).
 - `OpenCode database not found (...)`: default
   `~/.local/share/opencode/opencode.db` is absent. Point testing data with
   `TOKENBAR_OPENCODE_DB=/tmp/fake.db ./scripts/show-usage.sh`.
+  When the database is present, per-message tables (`message`,
+  `session_message`) attribute usage to the day and model that spent it;
+  per-session rollups (`session_v2`, `session`) fill only sessions with no
+  message rows, so a session created weeks ago still shows recent usage in
+  7d/today views.
 - `Claude sessions not found (...)`: default
   `~/.claude/projects/**/*.jsonl` is absent. Point testing data with
   `TOKENBAR_CLAUDE_ROOT=/tmp/fake-claude ./scripts/show-usage.sh`.

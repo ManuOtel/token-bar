@@ -8,26 +8,70 @@ import SQLite3
 ///
 /// Default path: `~/.local/share/opencode/opencode.db`
 /// (override with `TOKENBAR_OPENCODE_DB`).
-/// Reads `session_v2` (preferred) plus legacy `session` tables, read-only.
+///
+/// Two granularities exist in the wild and both are read, read-only:
+///
+/// - Per-message tables `message` (current) and `session_message` (older
+///   name): one row per assistant message with nested token usage
+///   (`data.tokens`: `input`, `output`, `reasoning`,
+///   `cache.read`/`cache.write`, optional `total`), per-message timestamps
+///   (`data.time.created`), and model identity as flat `modelID` /
+///   `providerID` columns-or-keys or a nested `model` object. Only
+///   assistant rows become records; user/synthetic/compaction rows are
+///   skipped and counted. Message rows are authoritative: per-message
+///   timestamps attribute usage to the day it happened (a session created
+///   weeks ago can still carry yesterday's tokens), and per-message models
+///   attribute cost to the model that spent them.
+/// - Per-session rollup tables `session_v2` (preferred) plus legacy
+///   `session`: one row per session with cumulative `tokens_*` columns
+///   dated at session creation. These are a fallback only: a rollup row is
+///   kept solely for sessions with zero message rows, so rollup/session
+///   double counting is impossible by construction.
+///
 /// Because the schema drifts between OpenCode versions, every row is decoded
-/// by the pure `decodeRow` function which accepts both column-form token
-/// counts (legacy `input_tokens` style plus current `tokens_input`,
-/// `tokens_output`, `tokens_reasoning`, `tokens_cache_read`,
-/// `tokens_cache_write` style with `time_created` / `time_updated` epoch
-/// millis timestamps) and JSON-blob columns (`data`, `payload`, `info`,
-/// `value`). The `model` column may be a JSON string like
-/// `{"id": "...", "providerID": "..."}` and is reduced to a concise stable
-/// label. The schema stores `tokens_input` separately from
+/// by the pure `decodeRow` (rollups) / `decodeMessageRow` (messages)
+/// functions. The schema stores `tokens_input` separately from
 /// `tokens_cache_read`/`tokens_cache_write`, so the normalized input folds
-/// cache back in: cached stays a subset of input and totals include cached
-/// usage. Rows mirrored across `session_v2` / `session` collapse downstream
-/// via `TokenBarStore.dedupe`: per-session rollup rows carry no per-message
-/// ID, so `decodeRow` falls back to `sessionID#epochSeconds` as the request
-/// ID. This assumes the mirror pair shares one row per session with the same
-/// `time_created` (observed: 22 rows in each table); genuine rows for one
+/// cache back in (`tokens_input + cache_read + cache_write`) and the total
+/// fallback includes cached usage. Rows mirrored across `session_v2` /
+/// `session` share one row per session per table; per-session rollup rows
+/// carry no per-message ID, so `decodeRow` falls back to
+/// `sessionID#epochSeconds` as the request ID, and genuine rows for one
 /// session at different timestamps keep distinct keys and are never merged.
+/// Message rows carry stable message IDs shared across the `message` /
+/// `session_message` mirror pair.
+///
+/// Mirror selection is deterministic and identical on both levels (see
+/// `combineMessageAndRollup`): one record per `source + requestId`, the
+/// larger `totalTokens` wins, ties break to the earliest `(timestamp, id)`.
+/// Downstream `TokenBarStore.dedupe` still runs unchanged (earliest wins)
+/// and is a no-op for these keys; records with an empty requestId always
+/// pass through with stable content-hashed IDs (see `decodeMessageRow`).
+///
+/// Load-bearing assumptions (re-validate if the OpenCode schema drifts):
+/// - Message rows link to rollup rows by session ID: `message.session_id`
+///   values match `session.id` values (the live schema enforces this with
+///   a foreign key). The covered-session filter in `combineMessageAndRollup`
+///   depends on it; a mismatch would surface as double counting.
+/// - Nested message input excludes cache: `data.tokens.input` does not
+///   contain `data.tokens.cache.read/write`, same convention as the
+///   rollup `tokens_input` column, so the same fold-in rule applies.
+/// - Validated once on a live 954MB database snapshot: per-session sums of
+///   decoded message tokens equaled the corresponding `session` rollup
+///   columns for the sampled session, and the 7d message-level token total
+///   equaled the 7d rollup total. Single-host observation, not a standing
+///   guarantee: if a future schema breaks any assumption, rows degrade to
+///   skipped + counted (visible as notices) rather than silent misreport.
+///
+/// Privacy: only token counts, timestamps, model labels, and session /
+/// message IDs are extracted. Prompt text, tool input/output, reasoning
+/// text, file paths (`data.path`, `data.content[*]`), and credentials are
+/// never read into records and never reach reports or the UI.
 public enum OpenCodeStore {
+    /// Per-session rollup tables (fallback granularity).
     public static let tableNames = ["session_v2", "session"]
+    /// Per-message tables (authoritative granularity).
+    public static let messageTableNames = ["message", "session_message"]
 
     /// Pure row decoder. Testable without a live SQLite file.
     /// `columns` maps lowercased column names to their string values (nil = NULL).
@@ -115,6 +159,257 @@ public enum OpenCodeStore {
         )
     }
 
+    /// Pure decoder for per-message rows (`message` / `session_message`).
+    /// `columns` maps lowercased column names to their string values
+    /// (nil = NULL). Returns nil for non-assistant rows, rows without
+    /// usable timestamp or token counts, and all-zero rows (final empty
+    /// assistant messages carry no usage and must not inflate request
+    /// counts).
+    ///
+    /// Real shapes handled (observed on a live database, sanitized):
+    /// `data` JSON `{"role":"assistant","tokens":{"input":N,"output":N,
+    /// "reasoning":N,"cache":{"read":N,"write":N},"total":N},
+    /// "time":{"created":epochMillis},"modelID":"...","providerID":"..."}`
+    /// (current `message` table, flat model IDs) or the same with a nested
+    /// `"model":{"id":"...","providerID":"..."}` object and a `type`
+    /// column == `assistant` (older `session_message` table). Like the
+    /// rollup path, nested `tokens.input` excludes cache, so normalized
+    /// input folds cache back in and the total fallback includes it.
+    public static func decodeMessageRow(_ columns: [String: String?], table: String = "message") -> NormalizedUsage? {
+        // 1. Decode the data blob first (never retained, only projected).
+        var data: [String: Any] = [:]
+        if let raw = columns["data"] ?? nil,
+           let blob = raw.data(using: .utf8),
+           let json = try? JSONSerialization.jsonObject(with: blob) as? [String: Any]
+        {
+            data = json
+        }
+
+        // 2. Role gate: only assistant rows carry usage. User, synthetic,
+        // and compaction rows are skipped. A missing role falls through to
+        // the token check (schema drift tolerance); a present non-assistant
+        // role is rejected.
+        let columnType = stringColumn(columns, keys: ["type", "role"])
+        let dataRole = dataString(data, keys: ["role", "type"])
+        if let role = columnType ?? dataRole, !role.isEmpty {
+            guard role.lowercased().contains("assistant") else { return nil }
+        }
+
+        // 3. Token counts: nested data.tokens first, flat columns as drift
+        // fallback.
+        let tokens = data["tokens"] as? [String: Any]
+        let cache = tokens?["cache"] as? [String: Any]
+        let nestedInput = intValue(tokens, keys: ["input", "input_tokens", "tokens_input"])
+        let nestedOutput = intValue(tokens, keys: ["output", "output_tokens", "tokens_output"])
+        let nestedReasoning = intValue(tokens, keys: ["reasoning", "reasoning_tokens", "tokens_reasoning"])
+        let nestedCacheRead = intValue(cache, keys: ["read", "input_tokens", "tokens_cache_read"])
+        let nestedCacheWrite = intValue(cache, keys: ["write", "tokens_cache_write"])
+        let nestedTotal = intValue(tokens, keys: ["total", "total_tokens", "tokens_total"])
+
+        let flatInput = intColumn(columns, data: data, keys: ["input_tokens", "inputtokens", "prompt_tokens", "prompttokens", "tokens_input", "tokensinput", "input"])
+        let flatOutput = intColumn(columns, data: data, keys: ["output_tokens", "outputtokens", "completion_tokens", "completiontokens", "tokens_output", "tokensoutput", "output"])
+        let flatCacheRead = intColumn(columns, data: data, keys: ["cached_tokens", "cachedtokens", "cached_input_tokens", "cachedinputtokens", "tokens_cache_read", "tokenscacheread"])
+        let flatCacheWrite = intColumn(columns, data: data, keys: ["cache_write_input_tokens", "cachewriteinputtokens", "tokens_cache_write", "tokenscachewrite"])
+        let flatReasoning = intColumn(columns, data: data, keys: ["reasoning_tokens", "reasoningtokens", "reasoning_output_tokens", "reasoningoutputtokens", "tokens_reasoning", "tokensreasoning"])
+        let flatTotal = intColumn(columns, data: data, keys: ["total_tokens", "totaltokens", "tokens_total", "tokenstotal", "total", "tokens"])
+
+        let rawInput = nestedInput ?? flatInput
+        let output = nestedOutput ?? flatOutput
+        let cacheRead = nestedCacheRead ?? flatCacheRead
+        let cacheWrite = nestedCacheWrite ?? flatCacheWrite
+        let cached: Int? = {
+            if cacheRead == nil && cacheWrite == nil { return nil }
+            return (cacheRead ?? 0) + (cacheWrite ?? 0)
+        }()
+        let input: Int? = {
+            if rawInput == nil && cached == nil { return nil }
+            return (rawInput ?? 0) + (cached ?? 0)
+        }()
+        let reasoning = nestedReasoning ?? flatReasoning
+        let total = nestedTotal ?? flatTotal
+        guard input != nil || output != nil || cached != nil || reasoning != nil || total != nil else {
+            return nil
+        }
+
+        // 4. Timestamp: nested data.time.created first (epoch millis),
+        // then flat time_created-style columns. Blob top-level timestamp
+        // keys are not probed: observed message blobs carry time only
+        // under the nested `time` object, and the flat columns always
+        // exist on the real tables.
+        let time = data["time"] as? [String: Any]
+        let timestamp = CodexParser.parseTimestamp(timeRaw(time, keys: ["created", "completed", "updated"]))
+            ?? CodexParser.parseTimestamp(stringColumn(columns, keys: [
+                "time_created", "timecreated", "created_at", "createdat", "created",
+                "time_updated", "timeupdated", "updated_at", "updatedat", "updated",
+                "timestamp", "time",
+            ]))
+        guard let timestamp else { return nil }
+
+        // 5. Model: flat modelID + providerID wins ("provider/id"), then a
+        // nested model object, then a model JSON string or plain name.
+        let flatModelId = dataString(data, keys: ["modelID", "modelId", "model_id"])
+            ?? stringColumn(columns, keys: ["modelid", "model_id"])
+        let flatProvider = dataString(data, keys: ["providerID", "providerId", "provider_id", "provider"])
+            ?? stringColumn(columns, keys: ["providerid", "provider_id", "provider"])
+        let model: String = {
+            if let id = flatModelId, !id.isEmpty {
+                if let provider = flatProvider, !provider.isEmpty { return "\(provider)/\(id)" }
+                return id
+            }
+            if let nested = data["model"] as? [String: Any] {
+                let id = dataString(nested, keys: ["id", "model", "modelID", "name"])
+                let provider = dataString(nested, keys: ["providerID", "providerId", "provider", "providerName"])
+                if let provider, let id, !provider.isEmpty, !id.isEmpty { return "\(provider)/\(id)" }
+                if let id, !id.isEmpty { return id }
+                if let provider, !provider.isEmpty { return provider }
+            }
+            if let raw = dataString(data, keys: ["model", "model_name", "modelname"])
+                ?? stringColumn(columns, keys: ["model", "model_name", "modelname", "provider_model"]),
+               !raw.isEmpty
+            {
+                return decodeModelLabel(raw) ?? "unknown"
+            }
+            return "unknown"
+        }()
+
+        let sessionId = stringColumn(columns, keys: ["session_id", "sessionid", "session"])
+            ?? dataString(data, keys: ["session_id", "sessionId", "sessionid", "session"]) ?? ""
+        // Stable message identity shared across the message /
+        // session_message mirror pair. Rows without any message ID get a
+        // deterministic content-hashed fallback (see `fallbackMessageID`):
+        // distinct rows in one session stay distinct, identical rows share
+        // an ID, and no randomness leaks into the record set.
+        let messageId = dataString(data, keys: ["id", "message_id", "messageid", "messageId"])
+            ?? stringColumn(columns, keys: ["id", "message_id", "messageid"]) ?? ""
+        let requestId = messageId
+        let id = "opencode:\(fallbackMessageID(table: table, columns: columns, messageId: messageId, sessionId: sessionId, timestamp: timestamp))"
+
+        let record = NormalizedUsage(
+            id: id,
+            source: .opencode,
+            timestamp: timestamp,
+            model: model,
+            inputTokens: input ?? 0,
+            outputTokens: output ?? 0,
+            cachedTokens: cached ?? 0,
+            reasoningTokens: reasoning ?? 0,
+            totalTokens: total ?? 0,
+            sessionId: sessionId,
+            requestId: requestId
+        )
+        // All-zero assistant rows (final empty messages) carry no usage;
+        // skipping them keeps request counts meaningful.
+        guard record.totalTokens > 0 || record.inputTokens > 0 || record.outputTokens > 0
+            || record.cachedTokens > 0 || record.reasoningTokens > 0
+        else { return nil }
+        return record
+    }
+
+    /// Merges message-level and rollup records without double counting.
+    /// Message rows win everywhere they exist; rollup rows fill only
+    /// sessions with zero message rows (legacy databases, or sessions whose
+    /// messages were compacted away). Mirror selection is deterministic and
+    /// identical on both levels: one record per `source + requestId`, the
+    /// larger `totalTokens` wins, ties break to the earliest
+    /// `(timestamp, id)`. Records with an empty requestId pass through
+    /// untouched, preserving `TokenBarStore.dedupe` semantics (unique by
+    /// id, always kept).
+    public static func combineMessageAndRollup(
+        messages: [NormalizedUsage],
+        rollups: [NormalizedUsage]
+    ) -> [NormalizedUsage] {
+        let covered = Set(messages.map(\.sessionId).filter { !$0.isEmpty })
+        var bestMessage: [String: NormalizedUsage] = [:]
+        var passthrough: [NormalizedUsage] = []
+        for message in messages {
+            if message.requestId.isEmpty {
+                passthrough.append(message)
+            } else {
+                selectMirror(&bestMessage, key: "opencode:\(message.requestId)", candidate: message)
+            }
+        }
+        var bestRollup: [String: NormalizedUsage] = [:]
+        for rollup in rollups {
+            if !covered.isEmpty, !rollup.sessionId.isEmpty, covered.contains(rollup.sessionId) { continue }
+            if rollup.requestId.isEmpty {
+                passthrough.append(rollup)
+            } else {
+                selectMirror(&bestRollup, key: "opencode:\(rollup.requestId)", candidate: rollup)
+            }
+        }
+        return (passthrough + bestMessage.values + bestRollup.values).sorted {
+            if $0.timestamp != $1.timestamp { return $0.timestamp < $1.timestamp }
+            return $0.id < $1.id
+        }
+    }
+
+    /// Deterministic mirror selection shared by both granularity levels:
+    /// larger `totalTokens` wins so a stale mirror never shadows fresh
+    /// data; exact ties break to the earliest `(timestamp, id)` so repeated
+    /// loads agree byte-for-byte.
+    private static func selectMirror(
+        _ best: inout [String: NormalizedUsage],
+        key: String,
+        candidate: NormalizedUsage
+    ) {
+        guard let seen = best[key] else {
+            best[key] = candidate
+            return
+        }
+        if candidate.totalTokens != seen.totalTokens {
+            if candidate.totalTokens > seen.totalTokens { best[key] = candidate }
+        } else if (candidate.timestamp, candidate.id) < (seen.timestamp, seen.id) {
+            best[key] = candidate
+        }
+    }
+
+    /// Deterministic fallback ID for message rows without a message ID.
+    /// Real tables always carry an `id` column, so this is drift tolerance
+    /// only. The ID folds in table, session, epoch second, and a stable
+    /// FNV-1a hash over the sorted `key=value` column projection: two
+    /// ID-less rows in one session at one timestamp stay distinct unless
+    /// every column matches (true content dupes). No UUID, no randomness,
+    /// stable across runs (Swift's `hashValue` is per-process seeded and
+    /// must never be used here).
+    static func fallbackMessageID(
+        table: String,
+        columns: [String: String?],
+        messageId: String,
+        sessionId: String,
+        timestamp: Date
+    ) -> String {
+        let epoch = Int(timestamp.timeIntervalSince1970)
+        if !messageId.isEmpty { return "\(table):\(messageId):\(epoch)" }
+        let session = sessionId.isEmpty ? "nosession" : sessionId
+        return "\(table):\(session):\(epoch):\(stableRowHash(columns))"
+    }
+
+    /// Stable FNV-1a 64-bit hash rendered as 16 lowercase hex digits.
+    /// Deterministic across processes, architectures, and runs. Missing
+    /// (NULL) values render as the literal `null`; present values render
+    /// verbatim, including empty strings. This exact rendering is the hash
+    /// contract shared with `fnv1a_hex` in `scripts/verify_logic.py`:
+    /// do not touch it without updating the mirror.
+    static func stableRowHash(_ columns: [String: String?]) -> String {
+        var hash: UInt64 = 14_695_981_039_346_656_037
+        for key in columns.keys.sorted() {
+            // Flatten String?? without `?? nil`: the double optional comes
+            // from dictionary subscripting over an optional value type.
+            let flattened: String? = columns[key].flatMap { $0 }
+            let rendered: String
+            if let flattened {
+                rendered = flattened
+            } else {
+                rendered = "null"
+            }
+            for byte in "\(key)=\(rendered)".utf8 {
+                hash ^= UInt64(byte)
+                hash &*= 1_099_511_628_211
+            }
+        }
+        return String(format: "%016llx", hash)
+    }
+
     /// Loads all decodable rows from the SQLite file. Throws
     /// `StoreError.sqliteUnavailable` on platforms without the SQLite3 module.
     public static func loadDatabase(at path: String) throws -> (records: [NormalizedUsage], skipped: Int) {
@@ -190,6 +485,66 @@ public enum OpenCodeStore {
         return nil
     }
 
+    /// String column lookup for message rows (columns arrive lowercased from
+    /// the loader). Empty strings count as missing.
+    private static func stringColumn(_ columns: [String: String?], keys: [String]) -> String? {
+        for key in keys {
+            for variant in [key, key.lowercased()] {
+                if let value = columns[variant] ?? nil, !value.isEmpty { return value }
+            }
+        }
+        return nil
+    }
+
+    /// Case-sensitive key lookup inside a decoded JSON object (JSON keys
+    /// keep their original case: `modelID`, `providerID`, `sessionId`).
+    private static func dataString(_ dict: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = dict[key] as? String, !value.isEmpty { return value }
+        }
+        return nil
+    }
+
+    private static func timeRaw(_ dict: [String: Any]?, keys: [String]) -> Any? {
+        guard let dict else { return nil }
+        for key in keys {
+            if let value = dict[key] { return value }
+        }
+        return nil
+    }
+
+    /// Integer lookup inside a decoded JSON object. Case-sensitive keys
+    /// plus string-number tolerance; JSON booleans never count.
+    private static func intValue(_ dict: [String: Any]?, keys: [String]) -> Int? {
+        guard let dict else { return nil }
+        for key in keys {
+            guard let raw = dict[key] else { continue }
+            if let number = raw as? NSNumber, String(cString: number.objCType) == "c" { continue }
+            if let int = raw as? Int { return int }
+            if let double = raw as? Double { return Int(double) }
+            if let number = raw as? NSNumber { return number.intValue }
+            if let string = raw as? String {
+                if let parsed = Int(string) { return parsed }
+                if let parsed = Double(string) { return Int(parsed) }
+            }
+        }
+        return nil
+    }
+
+    /// Integer lookup across flat string columns plus decoded blob keys.
+    private static func intColumn(_ columns: [String: String?], data: [String: Any], keys: [String]) -> Int? {
+        for key in keys {
+            for variant in [key, key.lowercased()] {
+                if let value = columns[variant] ?? nil {
+                    if let parsed = Int(value) { return parsed }
+                    if let parsed = Double(value) { return Int(parsed) }
+                }
+                if let hit = intValue(data, keys: [variant]) { return hit }
+            }
+        }
+        return nil
+    }
+
 #if canImport(SQLite3)
     private static func sqliteLoad(path: String) throws -> (records: [NormalizedUsage], skipped: Int) {
         var db: OpaquePointer?
@@ -199,38 +554,63 @@ public enum OpenCodeStore {
         }
         defer { sqlite3_close(db) }
 
+        var messages: [NormalizedUsage] = []
+        var rollups: [NormalizedUsage] = []
+        var skipped = 0
+        for table in messageTableNames {
+            let (records, tableSkipped) = loadTable(db: db, table: table) {
+                decodeMessageRow($0, table: $1)
+            }
+            messages.append(contentsOf: records)
+            skipped += tableSkipped
+        }
+        for table in tableNames {
+            let (records, tableSkipped) = loadTable(db: db, table: table) {
+                decodeRow($0, table: $1)
+            }
+            rollups.append(contentsOf: records)
+            skipped += tableSkipped
+        }
+        // Message rows win where they exist; rollups fill uncovered
+        // sessions only, so the two levels never double count.
+        return (combineMessageAndRollup(messages: messages, rollups: rollups), skipped)
+    }
+
+    private static func loadTable(
+        db: OpaquePointer,
+        table: String,
+        decode: ([String: String?], String) -> NormalizedUsage?
+    ) -> (records: [NormalizedUsage], skipped: Int) {
+        var stmt: OpaquePointer?
+        let sql = "SELECT * FROM \"\(table)\""
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return ([], 0) // missing table: skip gracefully
+        }
+        defer { sqlite3_finalize(stmt) }
+        let columnCount = Int(sqlite3_column_count(stmt))
+        var names: [String] = []
+        for index in 0..<columnCount {
+            guard let namePtr = sqlite3_column_name(stmt, Int32(index)) else { continue }
+            names.append(String(cString: namePtr).lowercased())
+        }
         var records: [NormalizedUsage] = []
         var skipped = 0
-        for table in tableNames {
-            var stmt: OpaquePointer?
-            let sql = "SELECT * FROM \"\(table)\""
-            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-                continue // missing table: skip gracefully
-            }
-            let columnCount = Int(sqlite3_column_count(stmt))
-            var names: [String] = []
-            for index in 0..<columnCount {
-                guard let namePtr = sqlite3_column_name(stmt, Int32(index)) else { continue }
-                names.append(String(cString: namePtr).lowercased())
-            }
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                var columns: [String: String?] = [:]
-                for (index, name) in names.enumerated() {
-                    if sqlite3_column_type(stmt, Int32(index)) == SQLITE_NULL {
-                        columns[name] = nil
-                    } else if let text = sqlite3_column_text(stmt, Int32(index)) {
-                        columns[name] = String(cString: text)
-                    } else {
-                        columns[name] = nil
-                    }
-                }
-                if let record = decodeRow(columns, table: table) {
-                    records.append(record)
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            var columns: [String: String?] = [:]
+            for (index, name) in names.enumerated() {
+                if sqlite3_column_type(stmt, Int32(index)) == SQLITE_NULL {
+                    columns[name] = nil
+                } else if let text = sqlite3_column_text(stmt, Int32(index)) {
+                    columns[name] = String(cString: text)
                 } else {
-                    skipped += 1
+                    columns[name] = nil
                 }
             }
-            sqlite3_finalize(stmt)
+            if let record = decode(columns, table) {
+                records.append(record)
+            } else {
+                skipped += 1
+            }
         }
         return (records, skipped)
     }
