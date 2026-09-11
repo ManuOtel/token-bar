@@ -28,3 +28,7 @@ sessions/
 
 # Release outputs - rebuilt by scripts/build-app.sh
 dist/
+
+# Python byproducts - regenerated on every verify run
+__pycache__/
+*.pyc
