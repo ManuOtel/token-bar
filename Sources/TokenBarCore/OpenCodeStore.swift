@@ -385,11 +385,24 @@ public enum OpenCodeStore {
     }
 
     /// Stable FNV-1a 64-bit hash rendered as 16 lowercase hex digits.
-    /// Deterministic across processes, architectures, and runs.
+    /// Deterministic across processes, architectures, and runs. Missing
+    /// (NULL) values render as the literal `null`; present values render
+    /// verbatim, including empty strings. This exact rendering is the hash
+    /// contract shared with `fnv1a_hex` in `scripts/verify_logic.py`:
+    /// do not touch it without updating the mirror.
     static func stableRowHash(_ columns: [String: String?]) -> String {
         var hash: UInt64 = 14_695_981_039_346_656_037
         for key in columns.keys.sorted() {
-            for byte in "\(key)=\(columns[key] ?? nil ?? "null")".utf8 {
+            // Flatten String?? without `?? nil`: the double optional comes
+            // from dictionary subscripting over an optional value type.
+            let flattened: String? = columns[key].flatMap { $0 }
+            let rendered: String
+            if let flattened {
+                rendered = flattened
+            } else {
+                rendered = "null"
+            }
+            for byte in "\(key)=\(rendered)".utf8 {
                 hash ^= UInt64(byte)
                 hash &*= 1_099_511_628_211
             }
