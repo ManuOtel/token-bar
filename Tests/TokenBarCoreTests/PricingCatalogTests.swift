@@ -225,6 +225,48 @@ final class PricingCatalogTests: XCTestCase {
         XCTAssertEqual(result.snapshot?.catalog.entries.count, 2)
     }
 
+    func testRefreshRejectsNonAllowlistedEndpointWithoutNetwork() async throws {
+        let catalog = try PricingCatalogCodec.decode(try fixtureData("pricing-cache-sample.json"))
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("pricing-catalog.json")
+        try PricingService(fetcher: MockFetcher.failing()).saveCatalog(catalog, to: path)
+        // The fetcher would succeed: rejection must happen before any call.
+        let payload = try fixtureData("pricing-openrouter-sample.json")
+        let mock = MockFetcher(result: .success((payload, MockFetcher.okResponse())))
+        let service = PricingService(fetcher: mock)
+        let offAllowlist = [
+            "https://evil.example.com/api/v1/models",
+            "http://openrouter.ai/api/v1/models",
+            "https://openrouter.ai.evil.com/api/v1/models",
+            "https://openrouter.ai/other/path",
+            "https://openrouter.ai/api/v1/models?foo=bar",
+            "https://openrouter.ai/api/v1/models#frag",
+            "https://openrouter.ai:8443/api/v1/models",
+            "https://user:pass@openrouter.ai/api/v1/models",
+        ]
+        for raw in offAllowlist {
+            let result = await service.refresh(now: now, catalogURL: URL(string: raw)!, cacheURL: path)
+            XCTAssertEqual(result.status, "cached", raw)
+            XCTAssertEqual(result.snapshot?.catalog.entries.count, 2, raw)
+            XCTAssertTrue(result.error?.contains("not allowlisted") ?? false, raw)
+        }
+        XCTAssertTrue(mock.requestedURLs.isEmpty)
+        // The documented default URL stays injectable and fetchable in tests.
+        XCTAssertTrue(PricingService.isAllowlistedCatalogURL(PricingService.defaultCatalogURL))
+        // Without a cache, rejection still falls back to static (nil).
+        let bare = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("pricing-catalog.json")
+        let offline = await service.refresh(
+            now: now,
+            catalogURL: URL(string: "https://evil.example.com/api/v1/models")!,
+            cacheURL: bare)
+        XCTAssertEqual(offline.status, "offline")
+        XCTAssertNil(offline.snapshot)
+        XCTAssertTrue(mock.requestedURLs.isEmpty)
+    }
+
     // MARK: - Privacy boundary
 
     func testCatalogRequestSendsNoUsageOrCredentials() {

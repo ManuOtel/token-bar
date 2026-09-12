@@ -75,15 +75,22 @@ public final class PricingService: @unchecked Sendable {
         ProcessInfo.processInfo.environment["TOKENBAR_PRICING_CACHE"]
     }
 
-    public static var catalogURLOverride: String? {
-        ProcessInfo.processInfo.environment["TOKENBAR_PRICING_URL"]
+    public static var defaultCatalogURL: URL {
+        URL(string: OpenRouterCatalog.defaultURLString)!
     }
 
-    public static var defaultCatalogURL: URL {
-        if let raw = catalogURLOverride, let url = URL(string: raw) {
-            return url
-        }
-        return URL(string: OpenRouterCatalog.defaultURLString)!
+    /// Allowlisted refresh endpoint, checked before any network call.
+    /// Exactly `https://openrouter.ai/api/v1/models` with no query,
+    /// fragment, port, or user info. Anything else is rejected and falls
+    /// back to cache/static, so no override path can redirect the single
+    /// outbound GET at runtime.
+    public static func isAllowlistedCatalogURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "https" else { return false }
+        guard let host = url.host?.lowercased(), host == "openrouter.ai" else { return false }
+        guard url.port == nil, url.user == nil, url.password == nil else { return false }
+        guard url.path == "/api/v1/models" else { return false }
+        guard url.query == nil, url.fragment == nil else { return false }
+        return true
     }
 
     private let fetcher: any PricingFetching
@@ -157,6 +164,14 @@ public final class PricingService: @unchecked Sendable {
     ) async -> PricingRefreshResult {
         let endpoint = catalogURL ?? Self.defaultCatalogURL
         let destination = cacheURL ?? self.cacheURL()
+        // Privacy gate: reject before any network call. Tests inject the
+        // documented default URL with MockFetcher; anything off-allowlist
+        // keeps offline fallback behavior (cache, then static).
+        guard Self.isAllowlistedCatalogURL(endpoint) else {
+            return offlineResult(
+                now: now, from: destination,
+                error: "Pricing endpoint not allowlisted; kept previous rates.")
+        }
         let request = Self.makeCatalogRequest(url: endpoint)
         let data: Data
         do {
