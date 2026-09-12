@@ -8,6 +8,9 @@ struct CLIOptions {
     var source: SourceFilter = .all
     var allPresets: Bool = false
     var json: Bool = false
+    /// Explicit opt-in network use. Without it the CLI never touches the
+    /// network and prices purely from the deterministic static table.
+    var refreshPricing: Bool = false
 }
 
 enum CLIError: Error, CustomStringConvertible {
@@ -63,6 +66,9 @@ func parseArguments(_ args: [String]) throws -> (options: CLIOptions, showHelp: 
         } else if arg == "--json" {
             options.json = true
             index += 1
+        } else if arg == "--refresh-pricing" {
+            options.refreshPricing = true
+            index += 1
         } else if arg == "--preset" {
             guard index + 1 < args.count else { throw CLIError.missingValue("--preset") }
             options.preset = try parsePreset(args[index + 1])
@@ -86,13 +92,16 @@ func parseArguments(_ args: [String]) throws -> (options: CLIOptions, showHelp: 
 
 func usageText(executable: String = "token-bar") -> String {
     """
-    Usage: \(executable) [--preset <name>] [--source <name>] [--all-presets] [--json]
+    Usage: \(executable) [--preset <name>] [--source <name>] [--all-presets] [--json] [--refresh-pricing]
 
       --preset <name>   today | 24h | 7d | 30d | best-month | lifetime (default: lifetime)
       --source <name>   all | codex | opencode | claude (default: all)
       --all-presets     print every preset for the chosen source, in fixed order
                         (today, 24h, 7d, 30d, best-month, lifetime); ignores --preset
       --json            emit machine-readable JSON instead of human-readable text
+      --refresh-pricing fetch the public model pricing catalog before reporting
+                        (GET \(OpenRouterCatalog.defaultURLString); no usage data sent).
+                        Without it the CLI is fully offline and uses the static table.
       --help, -h        show this help
 
     Examples:
@@ -101,6 +110,7 @@ func usageText(executable: String = "token-bar") -> String {
       \(executable) --preset 7d --source codex
       \(executable) --all-presets --source all
       \(executable) --preset lifetime --json
+      \(executable) --preset lifetime --refresh-pricing
     """
 }
 
@@ -129,12 +139,32 @@ let now = Date()
 let report = TokenBarStore.load(now: now)
 let calendar = Calendar.current
 
+// MARK: - Pricing (explicit opt-in only)
+
+// Offline by default: snapshot stays nil (static table) unless the user
+// explicitly passed --refresh-pricing. Top-level await keeps this
+// synchronous-looking without blocking primitives; the service's bounded
+// timeouts (15s request / 30s resource) bound the wait, and any failure
+// falls back to the on-disk cache, then to nil (static estimates).
+let pricingSnapshot: CatalogSnapshot?
+let pricingNote: String?
+if options.refreshPricing {
+    let refreshed = await PricingService().refresh()
+    pricingSnapshot = refreshed.snapshot
+    pricingNote = ReportFormatter.pricingNote(snapshot: refreshed.snapshot, error: refreshed.error)
+} else {
+    pricingSnapshot = nil
+    pricingNote = nil
+}
+
 let presets: [DatePreset] = options.allPresets
     ? [.today, .last24Hours, .last7Days, .last30Days, .bestMonth, .lifetime]
     : [options.preset]
 
 let sections = presets.map { preset in
-    ReportFormatter.section(records: report.records, source: options.source, preset: preset, now: now, calendar: calendar)
+    ReportFormatter.section(
+        records: report.records, source: options.source, preset: preset,
+        now: now, calendar: calendar, snapshot: pricingSnapshot)
 }
 
 if options.json {
@@ -145,7 +175,7 @@ if options.json {
         exit(1)
     }
 } else if options.allPresets {
-    print(ReportFormatter.renderAll(sections: sections, warnings: report.warnings))
+    print(ReportFormatter.renderAll(sections: sections, warnings: report.warnings, pricingNote: pricingNote))
 } else {
-    print(ReportFormatter.render(section: sections[0], warnings: report.warnings))
+    print(ReportFormatter.render(section: sections[0], warnings: report.warnings, pricingNote: pricingNote))
 }

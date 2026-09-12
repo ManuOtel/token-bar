@@ -36,6 +36,18 @@ public enum Aggregator {
         _ records: [NormalizedUsage],
         calendar: Calendar = .current
     ) -> AggregatedStats {
+        aggregate(records, snapshot: nil, calendar: calendar)
+    }
+
+    /// Catalog-aware aggregation. A nil snapshot keeps the deterministic
+    /// offline static path (CLI default). A supplied snapshot prices every
+    /// record via `Pricing.resolve`, so dynamic/cached catalog entries win
+    /// over the static table while unknown models still fall back visibly.
+    public static func aggregate(
+        _ records: [NormalizedUsage],
+        snapshot: CatalogSnapshot?,
+        calendar: Calendar = .current
+    ) -> AggregatedStats {
         guard !records.isEmpty else { return .empty }
         var total = 0, input = 0, output = 0, cached = 0, reasoning = 0
         var cost = 0.0
@@ -51,7 +63,7 @@ public enum Aggregator {
             output += record.outputTokens
             cached += record.cachedTokens
             reasoning += record.reasoningTokens
-            let recordCost = Pricing.cost(for: record)
+            let recordCost = Pricing.cost(for: record, snapshot: snapshot)
             cost += recordCost
             if !record.sessionId.isEmpty { sessions.insert(record.sessionId) }
             if lastUpdated == nil || record.timestamp > lastUpdated! {
@@ -101,6 +113,16 @@ public enum Aggregator {
         _ records: [NormalizedUsage],
         calendar: Calendar = .current
     ) -> BestMonth? {
+        bestMonth(records, snapshot: nil, calendar: calendar)
+    }
+
+    /// Catalog-aware best-month. Cost basis follows the snapshot; the winner
+    /// is still purely max total tokens, earliest on ties.
+    public static func bestMonth(
+        _ records: [NormalizedUsage],
+        snapshot: CatalogSnapshot?,
+        calendar: Calendar = .current
+    ) -> BestMonth? {
         guard !records.isEmpty else { return nil }
         var groups: [String: [NormalizedUsage]] = [:]
         for record in records {
@@ -116,7 +138,7 @@ public enum Aggregator {
             }
         }
         guard let winner else { return nil }
-        return BestMonth(monthKey: winner, stats: aggregate(groups[winner]!, calendar: calendar))
+        return BestMonth(monthKey: winner, stats: aggregate(groups[winner]!, snapshot: snapshot, calendar: calendar))
     }
 
     public static func monthKey(for date: Date, calendar: Calendar = .current) -> String {

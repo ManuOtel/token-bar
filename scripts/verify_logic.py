@@ -1483,6 +1483,97 @@ def run():
                                              "reasoning", "total", "session", "request",
                                              "origin", "id"})
 
+    # Dynamic pricing mirror (PricingCatalog/OpenRouter decoder + precedence).
+    def per_mtok(raw):
+        if raw is None:
+            return None
+        try:
+            return float(str(raw).strip()) * 1e6
+        except (ValueError, AttributeError):
+            return None
+
+    def decode_openrouter(payload):
+        entries = []
+        for model in payload.get("data", []):
+            mid = (model.get("id") or "").strip()
+            pricing = model.get("pricing") or {}
+            if not mid or not isinstance(pricing, dict):
+                continue
+            inp, outp = per_mtok(pricing.get("prompt")), per_mtok(pricing.get("completion"))
+            if inp is None or outp is None:
+                continue
+            cached = per_mtok(pricing.get("input_cache_read"))
+            if cached is None:
+                cached = per_mtok(pricing.get("input_cache_write"))
+            if cached is None:
+                cached = inp  # no invented discount (mirrors Swift decoder)
+            if min(inp, outp, cached) < 0:
+                continue
+            entries.append((mid, inp, outp, cached))
+        return sorted(entries)
+
+    or_fixture = os.path.join(root, "Fixtures", "pricing-openrouter-sample.json")
+    or_entries = []
+    if os.path.exists(or_fixture):
+        with open(or_fixture) as f:
+            or_entries = decode_openrouter(json.load(f))
+    check("openrouter fixture 4 kept / 2 broken skipped",
+          [m for m, _, _, _ in or_entries] == ["anthropic/claude-sonnet-4",
+                                               "google/gemini-flash-1.5",
+                                               "openai/gpt-4o",
+                                               "openai/gpt-5.6-luna"],
+          f"got={[m for m, _, _, _ in or_entries]}")
+    gpt4o = [e for e in or_entries if e[0] == "openai/gpt-4o"][0]
+    check("openrouter per-token strings scale to per-1M",
+          abs(gpt4o[1] - 2.5) < 1e-9 and abs(gpt4o[2] - 10.0) < 1e-9
+          and abs(gpt4o[3] - 1.25) < 1e-9)
+    sonnet = [e for e in or_entries if e[0] == "anthropic/claude-sonnet-4"][0]
+    check("openrouter missing cache falls back to input rate",
+          abs(sonnet[3] - sonnet[1]) < 1e-12)
+
+    def resolve_origin(model, catalog, is_fresh):
+        key = normalize_key(model)
+        index = {normalize_key(m): (m, i, o, c) for m, i, o, c in catalog}
+        if key in index:
+            return ("dynamic" if is_fresh else "cached", index[key][1])
+        if "/" not in key:
+            suffixes = sorted(m for m, _, _, _ in catalog
+                              if m.split("/")[-1] == key)
+            if suffixes:
+                hit = [e for e in catalog if normalize_key(e[0]) == suffixes[0]][0]
+                return ("dynamic" if is_fresh else "cached", hit[1])
+        if key in PRICE_EXACT:
+            return ("static", PRICE_EXACT[key][0])
+        for match, price in PRICE_TABLE:
+            if match in key:
+                return ("static", price[0])
+        return ("fallback", FALLBACK[0])
+
+    check("catalog beats static exact",
+          resolve_origin("openai/gpt-5.6-luna", or_entries, True) == ("dynamic", 5.0))
+    check("cached catalog labelled cached, same rate",
+          resolve_origin("openai/gpt-5.6-luna", or_entries, False) == ("cached", 5.0))
+    check("catalog miss falls to static exact",
+          resolve_origin("openai/gpt-5.6-luna",
+                         [e for e in or_entries if e[0] != "openai/gpt-5.6-luna"],
+                         True) == ("static", 1.25))
+    check("bare model suffix-matches provider catalog id",
+          resolve_origin("gpt-4o", or_entries, True) == ("dynamic", 2.5))
+    check("prefixed miss falls to static family, never guesses",
+          resolve_origin("other/gpt-4o", or_entries, True)[0] == "static")
+    check("unknown stays visible at fallback",
+          resolve_origin("mystery-model-zzz", or_entries, True) == ("fallback", 3.0))
+    check("freshness threshold is 7 days",
+          (now - datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)).total_seconds() == 0
+          and (now - (now - timedelta(days=8))).total_seconds() > 7 * 24 * 3600)
+    check("malformed cache rejected",
+          json.loads(open(os.path.join(root, "Fixtures", "pricing-malformed-sample.json")).read())["version"] != 1)
+    check("cache fixture is versioned v1 with entries",
+          (lambda c: c.get("version") == 1 and len(c.get("entries", [])) == 2
+           and all(set(e) == {"model", "inputPerMTok", "outputPerMTok", "cachedPerMTok"}
+                   for e in c["entries"]))(
+              json.loads(open(os.path.join(root, "Fixtures", "pricing-cache-sample.json")).read())))
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")

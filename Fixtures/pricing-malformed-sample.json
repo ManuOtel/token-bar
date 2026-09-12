@@ -1,0 +1,13 @@
+{
+  "entries" : [
+    {
+      "cachedPerMTok" : -1.5,
+      "inputPerMTok" : 3,
+      "model" : "broken/negative-rate",
+      "outputPerMTok" : 12
+    }
+  ],
+  "fetchedAt" : "2026-09-11T12:00:00Z",
+  "sourceURL" : "https://openrouter.ai/api/v1/models",
+  "version" : 99
+}

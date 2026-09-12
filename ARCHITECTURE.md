@@ -15,14 +15,25 @@ Sources/TokenBarCore/   # pure logic, Foundation only (no network, no auth)
                         # (per-message) + message-beats-rollup combine;
                         # optional SQLite loader (read-only) + sanitized
                         # snapshot loader (token counts only)
-  Pricing.swift         # static per-1M rates + cost formula
+  Pricing.swift         # static per-1M rates + cost formula + catalog-aware
+                        # resolve (dynamic/cached catalog first, then exact/
+                        # family static, then fallback) with PriceOrigin labels
+  PricingCatalog.swift  # PriceOrigin, pluggable normalized catalog format,
+                        # OpenRouter GET decoder, strict cache codec, freshness
+  PricingService.swift  # ONLY network in the codebase: one bounded,
+                        # cancellable, user-initiated catalog GET + disk cache
   Aggregator.swift      # filter / aggregate / bestMonth / dailyTrend (pure, clock-injected)
   Store.swift           # orchestrates adapters, env overrides, deterministic dedupe
   Report.swift          # privacy-safe CLI sections: sanitize, human + JSON render (pure)
 Sources/TokenBarCLI/    # thin terminal front-end (Foundation only)
-  main.swift            # --preset/--source/--all-presets/--json parsing, prints Report
+  main.swift            # --preset/--source/--all-presets/--json/--refresh-pricing
+                        # parsing, prints Report (offline static by default)
 Sources/TokenBarApp/    # SwiftUI + AppKit menu bar shell (macOS 14+)
   TokenBarApp.swift     # @main App, MenuBarExtra, accessory AppDelegate, refresh
+                        # + pricing footer (status line, user-initiated refresh)
+  PricingController.swift # @MainActor ObservableObject over PricingService:
+                        # offline cache at startup, cancellable Task refresh,
+                        # usage loading never blocks on pricing
   DashboardView.swift   # dark cockpit: source/range chips, hero total,
                         # metric cards, always-visible source rows, models,
                         # trend, empty/notice states (display only)
@@ -31,7 +42,12 @@ Sources/TokenBarCore/LaunchAtLogin.swift # pure bundled/status policy (tested)
 Tests/TokenBarCoreTests/
   CodexParserTests.swift / OpenCodeParserTests.swift / AggregatorTests.swift
   ReportTests.swift     # pure formatter: totals, sanitizer, best-month, JSON determinism
+  PricingCatalogTests.swift # OpenRouter decode, precedence, stale/offline,
+                        # privacy boundary, malformed catalogs (fixtures only)
 Fixtures/               # synthetic samples only, safe to commit
+  pricing-openrouter-sample.json # OpenRouter GET shape + broken rows (skipped)
+  pricing-cache-sample.json      # persisted cache v1 (2 entries)
+  pricing-malformed-sample.json  # wrong version + negative rate (rejected)
 scripts/verify_logic.py # host-side mirror of core semantics (no Swift here)
 scripts/export-opencode-usage.py # read-only homeserver exporter: SQLite
                         # mode=ro to sanitized token-only JSON (user copies
@@ -71,12 +87,23 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
 - **Deterministic aggregation**: explicit `now` + `Calendar` inputs, stable
   `(timestamp, id)` sort, documented tie-breaks (earliest month, key asc).
 - **Pricing separated**: `Pricing.swift` owns all money math; aggregation only
-  sums. Resolution is explicit provider-aware: exact normalized
-  `provider/model` first, then family/substring, then fallback. Static
-  estimate only, never a bill; subscription use is not an API invoice.
+  sums. Resolution is explicit provider-aware: fresh dynamic catalog entry,
+  then cached catalog entry, then exact normalized `provider/model`, then
+  family/substring, then fallback. Every rate carries a `PriceOrigin`
+  (`dynamicCatalog | cachedCatalog | staticEstimate | fallback`) surfaced in
+  the app footer and CLI `Pricing:` line. Static estimate only, never a
+  bill; subscription use is not an API invoice.
   Fallback rate keeps unknown models visible instead of zeroed.
+- **One bounded network call**: `PricingService` is the only type allowed to
+  touch the network (see `docs/PRICING.md`): a single user-initiated GET of
+  public model/pricing metadata (default OpenRouter `/api/v1/models`, 15s
+  timeout, 5MB cap, cancellable `Task`), persisted to
+  `Application Support/TokenBar/pricing-catalog.json` with `fetchedAt` age
+  metadata. It never sends prompts, token counts, paths, credentials,
+  cookies, or usage records. Everything else is file reads only.
 - **File reads only**: adapters use `FileManager` / read-only `sqlite3_open_v2`.
-  No `URLSession`, no keychain, no cookies anywhere.
+  No keychain, no cookies anywhere. `URLSession` appears only in
+  `PricingService.swift` (confined, CI-pinned).
 - **Test roots overrideable**: `TOKENBAR_CODEX_ROOT` / `TOKENBAR_OPENCODE_DB`
   / `TOKENBAR_CLAUDE_ROOT` env vars redirect all adapters; tests use temp
   dirs + inline rows. Offline merge adds `TOKENBAR_OPENCODE_DB_EXTRA`
@@ -112,6 +139,8 @@ files/db/snapshots --CodexParser/ClaudeParser/OpenCodeStore--> [NormalizedUsage]
   --> DashboardView (combined OpenCode row + local/homeserver sub-lines)
   --ReportFormatter.section/render--> TokenBarCLI terminal report
     (+ By origin when >1 origin; JSON carries byOrigin)
+  catalog GET --PricingService.refresh (user-initiated only)--> cache file
+    --snapshot--> Aggregator/Report cost basis (offline static when absent)
 homeserver db --export-opencode-usage.py (read-only)--> snapshot JSON
   --user-operated file copy--> TOKENBAR_OPENCODE_USAGE_JSON (no network)
 ```
@@ -124,6 +153,8 @@ homeserver db --export-opencode-usage.py (read-only)--> snapshot JSON
 | Missing SQLite table | table skipped |
 | Malformed line / row | skipped + counted |
 | Unknown model | `"unknown"` label, fallback price |
+| Pricing refresh fails / offline | cached catalog when present, else static estimates; usage loading unaffected |
+| Malformed pricing payload / cache | ignored with an offline message, previous rates kept |
 | Future timestamps | excluded by preset upper bound |
 | Duplicate requestIds | larger total kept, earliest breaks ties |
 | Duplicate id-less IDs | identical IDs collapse, distinct survive |

@@ -84,29 +84,55 @@ public enum Pricing {
     }
 
     /// Resolution order (documented, deterministic, case-insensitive):
-    /// 1. exact normalized `provider/model` match, 2. family/substring
-    /// match in table order, 3. fallback. Never zero, never a bill.
-    public static func price(forModel model: String) -> ModelPrice {
+    /// 1. dynamic/cached catalog entry (when a snapshot is supplied),
+    /// 2. exact normalized `provider/model` match, 3. family/substring
+    /// match in table order, 4. fallback. Never zero, never a bill.
+    /// Unknown models stay visible at the fallback rate.
+    public static func resolve(
+        forModel model: String,
+        snapshot: CatalogSnapshot? = nil
+    ) -> (price: ModelPrice, origin: PriceOrigin) {
+        if let snapshot {
+            let key = normalizedKey(forModel: model)
+            let index = snapshot.catalog.index()
+            if let hit = index[key] ?? snapshot.catalog.suffixMatch(forKey: key) {
+                let price = ModelPrice(
+                    inputPerMTok: hit.inputPerMTok,
+                    outputPerMTok: hit.outputPerMTok,
+                    cachedPerMTok: hit.cachedPerMTok)
+                return (price, snapshot.isFresh ? .dynamicCatalog : .cachedCatalog)
+            }
+        }
         let key = normalizedKey(forModel: model)
         if let hit = exact[key] {
-            return hit
+            return (hit, .staticEstimate)
         }
         for entry in table where key.contains(entry.match) {
-            return entry.price
+            return (entry.price, .staticEstimate)
         }
-        return fallback
+        return (fallback, .fallback)
+    }
+
+    /// Static-table price (nil snapshot) or catalog-aware price.
+    /// Nil keeps the deterministic offline path (CLI default, existing tests).
+    public static func price(forModel model: String, snapshot: CatalogSnapshot? = nil) -> ModelPrice {
+        resolve(forModel: model, snapshot: snapshot).price
     }
 
     /// Estimated cost. cached tokens are a subset of input (billed at the
     /// cached rate); reasoning tokens are a subset of output (billed at the
     /// output rate, never double-counted). total is never used for cost.
+    /// When `snapshot` is supplied, catalog entries win over the static
+    /// table per `resolve(forModel:snapshot:)`; nil keeps the deterministic
+    /// offline static path (CLI default, all existing tests).
     public static func cost(
         model: String,
         inputTokens: Int,
         outputTokens: Int,
-        cachedTokens: Int
+        cachedTokens: Int,
+        snapshot: CatalogSnapshot? = nil
     ) -> Double {
-        let price = price(forModel: model)
+        let price = price(forModel: model, snapshot: snapshot)
         let input = max(0, inputTokens)
         let output = max(0, outputTokens)
         let cached = min(max(0, cachedTokens), input)
@@ -116,12 +142,13 @@ public enum Pricing {
             + Double(output) / 1_000_000.0 * price.outputPerMTok
     }
 
-    public static func cost(for record: NormalizedUsage) -> Double {
+    public static func cost(for record: NormalizedUsage, snapshot: CatalogSnapshot? = nil) -> Double {
         cost(
             model: record.model,
             inputTokens: record.inputTokens,
             outputTokens: record.outputTokens,
-            cachedTokens: record.cachedTokens
+            cachedTokens: record.cachedTokens,
+            snapshot: snapshot
         )
     }
 }

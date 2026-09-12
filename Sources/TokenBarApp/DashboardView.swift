@@ -1,13 +1,18 @@
 import SwiftUI
 import TokenBarCore
 
-/// Compact dark usage cockpit for the macOS menu-bar popover.
+/// Dark usage cockpit for the macOS menu-bar popover, in two modes.
 ///
-/// Layout is deliberate for a ~400pt popover: one hero total, two short
-/// single-line chip rows (source, range), a metric grid, always-visible
-/// source breakdown, top models, trend, notices, login footer. Labels are
-/// short and single-line so nothing wraps or clips; every control is a
-/// real button (keyboard focusable) with a tooltip.
+/// - Compact (initial): hero total, estimated cost, source/range controls,
+///   a compact visual summary (composition ring, source bar, mini trend),
+///   and a clear Details action. Fits a ~400pt popover without scrolling.
+/// - Expanded (Details): the full readable breakdown (metric cards,
+///   composition, source rows with OpenCode origin split, model bars,
+///   14-day trend, notices, launch-at-login toggle), scrollable.
+///
+/// Labels stay short and single-line so nothing wraps or clips at the
+/// compact size; every control is a real button (keyboard focusable) with
+/// a tooltip and accessibility label.
 struct SourceChipData: Hashable {
     var filter: SourceFilter
     var tokens: Int
@@ -26,31 +31,45 @@ struct DashboardView: View {
     var sourceTotals: [SourceChipData]
     var bestMonthKey: String?
     @Binding var isLoading: Bool
+    @Binding var isExpanded: Bool
     var onRefresh: () -> Void
     @ObservedObject var loginItem: LaunchAtLoginController
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                header
-                sourceSection
-                rangeSection
-                if report.records.isEmpty {
-                    emptyState
-                } else if scopedCount == 0 {
-                    noScopeState
-                } else {
-                    heroStats
-                    metricGrid
-                    sourceBreakdown
-                    modelBreakdown
-                    trend
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            sourceSection
+            rangeSection
+            if report.records.isEmpty {
+                emptyState
+            } else if scopedCount == 0 {
+                noScopeState
+            } else if !isExpanded {
+                compactSummary
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        heroStats
+                        metricGrid
+                        compositionCard
+                        sourceBreakdown
+                        modelBreakdown
+                        trendFull
+                    }
                 }
+                .frame(maxHeight: 380)
+            }
+            if report.records.isEmpty || scopedCount == 0 {
+                notices
+                loginSection
+            } else if !isExpanded {
+                compactFooter
+            } else {
                 notices
                 loginSection
             }
-            .padding(16)
         }
+        .padding(16)
         .frame(width: 400)
         .preferredColorScheme(.dark)
         .onAppear {
@@ -73,8 +92,10 @@ struct DashboardView: View {
                     .font(.headline)
                     .lineLimit(1)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Token Bar, local usage")
             Spacer()
-            if isLoading { ProgressView().scaleEffect(0.7) }
+            if isLoading { ProgressView().scaleEffect(0.7).accessibilityLabel("Loading") }
             Button(action: onRefresh) {
                 Label("Refresh", systemImage: "arrow.clockwise")
                     .labelStyle(.iconOnly)
@@ -83,6 +104,18 @@ struct DashboardView: View {
             .buttonStyle(.bordered)
             .disabled(isLoading)
             .help("Reload local histories now")
+            .accessibilityLabel("Refresh")
+            Button(action: { isExpanded.toggle() }) {
+                Label(
+                    isExpanded ? "Show less" : "Details",
+                    systemImage: isExpanded ? "chevron.up" : "chevron.down"
+                )
+                .font(.callout)
+            }
+            .buttonStyle(.bordered)
+            .help(isExpanded ? "Collapse to the compact summary" : "Expand richer details")
+            .accessibilityLabel(isExpanded ? "Collapse details" : "Expand details")
+            .accessibilityHint(isExpanded ? "Shows the compact summary" : "Shows source, model and trend details")
         }
     }
 
@@ -96,6 +129,7 @@ struct DashboardView: View {
                 .tracking(1.2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .accessibilityHidden(true)
             HStack(spacing: 6) {
                 ForEach(sourceTotals, id: \.filter) { entry in
                     chipButton(
@@ -104,6 +138,7 @@ struct DashboardView: View {
                         isActive: source == entry.filter,
                         help: "\(sourceLongLabel(entry.filter)): \(entry.requests) records in range"
                     ) { source = entry.filter }
+                    .accessibilityLabel("\(sourceLongLabel(entry.filter)), \(entry.requests) records")
                 }
             }
         }
@@ -117,6 +152,7 @@ struct DashboardView: View {
                 .tracking(1.2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .accessibilityHidden(true)
             HStack(spacing: 6) {
                 ForEach(DatePreset.allCases, id: \.self) { item in
                     chipButton(
@@ -125,6 +161,7 @@ struct DashboardView: View {
                         isActive: preset == item,
                         help: rangeHelp(item)
                     ) { preset = item }
+                    .accessibilityLabel("Range \(rangeHelp(item))")
                 }
             }
         }
@@ -166,7 +203,89 @@ struct DashboardView: View {
         .help(helpText)
     }
 
-    // MARK: - Hero + metrics
+    // MARK: - Compact summary (no scroll)
+
+    private var compactSummary: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(fullCount(stats.totalTokens))
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .accessibilityLabel("\(fullCount(stats.totalTokens)) tokens")
+                    Text("≈ \(costString(stats.estimatedCostUSD)) est.")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                    Text("\(stats.requests) req · \(stats.sessions) sess")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                TokenCompositionRing(stats: stats, compactCount: compactCount)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            SourceStackedBar(stats: stats, compactCount: compactCount)
+            DailyTrendChart(stats: stats, fullCount: fullCount, maxBars: 14, barHeight: 36)
+            Button(action: { isExpanded.toggle() }) {
+                HStack {
+                    Text("Show details: sources, models, trend")
+                        .font(.callout)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.caption)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .background(Color.white.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .help("Expand richer details")
+            .accessibilityLabel("Show details")
+            .accessibilityHint("Shows sources, models and trend details")
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var compactFooter: some View {
+        let clean = ReportFormatter.sanitizeWarnings(report.warnings)
+        return HStack(spacing: 8) {
+            if clean.isEmpty {
+                Text("Updated \(lastUpdatedShort)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else {
+                Button(action: { isExpanded = true }) {
+                    Text("\(clean.count) notice\(clean.count == 1 ? "" : "s") - see Details")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .help("Expand to read notices")
+                .accessibilityLabel("\(clean.count) notices, expand details to read")
+            }
+            Spacer()
+            Text(loginItem.statusMessage)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Hero + metrics (expanded)
 
     private var heroStats: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -175,6 +294,7 @@ struct DashboardView: View {
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
+                .accessibilityLabel("\(fullCount(stats.totalTokens)) tokens")
             Text("tokens in \(rangeLongLabel) · \(sourceLongLabel(source))")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -230,11 +350,13 @@ struct DashboardView: View {
                 .tracking(0.8)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .accessibilityHidden(true)
             Text(value)
                 .font(.headline)
                 .monospacedDigit()
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                .accessibilityLabel("\(label) \(value)\(hint.map { ", \($0)" } ?? "")")
             if let hint {
                 Text(hint)
                     .font(.caption2)
@@ -248,7 +370,28 @@ struct DashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    // MARK: - Breakdowns + trend
+    private var compositionCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("COMPOSITION")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .tracking(1.2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityHidden(true)
+            TokenCompositionRing(stats: stats, compactCount: compactCount)
+            let comp = DashboardInsights.composition(for: stats)
+            Text("Ring splits the total into input (\(Int(comp.inputShare * 100))%) vs output (\(Int(comp.outputShare * 100))%). Cached (\(Int(comp.cachedShareOfInput * 100))% of input) and reasoning (\(Int(comp.reasoningShareOfOutput * 100))% of output) are subsets, never added on top.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    // MARK: - Breakdowns + trend (expanded)
 
     private var sourceBreakdown: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -258,6 +401,8 @@ struct DashboardView: View {
                 .tracking(1.2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .accessibilityHidden(true)
+            SourceStackedBar(stats: stats, compactCount: compactCount)
             let byKey = Dictionary(uniqueKeysWithValues: stats.bySource.map { ($0.key, $0) })
             let maxTokens = max(stats.bySource.map(\.totalTokens).max() ?? 0, 1)
             ForEach([UsageSource.codex, .opencode, .claude], id: \.self) { usageSource in
@@ -267,6 +412,7 @@ struct DashboardView: View {
                         Circle()
                             .fill(sourceDot(usageSource))
                             .frame(width: 8, height: 8)
+                            .accessibilityHidden(true)
                         Text(sourceName(usageSource))
                             .font(.callout)
                             .lineLimit(1)
@@ -281,6 +427,7 @@ struct DashboardView: View {
                                 .frame(maxHeight: .infinity, alignment: .center)
                         }
                         .frame(height: 10)
+                        .accessibilityHidden(true)
                         VStack(alignment: .trailing, spacing: 0) {
                             Text(compactCount(entry?.totalTokens ?? 0))
                                 .font(.callout)
@@ -296,6 +443,10 @@ struct DashboardView: View {
                     .opacity(entry == nil ? 0.65 : 1.0)
                     .help(entry == nil
                         ? "\(sourceName(usageSource)): no records in this range"
+                        : "\(sourceName(usageSource)): \(fullCount(entry!.totalTokens)) tokens, \(entry!.requests) requests")
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(entry == nil
+                        ? "\(sourceName(usageSource)): no records"
                         : "\(sourceName(usageSource)): \(fullCount(entry!.totalTokens)) tokens, \(entry!.requests) requests")
                     // OpenCode origin split: combined total stays on the row
                     // above; local vs homeserver read as one short line each.
@@ -318,6 +469,8 @@ struct DashboardView: View {
                                         .lineLimit(1)
                                 }
                                 .help("OpenCode \(originShort(origin.key)): \(fullCount(origin.totalTokens)) tokens, \(origin.requests) requests")
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel("OpenCode \(originShort(origin.key)): \(fullCount(origin.totalTokens)) tokens")
                             }
                         }
                     }
@@ -334,29 +487,12 @@ struct DashboardView: View {
                 .tracking(1.2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            if stats.byModel.isEmpty {
-                Text("No models in this view.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(stats.byModel.prefix(5), id: \.key) { entry in
-                    HStack {
-                        Text(entry.key)
-                            .font(.callout)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                        Text(compactCount(entry.totalTokens))
-                            .font(.callout)
-                            .monospacedDigit()
-                    }
-                    .help("\(entry.key): \(fullCount(entry.totalTokens)) tokens, \(entry.requests) requests")
-                }
-            }
+                .accessibilityHidden(true)
+            ModelDistributionBars(stats: stats, compactCount: compactCount, fullCount: fullCount, limit: 5)
         }
     }
 
-    private var trend: some View {
+    private var trendFull: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("DAILY TREND")
                 .font(.caption)
@@ -364,32 +500,8 @@ struct DashboardView: View {
                 .tracking(1.2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-            let buckets = stats.dailyTrend.suffix(14)
-            if buckets.isEmpty {
-                Text("No daily buckets in this view.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            } else {
-                let maxTokens = max(buckets.map(\.totalTokens).max() ?? 0, 1)
-                HStack(alignment: .bottom, spacing: 4) {
-                    ForEach(buckets, id: \.dayLabel) { bucket in
-                        VStack(spacing: 3) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.accentColor.opacity(0.85))
-                                .frame(
-                                    width: 14,
-                                    height: max(3, CGFloat(bucket.totalTokens) / CGFloat(maxTokens) * 64)
-                                )
-                            Text(String(bucket.dayLabel.suffix(2)))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        .help("\(bucket.dayLabel): \(fullCount(bucket.totalTokens)) tokens, \(bucket.requests) requests")
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
+                .accessibilityHidden(true)
+            DailyTrendChart(stats: stats, fullCount: fullCount, maxBars: 14, barHeight: 64)
         }
     }
 
@@ -470,6 +582,7 @@ struct DashboardView: View {
                     .tracking(1.2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .accessibilityHidden(true)
                 ForEach(clean, id: \.self) { warning in
                     Text(friendlyNotice(warning))
                         .font(.caption)
@@ -489,6 +602,7 @@ struct DashboardView: View {
                 )
             )
             .disabled(!loginItem.isBundled || !loginItem.isAvailable)
+            .accessibilityLabel("Launch at login")
             Text(loginItem.statusMessage)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -528,6 +642,11 @@ struct DashboardView: View {
 
     private func costString(_ usd: Double) -> String {
         String(format: "$%.2f", usd)
+    }
+
+    private var lastUpdatedShort: String {
+        guard let updated = stats.lastUpdated else { return "never" }
+        return updated.formatted(date: .abbreviated, time: .shortened)
     }
 
     private func sourceShortLabel(_ filter: SourceFilter) -> String {

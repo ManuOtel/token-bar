@@ -47,22 +47,55 @@ jobs:
           test -x scripts/package-release.sh
 
   privacy:
-    name: Privacy gate (no network indicators)
+    name: Privacy gate (bounded pricing network use)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Fail on networking indicators in Sources
+      - name: Confine network use to the documented pricing refresh
         run: |
           set -eu
-          # Allowed exceptions (documented, no network use):
-          # - "No auth, no cookies, no network" in Store.swift (local-only comment).
-          # - "privacy-denylist" in OpenCodeStore.swift (sanitized snapshot
-          #   forbidden-field names only; never transmitted, never fetched).
-          hits="$(grep -rniE 'URLSession|http|cookie' Sources/ | grep -v 'No auth, no cookies, no network' | grep -v 'privacy-denylist' || true)"
-          if [ -n "$hits" ]; then
-            echo "Privacy gate failed: networking indicators found in Sources/:"
-            echo "$hits"
+          # The ONLY network call in the codebase is the opt-in pricing
+          # refresh (PricingService: one GET of public model/pricing
+          # metadata, no prompts/counts/paths/credentials sent; see
+          # docs/PRICING.md). It is safe because the request is built by
+          # PricingService.makeCatalogRequest (pure, unit-pinned: GET, no
+          # body, no query, no auth/cookie headers) and refresh is strictly
+          # user-initiated (app button / CLI --refresh-pricing). Usage
+          # loading, tests, and default CLI runs never touch the network.
+          #
+          # 1. URLSession may appear ONLY in PricingService.swift.
+          #    (pre-existing local-only comment in Store.swift and the
+          #    "privacy-denylist" snapshot field names in OpenCodeStore.swift
+          #    are not network use and stay allowed.)
+          session_hits="$(grep -rln 'URLSession' Sources/ || true)"
+          echo "$session_hits"
+          # NOTE: plain for-loop (not a pipeline) so a failure exits the job.
+          for file in $session_hits; do
+            if [ "$file" != "Sources/TokenBarCore/PricingService.swift" ]; then
+              echo "Privacy gate failed: URLSession outside PricingService.swift: $file"
+              exit 1
+            fi
+          done
+          # 2. No credential headers are ever set (Cookie / Authorization).
+          #    PricingService documents the never-send policy in comments and
+          #    sets httpCookieAcceptPolicy=.never; grep for actual header use.
+          cred_hits="$(grep -rnE 'forHTTPHeaderField.*(Cookie|Authorization)|addValue.*(Bearer|Cookie)' Sources/ || true)"
+          if [ -n "$cred_hits" ]; then
+            echo "Privacy gate failed: credential header use found:"
+            echo "$cred_hits"
             exit 1
           fi
-          echo "Privacy gate passed: no URLSession/http/cookie indicators in Sources/."
+          # 3. Catalog URLs in code are allowlisted to openrouter.ai
+          #    (docs + default endpoint). No other remote host may appear in
+          #    the pricing sources or CLI.
+          url_hits="$(grep -rhoE 'https?://[^"'"'"' )]+' Sources/TokenBarCore/PricingCatalog.swift Sources/TokenBarCore/PricingService.swift Sources/TokenBarApp/PricingController.swift Sources/TokenBarCLI/main.swift || true)"
+          echo "$url_hits"
+          # NOTE: plain for-loop (not a pipeline) so a failure exits the job.
+          for url in $url_hits; do
+            case "$url" in
+              https://openrouter.ai/*) ;;
+              *) echo "Privacy gate failed: non-allowlisted URL: $url"; exit 1 ;;
+            esac
+          done
+          echo "Privacy gate passed: network confined to the documented pricing GET."

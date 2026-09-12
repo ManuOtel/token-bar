@@ -1,0 +1,19 @@
+{
+  "entries" : [
+    {
+      "cachedPerMTok" : 1.25,
+      "inputPerMTok" : 2.5,
+      "model" : "openai/gpt-4o",
+      "outputPerMTok" : 10
+    },
+    {
+      "cachedPerMTok" : 0.3,
+      "inputPerMTok" : 3,
+      "model" : "anthropic/claude-sonnet-4",
+      "outputPerMTok" : 15
+    }
+  ],
+  "fetchedAt" : "2026-09-11T12:00:00Z",
+  "sourceURL" : "https://openrouter.ai/api/v1/models",
+  "version" : 1
+}
