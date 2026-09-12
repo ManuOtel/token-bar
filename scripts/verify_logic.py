@@ -1254,6 +1254,164 @@ def run():
               [login_help(False, True), login_help(True, True), login_help(True, False)])
           and "build-app.sh" in login_help(False, True))
 
+    # Multi-origin merge (mirrors Models/Store/Aggregator/Report/Snapshot).
+    def split_extra(raw):
+        if not raw:
+            return []
+        out = []
+        for part in raw.replace(";", ",").replace(":", ",").replace("\n", ",").split(","):
+            p = part.strip()
+            if p:
+                out.append(p)
+        return out
+
+    check("extra list ignores empty entries",
+          split_extra(None) == [] and split_extra("") == []
+          and split_extra(" , : \n ") == []
+          and split_extra("/a.db, ,/b.db::/c.db") == ["/a.db", "/b.db", "/c.db"])
+
+    def normalize_origin(v):
+        s = (v or "").strip()
+        return s if s else "local"
+
+    check("old record without origin defaults local",
+          normalize_origin(None) == "local" and normalize_origin("") == "local"
+          and normalize_origin("homeserver") == "homeserver")
+    check("old stats without byOrigin defaults empty",
+          {}.get("byOrigin", []) == [])
+
+    FORBIDDEN = {"prompt", "tool_calls", "content", "text", "path", "credential",
+                 "api_key", "message", "cookie"}
+
+    def decode_snapshot(d, fallback="homeserver"):
+        src = d.get("source")
+        if src and str(src).lower() != "opencode":
+            return None
+        ts = parse_ts(d.get("timestamp") or d.get("created_at") or d.get("created"))
+        if ts is None:
+            return None
+        i = to_int(d.get("inputTokens", d.get("input_tokens", d.get("input"))))
+        o = to_int(d.get("outputTokens", d.get("output_tokens", d.get("output"))))
+        c = to_int(d.get("cachedTokens", d.get("cached_tokens", d.get("cached"))))
+        r = to_int(d.get("reasoningTokens", d.get("reasoning_tokens", d.get("reasoning"))))
+        tot = to_int(d.get("totalTokens", d.get("total_tokens", d.get("total"))))
+        if all(v is None for v in (i, o, c, r, tot)):
+            return None
+        i, o = i or 0, o or 0
+        cc = min(max(0, c or 0), i)
+        tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
+        model = d.get("model") or "unknown"
+        origin = (d.get("origin") or d.get("host") or fallback or "homeserver").strip() or fallback
+        rec = {"ts": ts, "model": model, "input": i, "output": o, "cached": cc,
+               "reasoning": r or 0, "total": tot_val if tot_val else i + o,
+               "session": d.get("sessionId", d.get("session_id", "")) or "",
+               "request": d.get("requestId", d.get("request_id", d.get("messageId", ""))) or "",
+               "origin": origin, "id": d.get("id") or ""}
+        if all(rec[k] == 0 for k in ("input", "output", "cached", "reasoning", "total")):
+            return None
+        return rec
+
+    snap = decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
+                            "inputTokens": 100, "outputTokens": 50,
+                            "sessionId": "s", "requestId": "msg-1"})
+    check("snapshot schema origin fallback homeserver",
+          snap is not None and snap["origin"] == "homeserver"
+          and snap["total"] == 150)
+    check("snapshot rejects other sources",
+          decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "source": "codex",
+                           "inputTokens": 1, "outputTokens": 1}) is None)
+    check("snapshot rejects all-zero rows",
+          decode_snapshot({"timestamp": "2026-09-11T10:00:00Z",
+                           "inputTokens": 0, "outputTokens": 0}) is None)
+    dirty = {"id": "x", "prompt": "SECRET", "path": "/Users/someone/x",
+             "timestamp": "2026-09-11T10:00:00Z", "inputTokens": 1, "outputTokens": 1}
+    check("snapshot forbidden keys detected + ignored",
+          any(k.lower() in FORBIDDEN for k in dirty)
+          and "SECRET" not in json.dumps(decode_snapshot(dirty), default=str)
+          and "/Users/someone" not in json.dumps(decode_snapshot(dirty), default=str))
+
+    def dedupe_origin(records):
+        best_req, best_id, order = {}, {}, []
+        for rec in sorted(records, key=lambda r: (r["ts"], r.get("id", ""))):
+            if not rec["request"]:
+                k = "opencode:" + rec["id"]
+                if k in best_id:
+                    cand, seen = rec, best_id[k]
+                    if (cand["total"],) != (seen["total"],):
+                        if cand["total"] > seen["total"]:
+                            best_id[k] = cand
+                    elif (cand["ts"], cand["id"]) < (seen["ts"], seen["id"]):
+                        best_id[k] = cand
+                else:
+                    best_id[k] = rec
+                    order.append(k)
+                continue
+            k = "opencode:" + rec["request"]
+            if k in best_req:
+                cand, seen = rec, best_req[k]
+                if cand["total"] != seen["total"]:
+                    if cand["total"] > seen["total"]:
+                        best_req[k] = cand
+                elif (cand["ts"], cand["id"]) < (seen["ts"], seen["id"]):
+                    best_req[k] = cand
+            else:
+                best_req[k] = rec
+        return sorted(list(best_req.values()) + [best_id[k] for k in order],
+                      key=lambda r: (r["ts"], r.get("id", "")))
+
+    base_ts = datetime(2026, 9, 10, 12, 0, tzinfo=timezone.utc)
+    loc = {"ts": base_ts, "id": "opencode:msg-1", "request": "msg-1",
+           "total": 100, "session": "s", "origin": "local",
+           "input": 100, "output": 0, "cached": 0, "reasoning": 0, "model": "m"}
+    rem = dict(loc, total=200, input=200, origin="homeserver")
+    for pair in ((loc, rem), (rem, loc)):
+        got = dedupe_origin(list(pair))
+        check("cross-origin dedupe max-total wins", len(got) == 1 and got[0]["total"] == 200)
+    earlier = dict(loc, ts=base_ts - timedelta(hours=1), id="opencode:a", request="dup", total=100)
+    later = dict(loc, ts=base_ts, id="opencode:b", request="dup", total=100, origin="homeserver")
+    for pair in ((earlier, later), (later, earlier)):
+        got = dedupe_origin(list(pair))
+        check("cross-origin tie earliest", len(got) == 1 and got[0]["ts"] == earlier["ts"])
+    clone_a = dict(loc, request="", id="opencode:same", total=15)
+    clone_b = dict(clone_a, origin="homeserver")
+    check("id-less clones collapse", len(dedupe_origin([clone_a, clone_b])) == 1)
+    distinct_a = dict(loc, request="", id="opencode:id-a", total=15)
+    distinct_b = dict(loc, request="", id="opencode:id-b", total=15, origin="homeserver")
+    check("id-less distinct survive", len(dedupe_origin([distinct_a, distinct_b])) == 2)
+
+    def origin_key(rec):
+        return f"opencode/{rec['origin']}"
+
+    origins = {}
+    for rec in (dict(loc, total=100, origin="local"),
+                dict(loc, total=300, origin="homeserver", id="opencode:b", request="b")):
+        k = origin_key(rec)
+        origins[k] = origins.get(k, 0) + rec["total"]
+    check("origin breakdown keeps combined total",
+          sum(origins.values()) == 400
+          and set(origins) == {"opencode/local", "opencode/homeserver"})
+
+    def sanitize_extra(w):
+        if "OpenCode extra database not found" in w:
+            return "OpenCode extra database not found (checked TOKENBAR_OPENCODE_DB_EXTRA)."
+        if "OpenCode usage snapshot not found" in w:
+            return "OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON)."
+        return w
+
+    check("sanitized extra warnings carry no paths",
+          all("/" not in w or "TOKENBAR" in w for w in
+              [sanitize_extra("OpenCode extra database not found (checked TOKENBAR_OPENCODE_DB_EXTRA)."),
+               sanitize_extra("OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON).")])
+          and "TOKENBAR_OPENCODE_DB_EXTRA" in sanitize_extra("OpenCode extra database not found x")
+          and "TOKENBAR_OPENCODE_USAGE_JSON" in sanitize_extra("OpenCode usage snapshot not found x"))
+    check("no prompt/path leakage in snapshot output",
+          "SECRET-PROMPT-XYZ" not in json.dumps(snap, default=str)
+          and "/Users/someone" not in json.dumps(snap, default=str))
+    check("exporter output keys are token-only",
+          snap is not None and set(snap) <= {"ts", "model", "input", "output", "cached",
+                                             "reasoning", "total", "session", "request",
+                                             "origin", "id"})
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")

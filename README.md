@@ -76,7 +76,8 @@ Flags:
 - `--all-presets`: print today, 24h, 7d, 30d, best month, lifetime in one
   fixed-order pass for the chosen source.
 - `--json`: machine-readable array of per-preset objects (same totals plus
-  `bestMonth`, `bySource`, `byModel`, sanitized `warnings`).
+  `bestMonth`, `bySource`, `byModel`, `byOrigin` (`source/origin` pairs),
+  sanitized `warnings`).
 - `--help` / `-h`: usage.
 
 What each report means:
@@ -102,10 +103,37 @@ What each report means:
 |---|---|---|
 | Codex | `~/.codex/sessions/**/*.jsonl` | JSONL, `token_usage_record` payloads + `turn_context` model map |
 | OpenCode | `~/.local/share/opencode/opencode.db` | SQLite, per-message `message` + `session_message` (authoritative); per-session `session_v2` + `session` rollups fill uncovered sessions only |
+| OpenCode extras | `TOKENBAR_OPENCODE_DB_EXTRA` (extra read-only DB copies) | Same SQLite shape, origin `homeserver` |
+| OpenCode snapshot | `TOKENBAR_OPENCODE_USAGE_JSON` (sanitized snapshot files) | JSON array from `scripts/export-opencode-usage.py` (token counts only) |
 | Claude | `~/.claude/projects/**/*.jsonl` | JSONL, assistant `message.usage` records |
 
 Overrides for testing: `TOKENBAR_CODEX_ROOT`, `TOKENBAR_OPENCODE_DB`,
-`TOKENBAR_CLAUDE_ROOT`.
+`TOKENBAR_CLAUDE_ROOT`. Multi-machine merge (offline only, no network):
+`TOKENBAR_OPENCODE_DB_EXTRA` (comma- or colon-separated extra read-only DB
+paths, empty entries ignored) and `TOKENBAR_OPENCODE_USAGE_JSON`
+(comma- or colon-separated sanitized snapshot paths). Extra DB rows load
+with origin `homeserver`; snapshot rows keep their embedded origin
+(`homeserver` when missing). With only `TOKENBAR_OPENCODE_DB` set, behavior
+is exactly as before. Missing extras are warnings only and never stop
+Codex/Claude/local usage.
+
+Homeserver-to-Mac workflow (you copy the file; the app never fetches it):
+
+```sh
+# On the homeserver (read-only export, token counts only):
+python3 scripts/export-opencode-usage.py --db ~/.local/share/opencode/opencode.db \
+    --out /tmp/opencode-usage.json --origin homeserver
+# Copy /tmp/opencode-usage.json to the Mac by any means you operate
+# (USB stick, existing file sync, manual copy). No HTTP API exists and no
+# SSH hostname is assumed.
+# On the Mac:
+TOKENBAR_OPENCODE_USAGE_JSON=/tmp/opencode-usage.json ./scripts/show-usage.sh --preset 7d
+```
+
+`7D` (and every rolling preset) is based on record timestamps: a session
+created weeks ago still counts when its messages fall in the window.
+Lifetime can be nonzero when recent data lives on another host: import the
+homeserver snapshot and the combined total appears.
 
 Privacy: all adapters open files read-only. Nothing leaves the machine.
 No subscription auth, no provider APIs, no cookies, no network calls exist
@@ -183,9 +211,22 @@ clearly labeled approximations.
 
 ### Dedup and malformed data
 
-- Same `source` + same non-empty `requestId` collapses to the earliest
-  `(timestamp, id)` record. Records without a `requestId` are unique by `id`.
-  Claude `requestId` prefers the per-message API id (`message.id`), then the
+- Same `source` + same non-empty `requestId` collapses to the larger
+  `totalTokens` (stale mirrors never shadow fresh data); exact ties break to
+  the earliest `(timestamp, id)` so repeated loads agree. Order-independent.
+  Records without a `requestId` collapse by `source` + `id`: cloned id-less
+  snapshot rows (identical stable IDs) count once, distinct id-less rows
+  (distinct content hashes) all survive.
+- OpenCode identity: per-session rollup IDs are `sessionID#epochSeconds`
+  (mirror pairs collapse, different timestamps stay distinct); message IDs
+  are shared across the `message` / `session_message` mirror pair. Snapshot
+  rollups rejoin the global combine via the `#` heuristic (rollup IDs
+  contain `#`, message IDs never do). Message rows win for covered sessions
+  across all origins; rollups fill uncovered sessions only.
+- `origin` (`local` vs `homeserver`) never changes `source`: OpenCode rows
+  from every host keep `source=.opencode` and share the combined OpenCode
+  total; `byOrigin` (`source/origin` pairs) shows the split.
+- Claude `requestId` prefers the per-message API id (`message.id`), then the
   outer request id; lines without either stay unique via a stable
   root-relative `path:line` id.
 - Malformed JSONL lines, unknown types without token fields, bad timestamps,
@@ -201,7 +242,9 @@ its token count in the current range) and **Range** chips
 (Today / 24H / 7D / 30D / Best / All), input/output/cached/reasoning
 cards, an always-visible source breakdown (zero sources stay listed as
 `no records`), top models, 14-day trend, sanitized notices, and the
-launch-at-login toggle. An empty range names the active source and range
+launch-at-login toggle. The OpenCode row keeps the combined total and, when
+both origins are present, adds one short sub-line each for local vs
+homeserver. An empty range names the active source and range
 and offers one-tap jumps to All sources / Lifetime.
 
 ## Testing
@@ -224,6 +267,10 @@ Covers: Codex valid/alias/nested/type-gate/malformed/epoch/unknown-model,
 OpenCode column-form/legacy/JSON-blob/missing-timestamp/no-counts/fallback/
 nulls plus per-message nested-tokens/flat-model-IDs/nested-model-object/
 role-gate/all-zero-skip/message-beats-rollup/stale-mirror/range-attribution,
+multi-origin local/homeserver merge (dual inputs, old-record `local` default,
+missing extras warn-only, snapshot schema + `#` rollup heuristic, mirror
+selection both orders, tie-break earliest, id-less clone collapse, origin
+breakdowns, sanitized extra warnings, no prompt/path leakage),
 Claude valid/cache-pair/type-gate/missing-usage/malformed/epoch-ISO/
 dedupe/source-isolation/sanitizer, plus filtering (source, today-vs-24h, 7d/30d, inclusive bounds),
 best-month max + earliest-tiebreak, totals/sessions/cost/breakdowns,
@@ -237,7 +284,14 @@ deterministic JSON, no raw paths in output).
 - Estimates only: pricing table is static and drifts from provider lists.
 - OpenCode schema drift is handled heuristically; exotic future schemas may
   skip rows (counted, visible).
-- No live sync, no multi-machine merge, no export in the MVP.
+- Multi-machine merge is offline file copy only: no live sync, no network
+  fetch, no HTTP API, no assumed SSH hostname. Snapshot rollups rejoin the
+  global combine via the `#` ID heuristic; a message UUID containing `#`
+  (not observed) would misclassify. ID-less drift rows hash full column
+  content, so the same logical row in `message` vs `session_message` keeps
+  two IDs (real tables always carry IDs; drift-only edge).
+- Extra DB copies share the single `homeserver` origin label; per-host
+  labels need separate snapshots with distinct `origin` values.
 - App target needs macOS 14+; Linux runs logic verification only.
 
 ## Troubleshooting missing data
@@ -255,6 +309,13 @@ deterministic JSON, no raw paths in output).
   per-session rollups (`session_v2`, `session`) fill only sessions with no
   message rows, so a session created weeks ago still shows recent usage in
   7d/today views.
+- `OpenCode extra database not found (checked TOKENBAR_OPENCODE_DB_EXTRA)` /
+  `OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON)`:
+  an extra input path is missing. Warnings only; local data still loads.
+  Unset the var or fix the path, then re-copy the snapshot yourself.
+- `OpenCode snapshot contained extra non-token fields (ignored)`: the
+  snapshot file held prompt/path/tool-like keys; they were ignored and only
+  token counts loaded. Re-export with `scripts/export-opencode-usage.py`.
 - `Claude sessions not found (...)`: default
   `~/.claude/projects/**/*.jsonl` is absent. Point testing data with
   `TOKENBAR_CLAUDE_ROOT=/tmp/fake-claude ./scripts/show-usage.sh`.

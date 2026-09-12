@@ -55,9 +55,11 @@ jobs:
       - name: Fail on networking indicators in Sources
         run: |
           set -eu
-          # Allowed exception: the documented local-only comment in
-          # Sources/TokenBarCore/Store.swift ("No auth, no cookies, no network").
-          hits="$(grep -rniE 'URLSession|http|cookie' Sources/ | grep -v 'No auth, no cookies, no network' || true)"
+          # Allowed exceptions (documented, no network use):
+          # - "No auth, no cookies, no network" in Store.swift (local-only comment).
+          # - "privacy-denylist" in OpenCodeStore.swift (sanitized snapshot
+          #   forbidden-field names only; never transmitted, never fetched).
+          hits="$(grep -rniE 'URLSession|http|cookie' Sources/ | grep -v 'No auth, no cookies, no network' | grep -v 'privacy-denylist' || true)"
           if [ -n "$hits" ]; then
             echo "Privacy gate failed: networking indicators found in Sources/:"
             echo "$hits"

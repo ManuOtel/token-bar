@@ -13,9 +13,13 @@ Scope: local-only macOS menu-bar usage totals. No accounts, no network, no auth.
 
 ## Non-goals
 
-- No live sync, multi-machine merge, or cloud dashboard.
+- No live sync, network multi-machine merge, or cloud dashboard. Offline
+  file-copy merge (extra DBs + sanitized snapshots) is the only
+  multi-machine path, and it never touches the network.
 - No provider APIs, cookies, keychain reads, or network calls.
-- No prompt/message body storage, export, or log upload.
+- No prompt/message body storage, export, or log upload. The homeserver
+  exporter emits token counts, timestamps, model labels, and session /
+  message IDs only.
 - No auto-updater or paid billing in this phase.
 - No Windows/Linux app target (Linux stays logic-verification only).
 
@@ -122,7 +126,9 @@ Acceptance:
 
 - Cost is always an estimate; static table drifts from provider price lists.
 - Parser heuristics skip exotic future schemas (counted, visible as warnings).
-- No live sync, no multi-machine merge, no export.
+- Multi-machine merge is offline file copy only (no live sync, no network,
+  no HTTP API, no assumed SSH hostname). `7D` is record-timestamp based;
+  lifetime can be nonzero when recent data lives on another host.
 - App needs macOS 14+; Linux runs verification only.
 - Best-month ties go to earliest month by design.
 - Future timestamps excluded by preset upper bound (`now`).

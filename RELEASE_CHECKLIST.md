@@ -13,6 +13,8 @@ Current sources (read-only; see README "Data sources"):
 |---|---|---|
 | Codex | `~/.codex/sessions/**/*.jsonl` | `TOKENBAR_CODEX_ROOT` |
 | OpenCode | `~/.local/share/opencode/opencode.db` | `TOKENBAR_OPENCODE_DB` |
+| OpenCode extras | extra read-only DB copies | `TOKENBAR_OPENCODE_DB_EXTRA` |
+| OpenCode snapshot | sanitized snapshot files | `TOKENBAR_OPENCODE_USAGE_JSON` |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | `TOKENBAR_CLAUDE_ROOT` |
 
 - [ ] Confirm adapters open files read-only and missing roots/tables degrade
@@ -77,7 +79,10 @@ Developer ID Application certificate:
 
 - [ ] `grep -rniE 'URLSession|http|cookie' Sources/` returns nothing
       except the documented local-only comment in
-      `Sources/TokenBarCore/Store.swift` (`No auth, no cookies, no network`).
+      `Sources/TokenBarCore/Store.swift` (`No auth, no cookies, no network`)
+      and the documented `privacy-denylist` forbidden-field names in
+      `Sources/TokenBarCore/OpenCodeStore.swift` (sanitizer denylist only,
+      never transmitted). No `URLSession`/`http` use exists.
 - [ ] CLI/JSON output contains no absolute paths, prompt text, or message
       bodies (sanitized warnings only; covered by `ReportTests` + smoke).
 - [ ] No secrets committed: synthetic fixtures only under `Fixtures/`;
@@ -95,7 +100,14 @@ Developer ID Application certificate:
 - [ ] `./scripts/show-usage.sh --all-presets`, each `--preset`
       (`today|24h|7d|30d|best-month|lifetime`), each `--source`
       (`all|codex|opencode|claude`), and `--preset lifetime --json` all work.
-- [ ] Dashboard: source/preset filters, totals, breakdowns, trend, empty and
+      `--preset lifetime --json` carries `byOrigin` (`source/origin` pairs).
+- [ ] Homeserver workflow: `python3 scripts/export-opencode-usage.py --db
+      <copy> --out <snapshot> --origin homeserver` emits token-only JSON
+      (no prompts/paths/credentials); user-copied snapshot loads via
+      `TOKENBAR_OPENCODE_USAGE_JSON` with combined OpenCode total plus
+      local/homeserver split in CLI (`By origin`) and dashboard.
+- [ ] Dashboard: source/preset filters, totals, breakdowns (OpenCode local
+      vs homeserver sub-lines, combined total kept), trend, empty and
       no-scope states, sanitized warnings, launch-at-login toggle.
 - [ ] Missing-data hints point at the `TOKENBAR_*` overrides without
       leaking paths (see README troubleshooting).
