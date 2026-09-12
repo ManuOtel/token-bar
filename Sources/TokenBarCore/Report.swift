@@ -28,23 +28,26 @@ public enum ReportFormatter {
 
     /// Builds the stats section for one (preset, source) scope.
     /// `bestMonth` scopes resolve over the source-filtered lifetime set,
-    /// mirroring `TokenBarApp` dashboard semantics.
+    /// mirroring `TokenBarApp` dashboard semantics. A nil snapshot keeps the
+    /// deterministic offline static path (CLI default); a supplied snapshot
+    /// prices the scope from the dynamic/cached catalog first.
     public static func section(
         records: [NormalizedUsage],
         source: SourceFilter,
         preset: DatePreset,
         now: Date,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        snapshot: CatalogSnapshot? = nil
     ) -> UsageSection {
         if preset == .bestMonth {
             let lifetime = Aggregator.filter(records, source: source, preset: .lifetime, now: now, calendar: calendar)
-            guard let best = Aggregator.bestMonth(lifetime, calendar: calendar) else {
+            guard let best = Aggregator.bestMonth(lifetime, snapshot: snapshot, calendar: calendar) else {
                 return UsageSection(preset: preset, source: source, stats: .empty)
             }
             return UsageSection(preset: preset, source: source, stats: best.stats, bestMonthKey: best.monthKey)
         }
         let scoped = Aggregator.filter(records, source: source, preset: preset, now: now, calendar: calendar)
-        return UsageSection(preset: preset, source: source, stats: Aggregator.aggregate(scoped, calendar: calendar))
+        return UsageSection(preset: preset, source: source, stats: Aggregator.aggregate(scoped, snapshot: snapshot, calendar: calendar))
     }
 
     public static func presetLabel(for preset: DatePreset) -> String {
@@ -141,7 +144,10 @@ public enum ReportFormatter {
     }
 
     /// Renders one section. Deterministic field order; no paths, no prompts.
-    public static func render(section: UsageSection, warnings: [String] = []) -> String {
+    /// `pricingNote` is an optional user-visible pricing-source line (dynamic
+    /// catalog / cached catalog / offline). Nil keeps the historic output
+    /// byte-for-byte (CLI default, existing tests).
+    public static func render(section: UsageSection, warnings: [String] = [], pricingNote: String? = nil) -> String {
         let stats = section.stats
         var lines: [String] = []
         lines.append("Token Bar -- \(section.presetLabel) / \(sourceLabel(for: section.source))")
@@ -156,6 +162,9 @@ public enum ReportFormatter {
         lines.append("Requests: \(stats.requests)")
         lines.append("Sessions: \(stats.sessions)")
         lines.append("Estimated cost: \(costString(stats.estimatedCostUSD)) USD (estimate only; static table, not a bill; subscription use is not an API invoice)")
+        if let pricingNote, !pricingNote.isEmpty {
+            lines.append("Pricing: \(pricingNote)")
+        }
         lines.append("Last updated: \(isoString(stats.lastUpdated))")
         if stats.bySource.isEmpty {
             lines.append("By source: none")
@@ -196,17 +205,48 @@ public enum ReportFormatter {
 
     /// Renders several sections (used by `--all-presets`), separated by a
     /// deterministic divider. Warnings print once at the end.
-    public static func renderAll(sections: [UsageSection], warnings: [String] = []) -> String {
+    public static func renderAll(sections: [UsageSection], warnings: [String] = [], pricingNote: String? = nil) -> String {
         var parts: [String] = []
         for (index, section) in sections.enumerated() {
             // Warnings attach to the final block only so output stays scannable.
             if index == sections.count - 1 {
-                parts.append(render(section: section, warnings: warnings))
+                parts.append(render(section: section, warnings: warnings, pricingNote: pricingNote))
             } else {
-                parts.append(render(section: section))
+                parts.append(render(section: section, pricingNote: pricingNote))
             }
         }
         return parts.joined(separator: "\n---\n")
+    }
+
+    /// User-visible pricing-source line for CLI/app footers. Always labels
+    /// costs as estimates; carries only catalog metadata (source host, model
+    /// count, age), never usage data. Nil snapshot means static estimates.
+    public static func pricingNote(snapshot: CatalogSnapshot?, error: String? = nil) -> String {
+        guard let snapshot else {
+            if let error, !error.isEmpty {
+                return "static estimates (pricing refresh \(error)). All costs are estimates, not a bill."
+            }
+            return "static estimates. All costs are estimates, not a bill."
+        }
+        let age = Self.catalogAgeLabel(since: snapshot.catalog.fetchedAt)
+        let host = URL(string: snapshot.catalog.sourceURL)?.host ?? "catalog"
+        let basis = snapshot.isFresh ? "dynamic catalog" : "cached catalog"
+        var note = "\(basis) (\(host), \(snapshot.catalog.entries.count) models, updated \(age)). All costs are estimates, not a bill."
+        if let error, !error.isEmpty {
+            note += " Note: \(error)"
+        }
+        return note
+    }
+
+    static func catalogAgeLabel(since date: Date, now: Date = Date()) -> String {
+        let interval = max(0, now.timeIntervalSince(date))
+        if interval < 3600 { return "just now" }
+        if interval < 24 * 3600 {
+            let hours = Int(interval / 3600)
+            return "\(hours)h ago"
+        }
+        let days = Int(interval / (24 * 3600))
+        return "\(days)d ago"
     }
 
     // MARK: - JSON rendering

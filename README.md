@@ -3,8 +3,9 @@
 [![CI](https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml/badge.svg)](https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml)
 
 Native macOS menu bar utility that totals token usage from local Codex,
-OpenCode, and Claude Code history. File reads only. No accounts, no cookies,
-no network.
+OpenCode, and Claude Code history. File reads only, plus one strictly
+opt-in pricing refresh (public catalog GET, no usage data sent).
+No accounts, no cookies.
 
 ## Requirements
 
@@ -78,6 +79,9 @@ Flags:
 - `--json`: machine-readable array of per-preset objects (same totals plus
   `bestMonth`, `bySource`, `byModel`, `byOrigin` (`source/origin` pairs),
   sanitized `warnings`).
+- `--refresh-pricing`: fetch the public model pricing catalog before
+  reporting (`GET https://openrouter.ai/api/v1/models`; no usage data
+  sent). Without it the CLI is fully offline and uses the static table.
 - `--help` / `-h`: usage.
 
 What each report means:
@@ -90,9 +94,12 @@ What each report means:
 - **lifetime**: everything, no date filter.
 - **source splits**: per-source tokens/requests/cost, sorted tokens desc.
 - **cost**: always labelled `Estimated cost ... (estimate only; static table,
-  not a bill; subscription use is not an API invoice)`; static per-1M
-  table in `Pricing.swift` with exact provider/model first, then
-  family/substring, then fallback. Unknown models use the fallback rate.
+  not a bill; subscription use is not an API invoice)`; with
+  `--refresh-pricing` (or the app Update pricing button) a `Pricing:` line
+  names the rate basis (`dynamic catalog` / `cached catalog` / `static
+  estimates` with host, model count, age). Resolution: fresh catalog, cached
+  catalog, exact provider/model static table, family static table, fallback.
+  Unknown models use the fallback rate.
 - **warnings**: sanitized counts only (for example `Codex sessions not
   found (checked default location or TOKENBAR_CODEX_ROOT)`). No absolute
   paths are ever printed.
@@ -141,9 +148,14 @@ created weeks ago still counts when its messages fall in the window.
 Lifetime can be nonzero when recent data lives on another host: import the
 homeserver snapshot and the combined total appears.
 
-Privacy: all adapters open files read-only. Nothing leaves the machine.
-No subscription auth, no provider APIs, no cookies, no network calls exist
-in this codebase (verify: `rg -i "URLSession|http|cookie|token.*api" Sources`).
+Privacy: all adapters open files read-only. Usage data never leaves the
+machine. The only network call in the codebase is the strictly opt-in
+pricing refresh (`PricingService`: one `GET` of public model/pricing
+metadata, no prompts/counts/paths/credentials sent; see
+`docs/PRICING.md`). No subscription auth, no provider APIs, no cookies
+(verify: `rg -i "URLSession" Sources` hits only `PricingService.swift`;
+`rg -i "cookie|Authorization" Sources` hits only documented never-send
+comments).
 
 ## Semantics
 
@@ -200,14 +212,17 @@ Per model per 1M tokens: `(input-cached)*inputRate + cached*cachedRate +
 output*outputRate`, all /1M, USD. Reasoning rides inside output, never extra.
 Cached is capped with `min(cached, input)`; `total` is never used for cost.
 
-Resolution order in `Pricing.swift` (deterministic, case-insensitive):
-1. exact normalized `provider/model` match (for example
+Resolution order (deterministic, case-insensitive): 1. fresh dynamic
+catalog entry (refreshed live this session), 2. cached catalog entry
+(on-disk snapshot), 3. exact normalized `provider/model` match (for example
 `github-copilot/gpt-5.6-sol`, `openai/gpt-5.6-luna`,
-`opencode-go/muse-spark-1.3-contributor`), 2. family/substring match
-(`gpt-5`, `claude-sonnet`, ...), 3. fallback. Unknown models use the
+`opencode-go/muse-spark-1.3-contributor`), 4. family/substring match
+(`gpt-5`, `claude-sonnet`, ...), 5. fallback. Unknown models use the
 fallback ($3.00 / $12.00 / $1.50), never zero, and stay visible in the
 report. Every dollar figure is labelled `Estimated cost ... (estimate
-only; static table, not a bill; subscription use is not an API invoice)`.
+only; static table, not a bill; subscription use is not an API invoice)`,
+and refreshed runs add a `Pricing: <dynamic/cached catalog|static
+estimates> (...)` line naming the rate basis (see `docs/PRICING.md`).
 
 Rates are hardcoded static approximations in `Pricing.swift` (one place to
 bump them) and drift from provider price lists. Subscription or flat-rate
@@ -247,6 +262,7 @@ Dark usage cockpit in the macOS menu bar popover (400pt, macOS 14 SwiftUI, no ex
 - **Expanded (Details, scrollable):** toggles back to compact via `Show less` in the header. Exposes input/output/cached/reasoning cards (cached reads "subset of input", reasoning "subset of output"), a composition card whose ring splits the total into input vs output only with subset percentages in text, an always-visible source breakdown (zero sources stay listed as `no records`) with a stacked distribution bar, top-5 model bars with share tooltips, the full 14-day trend with date range, sanitized notices, and the launch-at-login toggle.
 - Charts are custom SwiftUI (`DashboardCharts.swift`: ring, stacked bar, model bars, daily bars) fed by `DashboardInsights` shares in `TokenBarCore`. Cached and reasoning tokens never render as extra ring slices.
 - Preserved in both modes: source/range filtering, refresh button + loading state, empty-range states (with one-tap jumps to All sources / Lifetime), sanitized warnings (never paths), the OpenCode combined total plus local vs homeserver sub-lines when both origins are present, best-month key, last-updated line, and launch-at-login (`SMAppService.mainApp`; disabled dev-run copy under `swift run`).
+- Below the dashboard, a pricing footer shows the rate basis (`Pricing: ...` line) with an `Update pricing` button (user-initiated catalog GET, cancellable, offline-safe) and any refresh error. It never blocks usage loading.
 
 ## Testing
 
@@ -260,9 +276,12 @@ CI (`.github/workflows/ci.yml`, runs on `main` and PRs) mirrors this split:
 - macOS 14 job: `swift build` + `swift test` (source of truth).
 - Linux job: `PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify_logic.py`
   plus shell syntax checks (`bash -n` / `sh -n`) on `scripts/*.sh`.
-- Privacy gate: fails if `Sources` contains `URLSession` / `http` / `cookie`
-  indicators, except the documented local-only comment
-  (`No auth, no cookies, no network` in `Store.swift`).
+- Privacy gate: `URLSession` is confined to `Sources/TokenBarCore/PricingService.swift`
+  (the single opt-in catalog GET; every other hit fails the gate), catalog
+  URL hosts are allowlisted to `openrouter.ai`, and no `Cookie` /
+  `Authorization` header is ever set (the gate greps for those). The old
+  `No auth, no cookies, no network` comment in `Store.swift` still holds
+  for usage loading, which never touches the network.
 
 Covers: Codex valid/alias/nested/type-gate/malformed/epoch/unknown-model,
 OpenCode column-form/legacy/JSON-blob/missing-timestamp/no-counts/fallback/
@@ -278,11 +297,18 @@ best-month max + earliest-tiebreak, totals/sessions/cost/breakdowns,
 cached-subset accounting (OpenCode cache fold-in, explicit-total-wins),
 dedupe, empty aggregation, plus CLI report
 formatting (lifetime totals labels, warning path sanitizing, best-month key,
-deterministic JSON, no raw paths in output).
+deterministic JSON, no raw paths in output), plus dynamic pricing
+(`PricingCatalogTests`: OpenRouter decode/normalization, catalog-first
+precedence incl. suffix match, stale/offline cache behavior, privacy
+boundary of the catalog GET, malformed catalog rejection, fixtures under
+`Fixtures/pricing-*.json`; no test touches the network).
 
 ## Limitations
 
-- Estimates only: pricing table is static and drifts from provider lists.
+- Estimates only: the static table drifts from provider lists; the opt-in
+  catalog refresh (`Update pricing` / `--refresh-pricing`, OpenRouter
+  metadata) narrows the drift for listed models but stays an estimate, and
+  subscription-only ids keep static approximations (see `docs/PRICING.md`).
 - OpenCode schema drift is handled heuristically; exotic future schemas may
   skip rows (counted, visible).
 - Multi-machine merge is offline file copy only: no live sync, no network
