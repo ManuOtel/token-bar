@@ -310,12 +310,16 @@ public enum ReportFormatter {
         }
     }
 
-    /// Deterministic JSON: sorted keys + pretty printed.
+    /// Deterministic JSON: sorted keys + pretty printed. Foundation escapes
+    /// `/` as `\/`; both decode identically per the JSON spec, so the output
+    /// is unescaped to keep public `source/origin` keys (for example
+    /// `opencode/homeserver`) literal and greppable.
     public static func encodeJSON(sections: [UsageSection], warnings: [String]) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let payload = jsonReports(sections: sections, warnings: warnings)
         let data = try encoder.encode(payload)
-        return String(data: data, encoding: .utf8) ?? "[]"
+        return (String(data: data, encoding: .utf8) ?? "[]")
+            .replacingOccurrences(of: "\\/", with: "/")
     }
 }

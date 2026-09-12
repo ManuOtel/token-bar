@@ -118,11 +118,22 @@ public struct NormalizedUsage: Codable, Hashable, Sendable {
 
     /// Decodes records written before `origin` existed: the key defaults to
     /// `"local"` instead of failing. Encoding always writes the key.
+    /// Timestamps decode tolerantly: default-strategy `Date` values (Double,
+    /// as written by `JSONEncoder`) first, then ISO-8601 / epoch strings via
+    /// `CodexParser.parseTimestamp`. Genuinely undecodable values rethrow the
+    /// natural `Date` error.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         source = try container.decode(UsageSource.self, forKey: .source)
-        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        if let date = try? container.decode(Date.self, forKey: .timestamp) {
+            timestamp = date
+        } else if let string = try? container.decode(String.self, forKey: .timestamp),
+                  let parsed = CodexParser.parseTimestamp(string) {
+            timestamp = parsed
+        } else {
+            timestamp = try container.decode(Date.self, forKey: .timestamp)
+        }
         let rawModel = try container.decode(String.self, forKey: .model)
         model = rawModel.isEmpty ? "unknown" : rawModel
         let rawInput = try container.decode(Int.self, forKey: .inputTokens)
