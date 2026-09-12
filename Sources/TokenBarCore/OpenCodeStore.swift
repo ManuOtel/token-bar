@@ -347,9 +347,10 @@ public enum OpenCodeStore {
     }
 
     /// Deterministic mirror selection shared by both granularity levels:
-    /// larger `totalTokens` wins so a stale mirror never shadows fresh
-    /// data; exact ties break to the earliest `(timestamp, id)` so repeated
-    /// loads agree byte-for-byte.
+    /// larger `totalTokens` wins so a stale mirror never shadows fresh data;
+    /// exact ties break to the earliest `(timestamp, id)`, then to the
+    /// lexically smallest `origin`, so repeated loads agree byte-for-byte
+    /// regardless of input order.
     private static func selectMirror(
         _ best: inout [String: NormalizedUsage],
         key: String,
@@ -359,11 +360,20 @@ public enum OpenCodeStore {
             best[key] = candidate
             return
         }
+        best[key] = mirrorWinner(seen: seen, candidate: candidate)
+    }
+
+    /// Shared winner rule (also used by `TokenBarStore.mirrorWinner`): larger
+    /// `totalTokens` wins; ties break to the earliest `(timestamp, id)`, then
+    /// to the lexically smallest `origin` for order-independent attribution.
+    static func mirrorWinner(seen: NormalizedUsage, candidate: NormalizedUsage) -> NormalizedUsage {
         if candidate.totalTokens != seen.totalTokens {
-            if candidate.totalTokens > seen.totalTokens { best[key] = candidate }
-        } else if (candidate.timestamp, candidate.id) < (seen.timestamp, seen.id) {
-            best[key] = candidate
+            return candidate.totalTokens > seen.totalTokens ? candidate : seen
         }
+        if (candidate.timestamp, candidate.id) != (seen.timestamp, seen.id) {
+            return (candidate.timestamp, candidate.id) < (seen.timestamp, seen.id) ? candidate : seen
+        }
+        return candidate.origin < seen.origin ? candidate : seen
     }
 
     /// Deterministic fallback ID for message rows without a message ID.
@@ -470,8 +480,11 @@ public enum OpenCodeStore {
     /// `requestId`/`request_id`/`messageId`, `origin`/`host`/`label`.
     /// `source`, when present, must be `opencode` (other values skip + count).
     /// Missing `origin` falls back to `originFallback` (`"homeserver"` from
-    /// the Store). Returns records plus skipped count plus whether any
-    /// forbidden non-token keys were seen and ignored.
+    /// the Store); embedded labels are allowlisted (see
+    /// `sanitizeOriginLabel`). Counts are taken as normalized (the exporter
+    /// pre-folds cache into input); only the cached read/write aliases sum,
+    /// mirroring the SQLite path. Returns records plus skipped count plus
+    /// whether any forbidden non-token keys were seen and ignored.
     public static func loadSnapshot(
         at path: String,
         originFallback: String = "homeserver"
@@ -487,12 +500,10 @@ public enum OpenCodeStore {
         var skipped = 0
         var sawExtra = false
         for element in array {
-            let lowered = Dictionary(uniqueKeysWithValues: element.map { ($0.key.lowercased(), $0.value) })
             for key in element.keys where snapshotForbiddenKeys.contains(key.lowercased()) {
                 sawExtra = true
                 break
             }
-            _ = lowered
             if let record = decodeSnapshotRecord(element, originFallback: originFallback) {
                 records.append(record)
             } else {
@@ -500,6 +511,21 @@ public enum OpenCodeStore {
             }
         }
         return (records, skipped, sawExtra)
+    }
+
+    /// Sanitizes an untrusted origin/host label from snapshot data. Only a
+    /// short `[A-Za-z0-9_.-]` form (max 64 chars) is kept; anything else
+    /// (slashes, newlines, spaces, shell metacharacters, empty) falls back.
+    /// `local` and `homeserver` pass through unchanged. Snapshot labels never
+    /// reach a shell, but the allowlist keeps them out of CLI/dashboard text
+    /// verbatim-safe by construction.
+    public static func sanitizeOriginLabel(_ raw: String?, fallback: String = "homeserver") -> String {
+        guard let raw else { return fallback }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 64 else { return fallback }
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")
+        guard trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return fallback }
+        return trimmed
     }
 
     /// Pure snapshot record decoder (no filesystem). Returns nil for rows
@@ -555,7 +581,14 @@ public enum OpenCodeStore {
         guard let timestamp else { return nil }
         let input = int("inputTokens", "input_tokens", "inputtokens", "input", "prompt_tokens", "prompttokens", "tokens_input", "tokensinput")
         let output = int("outputTokens", "output_tokens", "outputtokens", "output", "completion_tokens", "completiontokens", "tokens_output", "tokensoutput")
-        let cached = int("cachedTokens", "cached_tokens", "cachedtokens", "cached", "cache_read_input_tokens", "tokens_cache_read", "tokenscacheread", "tokens_cache_write", "tokenscachewrite")
+        // Same read/write sum rule as the SQLite path (`decodeRow`): generic
+        // cached aliases count as read; an explicit write component adds on.
+        let cacheRead = int("cachedTokens", "cached_tokens", "cachedtokens", "cached", "cached_input_tokens", "cache_read_input_tokens", "tokens_cache_read")
+        let cacheWrite = int("cache_write_input_tokens", "tokens_cache_write")
+        let cached: Int? = {
+            if cacheRead == nil && cacheWrite == nil { return nil }
+            return (cacheRead ?? 0) + (cacheWrite ?? 0)
+        }()
         let reasoning = int("reasoningTokens", "reasoning_tokens", "reasoningtokens", "reasoning", "tokens_reasoning", "tokensreasoning")
         let total = int("totalTokens", "total_tokens", "totaltokens", "total", "tokens_total", "tokenstotal", "tokens")
         guard input != nil || output != nil || cached != nil || reasoning != nil || total != nil else { return nil }
@@ -571,9 +604,9 @@ public enum OpenCodeStore {
         }()
         let sessionId = text("sessionId", "session_id", "sessionid", "session") ?? ""
         let requestId = text("requestId", "request_id", "requestid", "request", "messageId", "message_id", "messageid", "id_message", "message") ?? ""
-        let originRaw = text("origin", "host", "hostname", "label", "machine") ?? originFallback
-        let trimmedOrigin = originRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let origin = trimmedOrigin.isEmpty ? originFallback : trimmedOrigin
+        let origin = sanitizeOriginLabel(
+            text("origin", "host", "hostname", "label", "machine"),
+            fallback: sanitizeOriginLabel(originFallback, fallback: "homeserver"))
         var id = text("id") ?? ""
         if id.isEmpty {
             let epoch = Int(timestamp.timeIntervalSince1970)

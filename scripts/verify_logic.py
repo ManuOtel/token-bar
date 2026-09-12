@@ -1256,10 +1256,12 @@ def run():
 
     # Multi-origin merge (mirrors Models/Store/Aggregator/Report/Snapshot).
     def split_extra(raw):
+        # Mirror of TokenBarStore.splitExtraList: commas and newlines only.
+        # Colons/semicolons are legal filename characters, never separators.
         if not raw:
             return []
         out = []
-        for part in raw.replace(";", ",").replace(":", ",").replace("\n", ",").split(","):
+        for part in raw.replace("\n", ",").split(","):
             p = part.strip()
             if p:
                 out.append(p)
@@ -1267,8 +1269,10 @@ def run():
 
     check("extra list ignores empty entries",
           split_extra(None) == [] and split_extra("") == []
-          and split_extra(" , : \n ") == []
-          and split_extra("/a.db, ,/b.db::/c.db") == ["/a.db", "/b.db", "/c.db"])
+          and split_extra(" ,  \n ") == []
+          and split_extra("/a.db, ,/b.db\n/c.db") == ["/a.db", "/b.db", "/c.db"]
+          and split_extra("/data:with:colons.db,/other.db") == ["/data:with:colons.db", "/other.db"]
+          and split_extra("/data;with.db,/other.db") == ["/data;with.db", "/other.db"])
 
     def normalize_origin(v):
         s = (v or "").strip()
@@ -1283,6 +1287,20 @@ def run():
     FORBIDDEN = {"prompt", "tool_calls", "content", "text", "path", "credential",
                  "api_key", "message", "cookie"}
 
+    import re as _re
+
+    def sanitize_origin_label(v, fallback="homeserver"):
+        # Mirror of OpenCodeStore.sanitizeOriginLabel: short [A-Za-z0-9_.-].
+        fb = sanitize_origin_label(fallback, "homeserver") if fallback != "homeserver" else "homeserver"
+        if not isinstance(v, str):
+            return fb
+        s = v.strip()
+        if not s or len(s) > 64:
+            return fb
+        if _re.fullmatch(r"[A-Za-z0-9_.-]+", s):
+            return s
+        return fb
+
     def decode_snapshot(d, fallback="homeserver"):
         src = d.get("source")
         if src and str(src).lower() != "opencode":
@@ -1290,9 +1308,17 @@ def run():
         ts = parse_ts(d.get("timestamp") or d.get("created_at") or d.get("created"))
         if ts is None:
             return None
-        i = to_int(d.get("inputTokens", d.get("input_tokens", d.get("input"))))
-        o = to_int(d.get("outputTokens", d.get("output_tokens", d.get("output"))))
-        c = to_int(d.get("cachedTokens", d.get("cached_tokens", d.get("cached"))))
+        i = to_int(get(d, "inputTokens", "input_tokens", "inputtokens", "input",
+                        "prompt_tokens", "prompttokens", "tokens_input", "tokensinput"))
+        o = to_int(get(d, "outputTokens", "output_tokens", "outputtokens", "output",
+                        "completion_tokens", "completiontokens", "tokens_output", "tokensoutput"))
+        # Same read/write sum rule as the SQLite path: generic cached
+        # aliases count as read; an explicit write component adds on.
+        c_read = to_int(get(d, "cachedTokens", "cached_tokens", "cachedtokens", "cached",
+                             "cached_input_tokens", "cache_read_input_tokens",
+                             "tokens_cache_read"))
+        c_write = to_int(get(d, "cache_write_input_tokens", "tokens_cache_write"))
+        c = None if (c_read is None and c_write is None) else (c_read or 0) + (c_write or 0)
         r = to_int(d.get("reasoningTokens", d.get("reasoning_tokens", d.get("reasoning"))))
         tot = to_int(d.get("totalTokens", d.get("total_tokens", d.get("total"))))
         if all(v is None for v in (i, o, c, r, tot)):
@@ -1301,7 +1327,7 @@ def run():
         cc = min(max(0, c or 0), i)
         tot_val = tot if isinstance(tot, (int, float)) and tot > 0 else None
         model = d.get("model") or "unknown"
-        origin = (d.get("origin") or d.get("host") or fallback or "homeserver").strip() or fallback
+        origin = sanitize_origin_label(d.get("origin") or d.get("host"), fallback)
         rec = {"ts": ts, "model": model, "input": i, "output": o, "cached": cc,
                "reasoning": r or 0, "total": tot_val if tot_val else i + o,
                "session": d.get("sessionId", d.get("session_id", "")) or "",
@@ -1330,30 +1356,30 @@ def run():
           and "SECRET" not in json.dumps(decode_snapshot(dirty), default=str)
           and "/Users/someone" not in json.dumps(decode_snapshot(dirty), default=str))
 
+    def mirror_winner(seen, cand):
+        # Mirror of OpenCodeStore.mirrorWinner/TokenBarStore.mirrorWinner:
+        # larger total wins; ties break to earliest (timestamp, id), then to
+        # the lexically smallest origin for order-independent attribution.
+        if cand["total"] != seen["total"]:
+            return cand if cand["total"] > seen["total"] else seen
+        if (cand["ts"], cand["id"]) != (seen["ts"], seen["id"]):
+            return cand if (cand["ts"], cand["id"]) < (seen["ts"], seen["id"]) else seen
+        return cand if cand["origin"] < seen["origin"] else seen
+
     def dedupe_origin(records):
         best_req, best_id, order = {}, {}, []
         for rec in sorted(records, key=lambda r: (r["ts"], r.get("id", ""))):
             if not rec["request"]:
                 k = "opencode:" + rec["id"]
                 if k in best_id:
-                    cand, seen = rec, best_id[k]
-                    if (cand["total"],) != (seen["total"],):
-                        if cand["total"] > seen["total"]:
-                            best_id[k] = cand
-                    elif (cand["ts"], cand["id"]) < (seen["ts"], seen["id"]):
-                        best_id[k] = cand
+                    best_id[k] = mirror_winner(best_id[k], rec)
                 else:
                     best_id[k] = rec
                     order.append(k)
                 continue
             k = "opencode:" + rec["request"]
             if k in best_req:
-                cand, seen = rec, best_req[k]
-                if cand["total"] != seen["total"]:
-                    if cand["total"] > seen["total"]:
-                        best_req[k] = cand
-                elif (cand["ts"], cand["id"]) < (seen["ts"], seen["id"]):
-                    best_req[k] = cand
+                best_req[k] = mirror_winner(best_req[k], rec)
             else:
                 best_req[k] = rec
         return sorted(list(best_req.values()) + [best_id[k] for k in order],
@@ -1374,10 +1400,55 @@ def run():
         check("cross-origin tie earliest", len(got) == 1 and got[0]["ts"] == earlier["ts"])
     clone_a = dict(loc, request="", id="opencode:same", total=15)
     clone_b = dict(clone_a, origin="homeserver")
-    check("id-less clones collapse", len(dedupe_origin([clone_a, clone_b])) == 1)
+    for pair in ((clone_a, clone_b), (clone_b, clone_a)):
+        got = dedupe_origin(list(pair))
+        check("id-less clones collapse with stable origin",
+              len(got) == 1 and got[0]["origin"] == "homeserver")
+    # Equal total, equal time, equal id, non-empty request: origin decides.
+    tie_l = dict(loc, request="dup", id="opencode:dup", total=100, origin="local")
+    tie_r = dict(tie_l, origin="homeserver")
+    for pair in ((tie_l, tie_r), (tie_r, tie_l)):
+        got = dedupe_origin(list(pair))
+        check("equal-total equal-time prefers stable origin",
+              len(got) == 1 and got[0]["origin"] == "homeserver")
     distinct_a = dict(loc, request="", id="opencode:id-a", total=15)
     distinct_b = dict(loc, request="", id="opencode:id-b", total=15, origin="homeserver")
     check("id-less distinct survive", len(dedupe_origin([distinct_a, distinct_b])) == 2)
+    # Snapshot cached read/write aliases sum like the SQLite path.
+    split_cache = decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
+                                   "tokens_input": 800, "tokens_output": 200,
+                                   "tokens_cache_read": 150, "tokens_cache_write": 50,
+                                   "sessionId": "s", "requestId": "r"})
+    check("snapshot cached read+write summed",
+          split_cache is not None and split_cache["cached"] == 200
+          and split_cache["input"] == 800 and split_cache["total"] == 1000)
+    lone_cache = decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
+                                  "inputTokens": 800, "outputTokens": 200,
+                                  "cachedTokens": 100,
+                                  "sessionId": "s", "requestId": "r2"})
+    check("snapshot lone cached alias counts once",
+          lone_cache is not None and lone_cache["cached"] == 100)
+    # Untrusted origin labels are allowlisted; local/homeserver preserved.
+    check("origin labels sanitized",
+          sanitize_origin_label("homeserver") == "homeserver"
+          and sanitize_origin_label("local") == "local"
+          and sanitize_origin_label("my-mac_2.0") == "my-mac_2.0"
+          and sanitize_origin_label(None) == "homeserver"
+          and sanitize_origin_label("") == "homeserver"
+          and all(sanitize_origin_label(h) == "homeserver"
+                  for h in ("a/b", "a\nb", "a b", "$(rm)", "`x`", "a;b", "../x"))
+          and len(sanitize_origin_label("x" * 64)) == 64
+          and sanitize_origin_label("x" * 65) == "homeserver"
+          and (decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
+                                "inputTokens": 1, "outputTokens": 1,
+                                "origin": "evil/x\ny"}) or {})["origin"] == "homeserver")
+    # By-origin text appears only with multiple distinct origins.
+    def origin_suffix(key):
+        return key.split("/")[-1] if "/" in key else key
+
+    check("by-origin hidden for single origin",
+          len({origin_suffix(k) for k in ("codex/local", "opencode/local", "claude/local")}) == 1
+          and len({origin_suffix(k) for k in ("opencode/local", "opencode/homeserver")}) == 2)
 
     def origin_key(rec):
         return f"opencode/{rec['origin']}"

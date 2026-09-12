@@ -7,9 +7,9 @@ import Foundation
 ///   (per-message `message` / `session_message` tables win where present;
 ///   per-session `session_v2` / `session` rollups fill uncovered sessions only)
 /// - OpenCode extras (offline multi-machine merge, no network):
-///   `TOKENBAR_OPENCODE_DB_EXTRA` (comma- or colon-separated read-only DB
+///   `TOKENBAR_OPENCODE_DB_EXTRA` (comma- or newline-separated read-only DB
 ///   paths, origin `"homeserver"`) plus `TOKENBAR_OPENCODE_USAGE_JSON`
-///   (comma- or colon-separated sanitized snapshot paths as written by
+///   (comma- or newline-separated sanitized snapshot paths as written by
 ///   `scripts/export-opencode-usage.py`). Empty entries are ignored. Missing
 ///   extras are warnings only and never stop Codex/Claude/local usage.
 ///   With only `TOKENBAR_OPENCODE_DB` set, behavior is exactly as before.
@@ -21,9 +21,11 @@ import Foundation
 /// - Records merge first, then one global `dedupe` runs: same
 ///   `source + requestId` collapses to the larger `totalTokens` (stale mirror
 ///   never shadows fresh data); exact ties break to the earliest
-///   `(timestamp, id)` so repeated loads agree byte-for-byte. Records with an
-///   empty `requestId` are unique by `id`: identical id-less clones collapse,
-///   distinct id-less rows stay distinct.
+///   `(timestamp, id)`, then to the lexically smallest `origin`, so repeated
+///   loads agree byte-for-byte in any input order. Records with an empty
+///   `requestId` collapse by `source + id`: identical id-less clones collapse
+///   (origin tiebreak keeps attribution stable), distinct id-less rows stay
+///   distinct.
 /// - Within OpenCode, message rows win everywhere they exist: all message and
 ///   rollup parts from the local DB plus every extra DB are combined in one
 ///   global `combineMessageAndRollup`, and snapshot records rejoin that
@@ -51,11 +53,13 @@ public enum TokenBarStore {
         ProcessInfo.processInfo.environment["TOKENBAR_OPENCODE_USAGE_JSON"]
     }
 
-    /// Splits a multi-path env var on commas, colons, and newlines, trims
-    /// whitespace, and drops empty entries. Public for tests.
+    /// Splits a multi-path env var on commas and newlines, trims whitespace,
+    /// and drops empty entries. Public for tests. Colons and semicolons are
+    /// deliberately NOT separators: both are legal filename characters on
+    /// Unix, so splitting on them could break real paths.
     public static func splitExtraList(_ raw: String?) -> [String] {
         guard let raw, !raw.isEmpty else { return [] }
-        let separators = CharacterSet(charactersIn: ",:\n;")
+        let separators = CharacterSet(charactersIn: ",\n")
         return raw.components(separatedBy: separators)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -131,7 +135,9 @@ public enum TokenBarStore {
             } catch StoreError.sqliteUnavailable {
                 warnings.append("OpenCode database present but SQLite module unavailable in this build.")
             } catch {
-                warnings.append("OpenCode database unreadable: \(error).")
+                // Fixed sanitized string: the caught error interpolates the
+                // raw custom database path, which must never reach warnings.
+                warnings.append("OpenCode database unreadable; others still load.")
             }
         } else {
             warnings.append("OpenCode database not found at \(dbPath).")
@@ -210,10 +216,12 @@ public enum TokenBarStore {
 
     /// Deterministic dedupe across origins: same `source + requestId`
     /// collapses to the larger `totalTokens` (max-total mirror selection);
-    /// exact ties break to the earliest `(timestamp, id)` so repeated loads
-    /// agree. Records without a `requestId` collapse by `source + id`:
-    /// cloned id-less snapshot rows (identical stable IDs) count once, while
-    /// distinct id-less rows (distinct content hashes) all survive.
+    /// exact ties break to the earliest `(timestamp, id)`, then to the
+    /// lexically smallest `origin`, so repeated loads agree in any input
+    /// order. Records without a `requestId` collapse by `source + id`:
+    /// cloned id-less snapshot rows (identical stable IDs) count once with
+    /// stable attribution, while distinct id-less rows (distinct content
+    /// hashes) all survive.
     /// OpenCode per-session rows mirrored across `session_v2` / `session`
     /// share a `sessionID#epochSeconds` fallback request ID (see
     /// `OpenCodeStore.decodeRow`), so each mirror pair collapses here while
@@ -246,13 +254,12 @@ public enum TokenBarStore {
         }
     }
 
-    /// Shared winner rule: larger `totalTokens` wins so a stale mirror never
-    /// shadows fresh data; exact ties break to the earliest
-    /// `(timestamp, id)`. Order-independent.
+    /// Shared winner rule (mirrors `OpenCodeStore.mirrorWinner`): larger
+    /// `totalTokens` wins so a stale mirror never shadows fresh data; exact
+    /// ties break to the earliest `(timestamp, id)`, then to the lexically
+    /// smallest `origin` so cross-origin clones attribute stably in both
+    /// input orders. Order-independent.
     static func mirrorWinner(_ seen: NormalizedUsage, _ candidate: NormalizedUsage) -> NormalizedUsage {
-        if candidate.totalTokens != seen.totalTokens {
-            return candidate.totalTokens > seen.totalTokens ? candidate : seen
-        }
-        return (candidate.timestamp, candidate.id) < (seen.timestamp, seen.id) ? candidate : seen
+        OpenCodeStore.mirrorWinner(seen: seen, candidate: candidate)
     }
 }

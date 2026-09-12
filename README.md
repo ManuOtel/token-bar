@@ -109,13 +109,19 @@ What each report means:
 
 Overrides for testing: `TOKENBAR_CODEX_ROOT`, `TOKENBAR_OPENCODE_DB`,
 `TOKENBAR_CLAUDE_ROOT`. Multi-machine merge (offline only, no network):
-`TOKENBAR_OPENCODE_DB_EXTRA` (comma- or colon-separated extra read-only DB
+`TOKENBAR_OPENCODE_DB_EXTRA` (comma- or newline-separated extra read-only DB
 paths, empty entries ignored) and `TOKENBAR_OPENCODE_USAGE_JSON`
-(comma- or colon-separated sanitized snapshot paths). Extra DB rows load
+(comma- or newline-separated sanitized snapshot paths). Colons and
+semicolons never split: both are legal filename characters, so colon-bearing
+paths stay whole. Extra DB rows load
 with origin `homeserver`; snapshot rows keep their embedded origin
-(`homeserver` when missing). With only `TOKENBAR_OPENCODE_DB` set, behavior
+(`homeserver` when missing). Snapshot origin labels are allowlisted to a
+short `[A-Za-z0-9_.-]` form (anything else falls back to `homeserver`).
+With only `TOKENBAR_OPENCODE_DB` set, behavior
 is exactly as before. Missing extras are warnings only and never stop
-Codex/Claude/local usage.
+Codex/Claude/local usage. The `By origin` CLI section prints only when more
+than one distinct origin is present, so local-only output never duplicates
+`By source`.
 
 Homeserver-to-Mac workflow (you copy the file; the app never fetches it):
 

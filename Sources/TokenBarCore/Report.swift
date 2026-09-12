@@ -121,6 +121,12 @@ public enum ReportFormatter {
         warnings.map(sanitizeWarning)
     }
 
+    /// Origin suffix of a `source/origin` breakdown key. Keys without a `/`
+    /// (foreign or future shapes) count as their own origin.
+    static func originSuffix(_ key: String) -> String {
+        key.split(separator: "/").last.map(String.init) ?? key
+    }
+
     // MARK: - Human-readable rendering
 
     private static func isoString(_ date: Date?) -> String {
@@ -159,7 +165,11 @@ public enum ReportFormatter {
                 lines.append("  \(entry.key): \(entry.totalTokens) tokens, \(entry.requests) requests, \(costString(entry.estimatedCostUSD)) est.")
             }
         }
-        if stats.byOrigin.count > 1 {
+        // Shown only when more than one distinct origin is present: a
+        // local-only `--source all` scope has one entry per source
+        // (`codex/local`, ...) but a single origin, so the section stays
+        // hidden instead of duplicating `By source`.
+        if Set(stats.byOrigin.map { Self.originSuffix($0.key) }).count > 1 {
             lines.append("By origin:")
             for entry in stats.byOrigin {
                 lines.append("  \(entry.key): \(entry.totalTokens) tokens, \(entry.requests) requests, \(costString(entry.estimatedCostUSD)) est.")

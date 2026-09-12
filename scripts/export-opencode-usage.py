@@ -323,16 +323,22 @@ def decode_message(cols, table, origin):
     return rec
 
 
+def mirror_winner(seen, candidate):
+    # Mirror of OpenCodeStore.mirrorWinner: larger total wins; ties break to
+    # the earliest (timestamp, id), then to the lexically smallest origin.
+    if candidate["total"] != seen["total"]:
+        return candidate if candidate["total"] > seen["total"] else seen
+    if (candidate["ts"], candidate.get("id", "")) != (seen["ts"], seen.get("id", "")):
+        return candidate if (candidate["ts"], candidate.get("id", "")) < (seen["ts"], seen.get("id", "")) else seen
+    return candidate if candidate["origin"] < seen["origin"] else seen
+
+
 def select_mirror(best, key, candidate):
     seen = best.get(key)
     if seen is None:
         best[key] = candidate
         return
-    if candidate["total"] != seen["total"]:
-        if candidate["total"] > seen["total"]:
-            best[key] = candidate
-    elif (candidate["ts"], candidate.get("id", "")) < (seen["ts"], seen.get("id", "")):
-        best[key] = candidate
+    best[key] = mirror_winner(seen, candidate)
 
 
 def combine(messages, rollups):
