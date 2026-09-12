@@ -143,9 +143,9 @@ let calendar = Calendar.current
 
 // Offline by default: snapshot stays nil (static table) unless the user
 // explicitly passed --refresh-pricing. Top-level await keeps this
-// synchronous-looking without blocking primitives; URLSession timeouts
-// (15s request / 30s resource in PricingService) bound the wait, and any
-// failure falls back to the on-disk cache, then to nil (static estimates).
+// synchronous-looking without blocking primitives; the service's bounded
+// timeouts (15s request / 30s resource) bound the wait, and any failure
+// falls back to the on-disk cache, then to nil (static estimates).
 let pricingSnapshot: CatalogSnapshot?
 let pricingNote: String?
 if options.refreshPricing {
