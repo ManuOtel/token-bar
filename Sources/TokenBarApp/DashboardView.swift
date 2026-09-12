@@ -262,40 +262,66 @@ struct DashboardView: View {
             let maxTokens = max(stats.bySource.map(\.totalTokens).max() ?? 0, 1)
             ForEach([UsageSource.codex, .opencode, .claude], id: \.self) { usageSource in
                 let entry = byKey[usageSource.rawValue]
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(sourceDot(usageSource))
-                        .frame(width: 8, height: 8)
-                    Text(sourceName(usageSource))
-                        .font(.callout)
-                        .lineLimit(1)
-                        .frame(width: 76, alignment: .leading)
-                    GeometryReader { proxy in
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(sourceDot(usageSource).opacity(entry == nil ? 0.15 : 0.85))
-                            .frame(
-                                width: max(3, proxy.size.width * CGFloat(entry?.totalTokens ?? 0) / CGFloat(maxTokens)),
-                                height: 8
-                            )
-                            .frame(maxHeight: .infinity, alignment: .center)
-                    }
-                    .frame(height: 10)
-                    VStack(alignment: .trailing, spacing: 0) {
-                        Text(compactCount(entry?.totalTokens ?? 0))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(sourceDot(usageSource))
+                            .frame(width: 8, height: 8)
+                        Text(sourceName(usageSource))
                             .font(.callout)
-                            .monospacedDigit()
                             .lineLimit(1)
-                        Text(entry == nil ? "no records" : "\(entry!.requests) req")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                            .frame(width: 76, alignment: .leading)
+                        GeometryReader { proxy in
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(sourceDot(usageSource).opacity(entry == nil ? 0.15 : 0.85))
+                                .frame(
+                                    width: max(3, proxy.size.width * CGFloat(entry?.totalTokens ?? 0) / CGFloat(maxTokens)),
+                                    height: 8
+                                )
+                                .frame(maxHeight: .infinity, alignment: .center)
+                        }
+                        .frame(height: 10)
+                        VStack(alignment: .trailing, spacing: 0) {
+                            Text(compactCount(entry?.totalTokens ?? 0))
+                                .font(.callout)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                            Text(entry == nil ? "no records" : "\(entry!.requests) req")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .frame(width: 72, alignment: .trailing)
                     }
-                    .frame(width: 72, alignment: .trailing)
+                    .opacity(entry == nil ? 0.65 : 1.0)
+                    .help(entry == nil
+                        ? "\(sourceName(usageSource)): no records in this range"
+                        : "\(sourceName(usageSource)): \(fullCount(entry!.totalTokens)) tokens, \(entry!.requests) requests")
+                    // OpenCode origin split: combined total stays on the row
+                    // above; local vs homeserver read as one short line each.
+                    if usageSource == .opencode {
+                        let origins = opencodeOriginRows
+                        if origins.count > 1 {
+                            ForEach(origins, id: \.key) { origin in
+                                HStack(spacing: 6) {
+                                    Text(originLabel(origin.key))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .frame(width: 76, alignment: .leading)
+                                        .padding(.leading, 16)
+                                    Spacer()
+                                    Text("\(compactCount(origin.totalTokens)) · \(origin.requests) req")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                        .lineLimit(1)
+                                }
+                                .help("OpenCode \(originShort(origin.key)): \(fullCount(origin.totalTokens)) tokens, \(origin.requests) requests")
+                            }
+                        }
+                    }
                 }
-                .opacity(entry == nil ? 0.65 : 1.0)
-                .help(entry == nil
-                    ? "\(sourceName(usageSource)): no records in this range"
-                    : "\(sourceName(usageSource)): \(fullCount(entry!.totalTokens)) tokens, \(entry!.requests) requests")
             }
         }
     }
@@ -393,6 +419,11 @@ struct DashboardView: View {
                 Text("Testing overrides: TOKENBAR_CODEX_ROOT, TOKENBAR_OPENCODE_DB, TOKENBAR_CLAUDE_ROOT.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                Text("Extras: TOKENBAR_OPENCODE_DB_EXTRA, TOKENBAR_OPENCODE_USAGE_JSON.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
                 Button("Retry now", action: onRefresh)
                     .buttonStyle(.bordered)
                     .help("Reload local histories now")
@@ -566,6 +597,22 @@ struct DashboardView: View {
         }
     }
 
+    /// OpenCode origin rows for the current range, sorted tokens desc.
+    private var opencodeOriginRows: [BreakdownEntry] {
+        stats.byOrigin.filter { $0.key.hasPrefix("opencode/") }.sorted {
+            if $0.totalTokens != $1.totalTokens { return $0.totalTokens > $1.totalTokens }
+            return $0.key < $1.key
+        }
+    }
+
+    private func originLabel(_ key: String) -> String {
+        "↳ \(originShort(key))"
+    }
+
+    private func originShort(_ key: String) -> String {
+        key.split(separator: "/").last.map(String.init) ?? key
+    }
+
     /// Rephrases raw sanitized warnings into scannable notice lines.
     /// Input is already path-free; this only shortens the phrasing.
     private func friendlyNotice(_ warning: String) -> String {
@@ -574,6 +621,13 @@ struct DashboardView: View {
         if warning.contains("Claude sessions not found") { return "Claude history not found locally." }
         if warning.contains("SQLite module unavailable") { return "OpenCode skipped: SQLite unavailable in this build." }
         if warning.contains("OpenCode database unreadable") { return "OpenCode database unreadable; others still load." }
+        if warning.contains("extra database not found") { return "OpenCode extra copy not found; using local data." }
+        if warning.contains("extra database unreadable") { return "OpenCode extra copy unreadable; others still load." }
+        if warning.contains("extra database skipped") { return "OpenCode extra skipped: SQLite unavailable." }
+        if warning.contains("snapshot not found") { return "OpenCode snapshot not found; using local data." }
+        if warning.contains("snapshot unreadable") { return "OpenCode snapshot unreadable; others still load." }
+        if warning.contains("extra non-token fields") { return "Snapshot had extra fields; token counts only." }
+        if warning.contains("snapshot row(s) skipped") { return "Some snapshot rows skipped; counts only." }
         return warning
     }
 }

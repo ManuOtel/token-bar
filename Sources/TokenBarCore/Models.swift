@@ -42,6 +42,13 @@ public enum DatePreset: String, Codable, Hashable, Sendable, CaseIterable {
 }
 
 /// One normalized usage event from either adapter.
+///
+/// `origin` is the host label for OpenCode multi-machine merge: `"local"`
+/// for the Mac database, `"homeserver"` (or a custom label from a sanitized
+/// snapshot) for imported rows. Codex/Claude rows are always `"local"`.
+/// Old encoded records without the key decode with the `"local"` default so
+/// prior reports keep loading. `source` stays `.opencode` for both local
+/// and homeserver OpenCode rows; origin never changes source routing.
 public struct NormalizedUsage: Codable, Hashable, Sendable {
     public var id: String
     public var source: UsageSource
@@ -54,6 +61,7 @@ public struct NormalizedUsage: Codable, Hashable, Sendable {
     public var totalTokens: Int
     public var sessionId: String
     public var requestId: String
+    public var origin: String
 
     public init(
         id: String,
@@ -66,12 +74,15 @@ public struct NormalizedUsage: Codable, Hashable, Sendable {
         reasoningTokens: Int,
         totalTokens: Int,
         sessionId: String,
-        requestId: String
+        requestId: String,
+        origin: String = "local"
     ) {
         self.id = id
         self.source = source
         self.timestamp = timestamp
         self.model = model.isEmpty ? "unknown" : model
+        let trimmedOrigin = origin.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.origin = trimmedOrigin.isEmpty ? "local" : trimmedOrigin
         self.inputTokens = max(0, inputTokens)
         self.outputTokens = max(0, outputTokens)
         // Cached is a subset of input by construction: clamp adversarial
@@ -88,6 +99,59 @@ public struct NormalizedUsage: Codable, Hashable, Sendable {
         self.totalTokens = totalTokens > 0 ? totalTokens : max(0, computed)
         self.sessionId = sessionId
         self.requestId = requestId
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case source
+        case timestamp
+        case model
+        case inputTokens
+        case outputTokens
+        case cachedTokens
+        case reasoningTokens
+        case totalTokens
+        case sessionId
+        case requestId
+        case origin
+    }
+
+    /// Decodes records written before `origin` existed: the key defaults to
+    /// `"local"` instead of failing. Encoding always writes the key.
+    /// Timestamps decode tolerantly: default-strategy `Date` values (Double,
+    /// as written by `JSONEncoder`) first, then ISO-8601 / epoch strings via
+    /// `CodexParser.parseTimestamp`. Genuinely undecodable values rethrow the
+    /// natural `Date` error.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        source = try container.decode(UsageSource.self, forKey: .source)
+        if let date = try? container.decode(Date.self, forKey: .timestamp) {
+            timestamp = date
+        } else if let string = try? container.decode(String.self, forKey: .timestamp),
+                  let parsed = CodexParser.parseTimestamp(string) {
+            timestamp = parsed
+        } else {
+            timestamp = try container.decode(Date.self, forKey: .timestamp)
+        }
+        let rawModel = try container.decode(String.self, forKey: .model)
+        model = rawModel.isEmpty ? "unknown" : rawModel
+        let rawInput = try container.decode(Int.self, forKey: .inputTokens)
+        let rawOutput = try container.decode(Int.self, forKey: .outputTokens)
+        let rawCached = try container.decode(Int.self, forKey: .cachedTokens)
+        let rawReasoning = try container.decode(Int.self, forKey: .reasoningTokens)
+        let rawTotal = try container.decode(Int.self, forKey: .totalTokens)
+        inputTokens = max(0, rawInput)
+        outputTokens = max(0, rawOutput)
+        cachedTokens = min(max(0, rawCached), inputTokens)
+        reasoningTokens = max(0, rawReasoning)
+        let computed = inputTokens + outputTokens
+        totalTokens = rawTotal > 0 ? rawTotal : max(0, computed)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        requestId = try container.decode(String.self, forKey: .requestId)
+        let rawOrigin = try container.decodeIfPresent(String.self, forKey: .origin) ?? "local"
+        let trimmed = rawOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+        origin = trimmed.isEmpty ? "local" : trimmed
     }
 }
 
@@ -108,6 +172,11 @@ public struct DailyBucket: Codable, Hashable, Sendable {
 }
 
 /// Aggregated stats for the current filter/preset scope.
+///
+/// `byOrigin` groups by `"source/origin"` (for example `"opencode/local"`,
+/// `"opencode/homeserver"`, `"codex/local"`), tokens desc then key asc.
+/// Single-origin scopes carry one entry; multi-origin scopes carry one per
+/// present pair. Old payloads without the key decode with an empty list.
 public struct AggregatedStats: Codable, Hashable, Sendable {
     public var totalTokens: Int
     public var inputTokens: Int
@@ -120,6 +189,7 @@ public struct AggregatedStats: Codable, Hashable, Sendable {
     public var lastUpdated: Date?
     public var byModel: [BreakdownEntry]
     public var bySource: [BreakdownEntry]
+    public var byOrigin: [BreakdownEntry]
     public var dailyTrend: [DailyBucket]
 
     public static var empty: AggregatedStats {
@@ -127,8 +197,63 @@ public struct AggregatedStats: Codable, Hashable, Sendable {
             totalTokens: 0, inputTokens: 0, outputTokens: 0,
             cachedTokens: 0, reasoningTokens: 0,
             requests: 0, sessions: 0, estimatedCostUSD: 0,
-            lastUpdated: nil, byModel: [], bySource: [], dailyTrend: []
+            lastUpdated: nil, byModel: [], bySource: [], byOrigin: [], dailyTrend: []
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case totalTokens
+        case inputTokens
+        case outputTokens
+        case cachedTokens
+        case reasoningTokens
+        case requests
+        case sessions
+        case estimatedCostUSD
+        case lastUpdated
+        case byModel
+        case bySource
+        case byOrigin
+        case dailyTrend
+    }
+
+    public init(
+        totalTokens: Int, inputTokens: Int, outputTokens: Int,
+        cachedTokens: Int, reasoningTokens: Int,
+        requests: Int, sessions: Int, estimatedCostUSD: Double,
+        lastUpdated: Date?, byModel: [BreakdownEntry], bySource: [BreakdownEntry],
+        byOrigin: [BreakdownEntry] = [], dailyTrend: [DailyBucket]
+    ) {
+        self.totalTokens = totalTokens
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.cachedTokens = cachedTokens
+        self.reasoningTokens = reasoningTokens
+        self.requests = requests
+        self.sessions = sessions
+        self.estimatedCostUSD = estimatedCostUSD
+        self.lastUpdated = lastUpdated
+        self.byModel = byModel
+        self.bySource = bySource
+        self.byOrigin = byOrigin
+        self.dailyTrend = dailyTrend
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        totalTokens = try container.decode(Int.self, forKey: .totalTokens)
+        inputTokens = try container.decode(Int.self, forKey: .inputTokens)
+        outputTokens = try container.decode(Int.self, forKey: .outputTokens)
+        cachedTokens = try container.decode(Int.self, forKey: .cachedTokens)
+        reasoningTokens = try container.decode(Int.self, forKey: .reasoningTokens)
+        requests = try container.decode(Int.self, forKey: .requests)
+        sessions = try container.decode(Int.self, forKey: .sessions)
+        estimatedCostUSD = try container.decode(Double.self, forKey: .estimatedCostUSD)
+        lastUpdated = try container.decodeIfPresent(Date.self, forKey: .lastUpdated)
+        byModel = try container.decode([BreakdownEntry].self, forKey: .byModel)
+        bySource = try container.decode([BreakdownEntry].self, forKey: .bySource)
+        byOrigin = try container.decodeIfPresent([BreakdownEntry].self, forKey: .byOrigin) ?? []
+        dailyTrend = try container.decode([DailyBucket].self, forKey: .dailyTrend)
     }
 }
 

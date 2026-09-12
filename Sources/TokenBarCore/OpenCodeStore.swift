@@ -42,11 +42,11 @@ import SQLite3
 /// `session_message` mirror pair.
 ///
 /// Mirror selection is deterministic and identical on both levels (see
-/// `combineMessageAndRollup`): one record per `source + requestId`, the
-/// larger `totalTokens` wins, ties break to the earliest `(timestamp, id)`.
-/// Downstream `TokenBarStore.dedupe` still runs unchanged (earliest wins)
-/// and is a no-op for these keys; records with an empty requestId always
-/// pass through with stable content-hashed IDs (see `decodeMessageRow`).
+/// `combineMessageAndRollup`) and in `TokenBarStore.dedupe`: one record per
+/// `source + requestId`, the larger `totalTokens` wins, ties break to the
+/// earliest `(timestamp, id)`. Dedupe is a no-op for already-combined keys;
+/// records with an empty requestId collapse by `source + id` (cloned id-less
+/// rows share stable content-hashed IDs, see `decodeMessageRow`).
 ///
 /// Load-bearing assumptions (re-validate if the OpenCode schema drifts):
 /// - Message rows link to rollup rows by session ID: `message.session_id`
@@ -76,7 +76,8 @@ public enum OpenCodeStore {
     /// Pure row decoder. Testable without a live SQLite file.
     /// `columns` maps lowercased column names to their string values (nil = NULL).
     /// Returns nil for rows without usable timestamp or token counts.
-    public static func decodeRow(_ columns: [String: String?], table: String = "session_v2") -> NormalizedUsage? {
+    /// `origin` labels the host the row was read from (`"local"` default).
+    public static func decodeRow(_ columns: [String: String?], table: String = "session_v2", origin: String = "local") -> NormalizedUsage? {
         var merged: [String: Any] = [:]
 
         // 1. Column-form token counts and metadata.
@@ -155,7 +156,8 @@ public enum OpenCodeStore {
             reasoningTokens: reasoning ?? 0,
             totalTokens: total ?? 0,
             sessionId: sessionId,
-            requestId: requestId
+            requestId: requestId,
+            origin: origin
         )
     }
 
@@ -175,7 +177,7 @@ public enum OpenCodeStore {
     /// column == `assistant` (older `session_message` table). Like the
     /// rollup path, nested `tokens.input` excludes cache, so normalized
     /// input folds cache back in and the total fallback includes it.
-    public static func decodeMessageRow(_ columns: [String: String?], table: String = "message") -> NormalizedUsage? {
+    public static func decodeMessageRow(_ columns: [String: String?], table: String = "message", origin: String = "local") -> NormalizedUsage? {
         // 1. Decode the data blob first (never retained, only projected).
         var data: [String: Any] = [:]
         if let raw = columns["data"] ?? nil,
@@ -295,7 +297,8 @@ public enum OpenCodeStore {
             reasoningTokens: reasoning ?? 0,
             totalTokens: total ?? 0,
             sessionId: sessionId,
-            requestId: requestId
+            requestId: requestId,
+            origin: origin
         )
         // All-zero assistant rows (final empty messages) carry no usage;
         // skipping them keeps request counts meaningful.
@@ -344,9 +347,10 @@ public enum OpenCodeStore {
     }
 
     /// Deterministic mirror selection shared by both granularity levels:
-    /// larger `totalTokens` wins so a stale mirror never shadows fresh
-    /// data; exact ties break to the earliest `(timestamp, id)` so repeated
-    /// loads agree byte-for-byte.
+    /// larger `totalTokens` wins so a stale mirror never shadows fresh data;
+    /// exact ties break to the earliest `(timestamp, id)`, then to the
+    /// lexically smallest `origin`, so repeated loads agree byte-for-byte
+    /// regardless of input order.
     private static func selectMirror(
         _ best: inout [String: NormalizedUsage],
         key: String,
@@ -356,11 +360,20 @@ public enum OpenCodeStore {
             best[key] = candidate
             return
         }
+        best[key] = mirrorWinner(seen: seen, candidate: candidate)
+    }
+
+    /// Shared winner rule (also used by `TokenBarStore.mirrorWinner`): larger
+    /// `totalTokens` wins; ties break to the earliest `(timestamp, id)`, then
+    /// to the lexically smallest `origin` for order-independent attribution.
+    static func mirrorWinner(seen: NormalizedUsage, candidate: NormalizedUsage) -> NormalizedUsage {
         if candidate.totalTokens != seen.totalTokens {
-            if candidate.totalTokens > seen.totalTokens { best[key] = candidate }
-        } else if (candidate.timestamp, candidate.id) < (seen.timestamp, seen.id) {
-            best[key] = candidate
+            return candidate.totalTokens > seen.totalTokens ? candidate : seen
         }
+        if (candidate.timestamp, candidate.id) != (seen.timestamp, seen.id) {
+            return (candidate.timestamp, candidate.id) < (seen.timestamp, seen.id) ? candidate : seen
+        }
+        return candidate.origin < seen.origin ? candidate : seen
     }
 
     /// Deterministic fallback ID for message rows without a message ID.
@@ -412,12 +425,231 @@ public enum OpenCodeStore {
 
     /// Loads all decodable rows from the SQLite file. Throws
     /// `StoreError.sqliteUnavailable` on platforms without the SQLite3 module.
-    public static func loadDatabase(at path: String) throws -> (records: [NormalizedUsage], skipped: Int) {
+    /// `origin` labels every returned record (default `"local"`; extra
+    /// homeserver copies use `"homeserver"`).
+    public static func loadDatabase(at path: String, origin: String = "local") throws -> (records: [NormalizedUsage], skipped: Int) {
 #if canImport(SQLite3)
-        return try sqliteLoad(path: path)
+        return try sqliteLoad(path: path, origin: origin)
 #else
         throw StoreError.sqliteUnavailable
 #endif
+    }
+
+    /// Raw split behind `loadDatabase`: message-level rows and rollup rows
+    /// separately so multi-input merges can apply one global
+    /// `combineMessageAndRollup` (messages win everywhere, rollups fill only
+    /// uncovered sessions). Pure-decode hosts without SQLite get empty parts.
+    public static func loadDatabaseParts(at path: String, origin: String = "local") throws -> (messages: [NormalizedUsage], rollups: [NormalizedUsage], skipped: Int) {
+#if canImport(SQLite3)
+        return try sqliteParts(path: path, origin: origin)
+#else
+        throw StoreError.sqliteUnavailable
+#endif
+    }
+
+    /// Heuristic used when merging already-combined snapshot records back
+    /// into a global combine: rollup request IDs are `sessionID#epochSeconds`
+    /// (see `decodeRow`), message request IDs are opaque UUIDs that never
+    /// contain `#`. Empty request IDs pass through untouched.
+    public static func isRollupRecord(_ record: NormalizedUsage) -> Bool {
+        record.requestId.contains("#")
+    }
+
+    /// Forbidden snapshot keys: prompt text, tool I/O, file paths,
+    /// credentials, and message bodies. The loader ignores them (never
+    /// stored) and reports one sanitized warning per file when any appear.
+    /// Privacy-denylist field names only, no network use (see CI exception).
+    public static let snapshotForbiddenKeys: Set<String> = [
+        "prompt", "prompts", "prompt_text", "prompttext",
+        "tool", "tools", "tool_calls", "toolcalls", "tool_input", "tool_output",
+        "content", "contents", "text", "body", "message", "messages",
+        "messagetext", "message_text", "reasoning_text", "reasoningtext",
+        "path", "paths", "filepath", "filepaths", "file", "files", "cwd",
+        "credential", "credentials", "secret", "secrets", "api_key", "apikey",
+        "token", "authorization",
+        // privacy-denylist: session-field names only, never transmitted.
+        "cookie", "cookies", // privacy-denylist
+    ]
+
+    /// Loads a sanitized homeserver snapshot: a JSON array of normalized
+    /// token-only records as written by `scripts/export-opencode-usage.py`.
+    /// Accepted per-record keys (camelCase or snake_case): `id`,
+    /// `timestamp` (ISO8601 or epoch seconds/millis), `model` (or
+    /// `provider` + `model` pair), token counts (`inputTokens`/`input_tokens`
+    /// etc., plus `cached`/`reasoning`/`total`), `sessionId`/`session_id`,
+    /// `requestId`/`request_id`/`messageId`, `origin`/`host`/`label`.
+    /// `source`, when present, must be `opencode` (other values skip + count).
+    /// Missing `origin` falls back to `originFallback` (`"homeserver"` from
+    /// the Store); embedded labels are allowlisted (see
+    /// `sanitizeOriginLabel`). Counts are taken as normalized (the exporter
+    /// pre-folds cache into input); only the cached read/write aliases sum,
+    /// mirroring the SQLite path. Returns records plus skipped count plus
+    /// whether any forbidden non-token keys were seen and ignored.
+    public static func loadSnapshot(
+        at path: String,
+        originFallback: String = "homeserver"
+    ) throws -> (records: [NormalizedUsage], skipped: Int, sawExtraFields: Bool) {
+        let url = URL(fileURLWithPath: path)
+        let data = try Data(contentsOf: url)
+        guard let json = try? JSONSerialization.jsonObject(with: data),
+              let array = json as? [[String: Any]]
+        else {
+            throw StoreError.sqliteOpenFailed(path)
+        }
+        var records: [NormalizedUsage] = []
+        var skipped = 0
+        var sawExtra = false
+        for element in array {
+            for key in element.keys where snapshotForbiddenKeys.contains(key.lowercased()) {
+                sawExtra = true
+                break
+            }
+            if let record = decodeSnapshotRecord(element, originFallback: originFallback) {
+                records.append(record)
+            } else {
+                skipped += 1
+            }
+        }
+        return (records, skipped, sawExtra)
+    }
+
+    /// Sanitizes an untrusted origin/host label from snapshot data. Only a
+    /// short `[A-Za-z0-9_.-]` form (max 64 chars) is kept; anything else
+    /// (slashes, newlines, spaces, shell metacharacters, empty) falls back.
+    /// `local` and `homeserver` pass through unchanged. Snapshot labels never
+    /// reach a shell, but the allowlist keeps them out of CLI/dashboard text
+    /// verbatim-safe by construction.
+    public static func sanitizeOriginLabel(_ raw: String?, fallback: String = "homeserver") -> String {
+        guard let raw else { return fallback }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 64 else { return fallback }
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")
+        guard trimmed.unicodeScalars.allSatisfy({ allowed.contains($0) }) else { return fallback }
+        return trimmed
+    }
+
+    /// Pure snapshot record decoder (no filesystem). Returns nil for rows
+    /// without usable timestamp or token counts, for non-opencode sources,
+    /// and for all-zero rows (empty messages carry no usage).
+    public static func decodeSnapshotRecord(
+        _ dict: [String: Any],
+        originFallback: String = "homeserver"
+    ) -> NormalizedUsage? {
+        func text(_ keys: String...) -> String? {
+            for key in keys {
+                if let value = dict[key] as? String, !value.isEmpty { return value }
+                let low = key.lowercased()
+                for (k, v) in dict where k.lowercased() == low {
+                    if let s = v as? String, !s.isEmpty { return s }
+                }
+            }
+            return nil
+        }
+        func int(_ keys: String...) -> Int? {
+            for key in keys {
+                let candidates = [key] + [key.lowercased()]
+                for candidate in candidates {
+                    var raw: Any?
+                    if let hit = dict[candidate] { raw = hit }
+                    else {
+                        for (k, v) in dict where k.lowercased() == candidate.lowercased() { raw = v; break }
+                    }
+                    guard let value = raw else { continue }
+                    if let number = value as? NSNumber, String(cString: number.objCType) == "c" { continue }
+                    if let i = value as? Int { return i }
+                    if let d = value as? Double { return Int(d) }
+                    if let n = value as? NSNumber { return n.intValue }
+                    if let s = value as? String {
+                        if let parsed = Int(s) { return parsed }
+                        if let parsed = Double(s) { return Int(parsed) }
+                    }
+                }
+            }
+            return nil
+        }
+        func raw(_ keys: String...) -> Any? {
+            for key in keys {
+                if let hit = dict[key] { return hit }
+                for (k, v) in dict where k.lowercased() == key.lowercased() { return v }
+            }
+            return nil
+        }
+        if let source = text("source"), !source.isEmpty, source.lowercased() != "opencode" {
+            return nil
+        }
+        let timestamp = CodexParser.parseTimestamp(raw("timestamp", "time", "created_at", "createdAt", "created", "date"))
+        guard let timestamp else { return nil }
+        let input = int("inputTokens", "input_tokens", "inputtokens", "input", "prompt_tokens", "prompttokens", "tokens_input", "tokensinput")
+        let output = int("outputTokens", "output_tokens", "outputtokens", "output", "completion_tokens", "completiontokens", "tokens_output", "tokensoutput")
+        // Same read/write sum rule as the SQLite path (`decodeRow`): generic
+        // cached aliases count as read; an explicit write component adds on.
+        let cacheRead = int("cachedTokens", "cached_tokens", "cachedtokens", "cached", "cached_input_tokens", "cache_read_input_tokens", "tokens_cache_read")
+        let cacheWrite = int("cache_write_input_tokens", "tokens_cache_write")
+        let cached: Int? = {
+            if cacheRead == nil && cacheWrite == nil { return nil }
+            return (cacheRead ?? 0) + (cacheWrite ?? 0)
+        }()
+        let reasoning = int("reasoningTokens", "reasoning_tokens", "reasoningtokens", "reasoning", "tokens_reasoning", "tokensreasoning")
+        let total = int("totalTokens", "total_tokens", "totaltokens", "total", "tokens_total", "tokenstotal", "tokens")
+        guard input != nil || output != nil || cached != nil || reasoning != nil || total != nil else { return nil }
+        let provider = text("provider", "providerID", "providerId", "provider_id")
+        let modelName = text("model", "model_name", "modelname", "modelID", "modelId", "model_id")
+        let model: String = {
+            if let name = modelName, !name.isEmpty {
+                if name.hasPrefix("{") { return decodeModelLabel(name) ?? "unknown" }
+                if let provider, !provider.isEmpty, !name.contains("/") { return "\(provider)/\(name)" }
+                return name
+            }
+            return provider ?? "unknown"
+        }()
+        let sessionId = text("sessionId", "session_id", "sessionid", "session") ?? ""
+        let requestId = text("requestId", "request_id", "requestid", "request", "messageId", "message_id", "messageid", "id_message", "message") ?? ""
+        let origin = sanitizeOriginLabel(
+            text("origin", "host", "hostname", "label", "machine"),
+            fallback: sanitizeOriginLabel(originFallback, fallback: "homeserver"))
+        var id = text("id") ?? ""
+        if id.isEmpty {
+            let epoch = Int(timestamp.timeIntervalSince1970)
+            let session = sessionId.isEmpty ? "nosession" : sessionId
+            if !requestId.isEmpty {
+                id = "opencode:\(requestId)"
+            } else {
+                var projection: [String: String] = [:]
+                projection["model"] = model
+                projection["session"] = session
+                projection["input"] = "\(input ?? 0)"
+                projection["output"] = "\(output ?? 0)"
+                projection["cached"] = "\(cached ?? 0)"
+                projection["reasoning"] = "\(reasoning ?? 0)"
+                projection["total"] = "\(total ?? 0)"
+                var hash: UInt64 = 14_695_981_039_346_656_037
+                for key in projection.keys.sorted() {
+                    for byte in "\(key)=\(projection[key]!)".utf8 {
+                        hash ^= UInt64(byte)
+                        hash &*= 1_099_511_628_211
+                    }
+                }
+                id = String(format: "opencode:snapshot:%@:m%08x", session, UInt32(truncatingIfNeeded: hash) ^ UInt32(epoch))
+            }
+        }
+        let record = NormalizedUsage(
+            id: id,
+            source: .opencode,
+            timestamp: timestamp,
+            model: model,
+            inputTokens: input ?? 0,
+            outputTokens: output ?? 0,
+            cachedTokens: cached ?? 0,
+            reasoningTokens: reasoning ?? 0,
+            totalTokens: total ?? 0,
+            sessionId: sessionId,
+            requestId: requestId,
+            origin: origin
+        )
+        guard record.totalTokens > 0 || record.inputTokens > 0 || record.outputTokens > 0
+            || record.cachedTokens > 0 || record.reasoningTokens > 0
+        else { return nil }
+        return record
     }
 
     // MARK: - Private helpers
@@ -546,7 +778,14 @@ public enum OpenCodeStore {
     }
 
 #if canImport(SQLite3)
-    private static func sqliteLoad(path: String) throws -> (records: [NormalizedUsage], skipped: Int) {
+    private static func sqliteLoad(path: String, origin: String = "local") throws -> (records: [NormalizedUsage], skipped: Int) {
+        let parts = try sqliteParts(path: path, origin: origin)
+        // Message rows win where they exist; rollups fill uncovered
+        // sessions only, so the two levels never double count.
+        return (combineMessageAndRollup(messages: parts.messages, rollups: parts.rollups), parts.skipped)
+    }
+
+    private static func sqliteParts(path: String, origin: String = "local") throws -> (messages: [NormalizedUsage], rollups: [NormalizedUsage], skipped: Int) {
         var db: OpaquePointer?
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
         guard sqlite3_open_v2(path, &db, flags, nil) == SQLITE_OK, let db else {
@@ -559,21 +798,19 @@ public enum OpenCodeStore {
         var skipped = 0
         for table in messageTableNames {
             let (records, tableSkipped) = loadTable(db: db, table: table) {
-                decodeMessageRow($0, table: $1)
+                decodeMessageRow($0, table: $1, origin: origin)
             }
             messages.append(contentsOf: records)
             skipped += tableSkipped
         }
         for table in tableNames {
             let (records, tableSkipped) = loadTable(db: db, table: table) {
-                decodeRow($0, table: $1)
+                decodeRow($0, table: $1, origin: origin)
             }
             rollups.append(contentsOf: records)
             skipped += tableSkipped
         }
-        // Message rows win where they exist; rollups fill uncovered
-        // sessions only, so the two levels never double count.
-        return (combineMessageAndRollup(messages: messages, rollups: rollups), skipped)
+        return (messages, rollups, skipped)
     }
 
     private static func loadTable(

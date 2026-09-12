@@ -5,13 +5,16 @@
 ```
 Package.swift
 Sources/TokenBarCore/   # pure logic, Foundation only (no network, no auth)
-  Models.swift          # UsageSource, SourceFilter, DatePreset, NormalizedUsage,
-                        # AggregatedStats, BreakdownEntry, DailyBucket, BestMonth, LoadReport
+  Models.swift          # UsageSource, SourceFilter, DatePreset, NormalizedUsage
+                        # (+ origin host label, old rows default local),
+                        # AggregatedStats (+ byOrigin source/origin pairs),
+                        # BreakdownEntry, DailyBucket, BestMonth, LoadReport
   CodexParser.swift     # recursive *.jsonl reader, tolerant line decoder
   ClaudeParser.swift    # recursive *.jsonl reader for ~/.claude/projects
   OpenCodeStore.swift   # pure decodeRow (rollups) + decodeMessageRow
                         # (per-message) + message-beats-rollup combine;
-                        # optional SQLite loader (read-only)
+                        # optional SQLite loader (read-only) + sanitized
+                        # snapshot loader (token counts only)
   Pricing.swift         # static per-1M rates + cost formula
   Aggregator.swift      # filter / aggregate / bestMonth / dailyTrend (pure, clock-injected)
   Store.swift           # orchestrates adapters, env overrides, deterministic dedupe
@@ -30,6 +33,9 @@ Tests/TokenBarCoreTests/
   ReportTests.swift     # pure formatter: totals, sanitizer, best-month, JSON determinism
 Fixtures/               # synthetic samples only, safe to commit
 scripts/verify_logic.py # host-side mirror of core semantics (no Swift here)
+scripts/export-opencode-usage.py # read-only homeserver exporter: SQLite
+                        # mode=ro to sanitized token-only JSON (user copies
+                        # the file; no network, no HTTP API)
 scripts/show-usage.sh   # one-command CLI wrapper: swift run TokenBarCLI "$@"
 scripts/run-token-bar.sh # one-command menu bar launcher: swift run TokenBarApp
 scripts/build-app.sh     # versioned TokenBar.app bundle into dist/ (Info.plist, LSUIElement)
@@ -49,7 +55,10 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   total; message mirrors share stable message IDs so existing dedupe
   collapses them.
 - **Normalized records**: every event becomes one `NormalizedUsage` with
-  clamped non-negative counts and `total` derived deterministically.
+  clamped non-negative counts and `total` derived deterministically, plus an
+  `origin` host label (`local` default; `homeserver` for extra DB copies and
+  snapshots missing the key). `source` stays `.opencode` on every host; only
+  `byOrigin` (`source/origin` pairs) splits the combined total.
   Codex resolves models per file (line-local `model|model_name` wins, else
   latest `turn_context` for the same `turn_id`, else a single-model
   `thread_id` fallback, else `"unknown"`; ambiguous threads never guess).
@@ -70,7 +79,10 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   No `URLSession`, no keychain, no cookies anywhere.
 - **Test roots overrideable**: `TOKENBAR_CODEX_ROOT` / `TOKENBAR_OPENCODE_DB`
   / `TOKENBAR_CLAUDE_ROOT` env vars redirect all adapters; tests use temp
-  dirs + inline rows.
+  dirs + inline rows. Offline merge adds `TOKENBAR_OPENCODE_DB_EXTRA`
+  (extra read-only DBs, origin `homeserver`) and
+  `TOKENBAR_OPENCODE_USAGE_JSON` (sanitized snapshots); empty entries are
+  ignored and missing extras warn only.
 - **SQLite optional**: the live DB loader compiles only under
   `#if canImport(SQLite3)`; `decodeRow` stays pure and fully tested on hosts
   without SQLite (like this Linux worker).
@@ -91,10 +103,17 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
 ## Data flow
 
 ```
-files/db --CodexParser/ClaudeParser/OpenCodeStore--> [NormalizedUsage]
-  --TokenBarStore.dedupe--> LoadReport --Aggregator.filter--> scoped
-  --Aggregator.aggregate / .bestMonth--> AggregatedStats --> DashboardView
+files/db/snapshots --CodexParser/ClaudeParser/OpenCodeStore--> [NormalizedUsage]
+  --OpenCodeStore.combineMessageAndRollup (global across local + extras +
+    snapshots; messages win, rollups fill uncovered only)
+  --TokenBarStore.dedupe (max-total wins, earliest tiebreak, id-less by id)
+  --> LoadReport --Aggregator.filter--> scoped
+  --Aggregator.aggregate / .bestMonth--> AggregatedStats (+ byOrigin)
+  --> DashboardView (combined OpenCode row + local/homeserver sub-lines)
   --ReportFormatter.section/render--> TokenBarCLI terminal report
+    (+ By origin when >1 origin; JSON carries byOrigin)
+homeserver db --export-opencode-usage.py (read-only)--> snapshot JSON
+  --user-operated file copy--> TOKENBAR_OPENCODE_USAGE_JSON (no network)
 ```
 
 ## Failure model
@@ -106,4 +125,6 @@ files/db --CodexParser/ClaudeParser/OpenCodeStore--> [NormalizedUsage]
 | Malformed line / row | skipped + counted |
 | Unknown model | `"unknown"` label, fallback price |
 | Future timestamps | excluded by preset upper bound |
-| Duplicate requestIds | earliest kept |
+| Duplicate requestIds | larger total kept, earliest breaks ties |
+| Duplicate id-less IDs | identical IDs collapse, distinct survive |
+| Covered rollups (any origin) | dropped, messages win |

@@ -43,6 +43,7 @@ public enum Aggregator {
         var lastUpdated: Date?
         var modelGroups: [String: (tokens: Int, requests: Int, cost: Double)] = [:]
         var sourceGroups: [String: (tokens: Int, requests: Int, cost: Double)] = [:]
+        var originGroups: [String: (tokens: Int, requests: Int, cost: Double)] = [:]
 
         for record in records {
             total += record.totalTokens
@@ -67,6 +68,13 @@ public enum Aggregator {
             group.requests += 1
             group.cost += recordCost
             sourceGroups[sourceKey] = group
+            let originLabel = record.origin.trimmingCharacters(in: .whitespacesAndNewlines)
+            let originKey = "\(record.source.rawValue)/\(originLabel.isEmpty ? "local" : originLabel)"
+            var originGroup = originGroups[originKey] ?? (0, 0, 0)
+            originGroup.tokens += record.totalTokens
+            originGroup.requests += 1
+            originGroup.cost += recordCost
+            originGroups[originKey] = originGroup
         }
 
         return AggregatedStats(
@@ -81,6 +89,7 @@ public enum Aggregator {
             lastUpdated: lastUpdated,
             byModel: breakdown(modelGroups),
             bySource: breakdown(sourceGroups),
+            byOrigin: breakdown(originGroups),
             dailyTrend: dailyTrend(records, calendar: calendar)
         )
     }
