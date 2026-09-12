@@ -243,6 +243,7 @@ final class PricingCatalogTests: XCTestCase {
             "https://openrouter.ai/api/v1/models?foo=bar",
             "https://openrouter.ai/api/v1/models#frag",
             "https://openrouter.ai:8443/api/v1/models",
+            "https://user:pass@openrouter.ai/api/v1/models",
         ]
         for raw in offAllowlist {
             let result = await service.refresh(now: now, catalogURL: URL(string: raw)!, cacheURL: path)
