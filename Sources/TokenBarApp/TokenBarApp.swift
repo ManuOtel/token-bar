@@ -16,6 +16,7 @@ struct TokenBarApp: App {
     @State private var source: SourceFilter = .all
     @State private var preset: DatePreset = .today
     @State private var isLoading = false
+    @State private var isExpanded = false
     @StateObject private var loginItem = LaunchAtLoginController()
 
     private static let sourceOrder: [SourceFilter] = [.all, .codex, .opencode, .claude]
@@ -43,10 +44,11 @@ struct TokenBarApp: App {
                 },
                 bestMonthKey: bestKey,
                 isLoading: $isLoading,
+                isExpanded: $isExpanded,
                 onRefresh: refresh,
                 loginItem: loginItem
             )
-            .frame(width: 400, height: 600)
+            .frame(width: 400, height: isExpanded ? 600 : nil)
         }
         .menuBarExtraStyle(.window)
     }

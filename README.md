@@ -241,17 +241,12 @@ clearly labeled approximations.
 
 ## Menu bar dashboard
 
-Dark usage cockpit in the macOS menu bar popover. Hero total tokens for
-the active source/range, estimated cost (estimate only), refresh button,
-single-line **Source** chips (All / Codex / OpenCode / Claude, each with
-its token count in the current range) and **Range** chips
-(Today / 24H / 7D / 30D / Best / All), input/output/cached/reasoning
-cards, an always-visible source breakdown (zero sources stay listed as
-`no records`), top models, 14-day trend, sanitized notices, and the
-launch-at-login toggle. The OpenCode row keeps the combined total and, when
-both origins are present, adds one short sub-line each for local vs
-homeserver. An empty range names the active source and range
-and offers one-tap jumps to All sources / Lifetime.
+Dark usage cockpit in the macOS menu bar popover (400pt, macOS 14 SwiftUI, no extra chart dependency).
+
+- **Compact (initial, no scroll):** hero token total for the active source/range, estimated cost (estimate only), `Source` chips (All / Codex / OpenCode / Claude with per-source tokens in range) and `Range` chips (Today / 24H / 7D / 30D / Best / All), a compact visual summary (input/output composition ring with cached/reasoning labelled as subsets, stacked source bar, 14-day mini trend), and a clear `Details` expand action plus a one-line notices/login status footer.
+- **Expanded (Details, scrollable):** toggles back to compact via `Show less` in the header. Exposes input/output/cached/reasoning cards (cached reads "subset of input", reasoning "subset of output"), a composition card whose ring splits the total into input vs output only with subset percentages in text, an always-visible source breakdown (zero sources stay listed as `no records`) with a stacked distribution bar, top-5 model bars with share tooltips, the full 14-day trend with date range, sanitized notices, and the launch-at-login toggle.
+- Charts are custom SwiftUI (`DashboardCharts.swift`: ring, stacked bar, model bars, daily bars) fed by `DashboardInsights` shares in `TokenBarCore`. Cached and reasoning tokens never render as extra ring slices.
+- Preserved in both modes: source/range filtering, refresh button + loading state, empty-range states (with one-tap jumps to All sources / Lifetime), sanitized warnings (never paths), the OpenCode combined total plus local vs homeserver sub-lines when both origins are present, best-month key, last-updated line, and launch-at-login (`SMAppService.mainApp`; disabled dev-run copy under `swift run`).
 
 ## Testing
 

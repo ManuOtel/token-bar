@@ -114,6 +114,17 @@ Acceptance:
 - Future sources tracked, not built: Gemini CLI, Copilot, Cursor, other JSONL/SQLite histories. Each needs: default path, record shape, token-field map, cache semantics, dedupe key, privacy review, fixtures + tests.
 - Open follow-up issues per source; close this plan when M0-M5 ship.
 
+### M7 - Compact/detail dashboard with subset-safe charts (next)
+
+Status: in progress on `feat/compact-detail-dashboard`. Pricing untouched (`Pricing.swift` + pricing tests frozen).
+
+Acceptance:
+
+- Compact initial popover (400pt, no scroll): hero token total, estimated cost + req/sess line, source/range chips, composition ring + stacked source bar + mini 14-day trend, a `Details` expand action, and a one-line notices/login-status footer. No clipped or wrapped controls.
+- Expanded Details mode: toggles back via `Show less`; exposes metric cards, composition card, always-visible source rows with OpenCode local/homeserver sub-lines, top-5 model bars, full 14-day trend with date range, full sanitized notices, and the launch-at-login toggle. Existing filters, refresh, empty states, warnings, origin split, and login behavior all preserved.
+- Charts (`DashboardCharts.swift` on SwiftUI/macOS 14 only, shares from `DashboardInsights`): ring splits the total into input vs output only; cached reads "subset of input" and reasoning "subset of output" in legend + caption; source/model bars show percent-of-total shares; trend bars scale to the peak bucket with tooltips and accessibility labels.
+- Tests: `DashboardInsightsTests` covers empty scope (zero shares, no NaN), input/output split + subset ratios, share normalization/order, trend peak scaling, and top-model limits. No screenshot tests. `swift build` + `swift test` green on Mac; `Pricing.swift` and pricing tests unmodified.
+
 ## Test strategy
 
 - Mac (truth): `swift build`, `swift test`. Covers parsers, aggregator (presets, bounds inclusive of `now`, best-month earliest-tiebreak, empty agg), pricing, report sanitizer + JSON determinism, store dedupe.
