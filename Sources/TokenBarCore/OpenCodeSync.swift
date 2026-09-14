@@ -467,30 +467,38 @@ public protocol OpenCodeSnapshotFetching: Sendable {
 /// The controller funnels every pull (startup, manual, polling) through one
 /// tracked task, so Settings Cancel and disabling sync cancel whatever is
 /// running -- not just polling pulls. Newest wins: tracking a task cancels
-/// the previous one, and only the still-current task may publish its
-/// outcome. Lock-guarded; safe from any thread.
+/// the previous one, and only the still-current token may publish its
+/// outcome. Identity is a UUID token because `Task` is a struct and has no
+/// reference identity. Lock-guarded; safe from any thread.
 public final class OpenCodeSyncTaskOwner: @unchecked Sendable {
     private let lock = NSLock()
-    private var current: Task<OpenCodeSyncResult, Never>?
+    private var currentID: UUID?
+    private var currentTask: Task<OpenCodeSyncResult, Never>?
 
     public init() {}
 
     /// Tracks `task` as the in-flight pull, cancelling any previous one.
-    public func track(_ task: Task<OpenCodeSyncResult, Never>) {
+    /// Returns the identity token to present to `complete`.
+    @discardableResult
+    public func track(_ task: Task<OpenCodeSyncResult, Never>) -> UUID {
+        let id = UUID()
         lock.lock()
         defer { lock.unlock() }
-        current?.cancel()
-        current = task
+        currentTask?.cancel()
+        currentTask = task
+        currentID = id
+        return id
     }
 
-    /// Clears `task` if it is still current. Returns true only then, so a
-    /// superseded pull never publishes stale UI state.
+    /// Clears the tracked pull if `id` is still current. Returns true only
+    /// then, so a superseded pull never publishes stale UI state.
     @discardableResult
-    public func complete(_ task: Task<OpenCodeSyncResult, Never>) -> Bool {
+    public func complete(id: UUID) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard current === task else { return false }
-        current = nil
+        guard currentID == id else { return false }
+        currentID = nil
+        currentTask = nil
         return true
     }
 
@@ -499,14 +507,15 @@ public final class OpenCodeSyncTaskOwner: @unchecked Sendable {
     public func cancel() {
         lock.lock()
         defer { lock.unlock() }
-        current?.cancel()
-        current = nil
+        currentTask?.cancel()
+        currentTask = nil
+        currentID = nil
     }
 
     public var isRunning: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return current != nil
+        return currentID != nil
     }
 }
 

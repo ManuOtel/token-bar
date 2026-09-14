@@ -54,14 +54,15 @@ final class OpenCodeSyncController: ObservableObject {
             let config = await MainActor.run { self.config }
             return await service.sync(config: config)
         }
-        await MainActor.run {
-            owner.track(task)
+        let token: UUID = await MainActor.run {
+            let id = owner.track(task)
             isSyncing = true
             lastError = nil
+            return id
         }
         let result = await task.value
         await MainActor.run {
-            guard owner.complete(task) else { return }
+            guard owner.complete(id: token) else { return }
             status = service.loadStatus()
             lastError = result.error
             lastDidUpdate = result.didUpdateCache

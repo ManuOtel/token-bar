@@ -343,18 +343,21 @@ final class OpenCodeSyncTests: XCTestCase {
         let owner = OpenCodeSyncTaskOwner()
         XCTAssertFalse(owner.isRunning)
         let first = slowPullResult("first")
-        owner.track(first)
+        let id1 = owner.track(first)
         XCTAssertTrue(owner.isRunning)
         let second = slowPullResult("second")
-        owner.track(second)
+        let id2 = owner.track(second)
         // Tracking the second pull cancels the first.
         XCTAssertTrue(first.isCancelled)
         XCTAssertFalse(second.isCancelled)
-        // The superseded pull must not publish.
-        XCTAssertFalse(owner.complete(first))
+        // The superseded token must not publish.
+        XCTAssertFalse(owner.complete(id: id1))
+        XCTAssertNotEqual(id1, id2)
         XCTAssertTrue(owner.isRunning)
-        XCTAssertTrue(owner.complete(second))
+        XCTAssertTrue(owner.complete(id: id2))
         XCTAssertFalse(owner.isRunning)
+        // Completing twice is a no-op: the token is spent.
+        XCTAssertFalse(owner.complete(id: id2))
         _ = await first.value
         second.cancel()
         _ = await second.value
@@ -363,11 +366,11 @@ final class OpenCodeSyncTests: XCTestCase {
     func testTaskOwnerCancelReachesInFlightPull() async {
         let owner = OpenCodeSyncTaskOwner()
         let slow = slowPullResult("slow")
-        owner.track(slow)
+        let id = owner.track(slow)
         owner.cancel()
         XCTAssertTrue(slow.isCancelled)
         XCTAssertFalse(owner.isRunning)
-        XCTAssertFalse(owner.complete(slow))
+        XCTAssertFalse(owner.complete(id: id))
         _ = await slow.value
     }
 
