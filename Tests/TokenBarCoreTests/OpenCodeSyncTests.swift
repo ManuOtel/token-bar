@@ -248,7 +248,9 @@ final class OpenCodeSyncTests: XCTestCase {
         XCTAssertNil(result.error)
         let loaded = try OpenCodeStore.loadSnapshot(at: cache.path)
         XCTAssertEqual(loaded.records.count, 1)
-        XCTAssertEqual(loaded.records.first?.origin, "remote")
+        // Stamping: the fixture's default `remote` origin becomes the
+        // alias-derived endpoint label (`myserver` from enabledConfig).
+        XCTAssertEqual(loaded.records.first?.origin, "myserver")
         XCTAssertEqual(loaded.records.first?.source, .opencode)
         let persisted = service.loadStatus(from: status)
         XCTAssertNotNil(persisted.lastSuccessAt)
