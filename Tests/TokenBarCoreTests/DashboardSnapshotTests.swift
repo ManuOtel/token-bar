@@ -188,15 +188,41 @@ final class DashboardSnapshotTests: XCTestCase {
         XCTAssertEqual(cheaper.menuTotalTokens, priced.menuTotalTokens)
     }
 
-    // MARK: - Menu title formatting unchanged
+    // MARK: - Menu title shares the compact count contract
 
-    func testMenuTitleFormattingUnchanged() {
+    func testMenuTitleUsesSharedCompactFormat() {
         XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 0), "0")
         XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 999), "999")
-        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 1000), "1.0k")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 1000), "1k")
         XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 1500), "1.5k")
-        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 999_999), "1000.0k")
-        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 1_000_000), "1.00M")
-        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 2_345_678), "2.35M")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 999_949), "999.9k")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 999_950), "1M")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 999_999), "1M")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 1_000_000), "1M")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 2_345_678), "2.3M")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 999_949_999), "999.9M")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 999_950_000), "1B")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 1_000_000_000), "1B")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 2_416_100_000), "2.4B")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 2_000_000_000), "2B")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 999_949_999_999), "999.9B")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 999_950_000_000), "1T")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 1_000_000_000_000), "1T")
+        XCTAssertEqual(DashboardSnapshot.menuTitle(forTotal: 1_500_000_000_000), "1.5T")
+    }
+
+    func testMenuTitleMatchesSharedCompactFormatter() {
+        let samples = [
+            0, 1, -1, 999, 1000, 1500, 999_949, 999_950, 1_000_000,
+            2_345_678, 999_949_999, 999_950_000, 1_000_000_000,
+            2_416_100_000, 999_949_999_999, 999_950_000_000,
+            1_500_000_000_000, -1500, Int.max, Int.min,
+        ]
+        for total in samples {
+            XCTAssertEqual(
+                DashboardSnapshot.menuTitle(forTotal: total),
+                TokenCountFormat.compact(total),
+                "menu title must equal the shared compact count for \(total)")
+        }
     }
 }
