@@ -102,6 +102,17 @@ public enum StartupReportCache {
         return try? decode(data).report
     }
 
+    /// Derives both initial UI values from one cache seed so the app reads
+    /// and decodes the file exactly once at startup. Nil (first run,
+    /// missing/corrupt cache) maps to the previous empty report with no
+    /// stale banner; a cached report with records maps to itself with the
+    /// stale banner on. A cached but record-empty report maps to itself
+    /// with no banner, preserving the empty + loading path. Pure for tests.
+    public static func initialState(cached: LoadReport?) -> (report: LoadReport, isShowingStaleCache: Bool) {
+        let report = cached ?? LoadReport(records: [], skippedCodexLines: 0, skippedOpenCodeRows: 0, warnings: [])
+        return (report, cached?.records.isEmpty == false)
+    }
+
     /// Persists the fresh report atomically. Creates parent directories.
     /// Throws on encode/write failure; callers must ignore the error so a
     /// cache write failure never breaks a successful fresh load.

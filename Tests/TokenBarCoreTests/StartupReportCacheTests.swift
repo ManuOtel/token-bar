@@ -193,4 +193,29 @@ final class StartupReportCacheTests: XCTestCase {
         XCTAssertTrue(state.finish(generation: current))
         XCTAssertNotNil(state.beginManual())
     }
+
+    // MARK: - Single-seed initial state
+
+    func testInitialStateDerivesBothValuesFromOneSeed() {
+        // First run (no cache): empty report, no stale banner.
+        let empty = StartupReportCache.initialState(cached: nil)
+        XCTAssertTrue(empty.report.records.isEmpty)
+        XCTAssertFalse(empty.isShowingStaleCache)
+        // Cached but record-empty: the cached report itself (warnings kept),
+        // still no stale banner so the empty + loading path is preserved.
+        let cachedEmpty = LoadReport(
+            records: [], skippedCodexLines: 1, skippedOpenCodeRows: 2,
+            warnings: ["OpenCode snapshot unreadable; others still load."],
+            skippedClaudeLines: 3)
+        let fromEmpty = StartupReportCache.initialState(cached: cachedEmpty)
+        XCTAssertEqual(fromEmpty.report, cachedEmpty)
+        XCTAssertFalse(fromEmpty.isShowingStaleCache)
+        // Cached with records: the same report with the stale banner on.
+        let cached = LoadReport(
+            records: [record("a")], skippedCodexLines: 0,
+            skippedOpenCodeRows: 0, warnings: [], skippedClaudeLines: 0)
+        let fromCached = StartupReportCache.initialState(cached: cached)
+        XCTAssertEqual(fromCached.report, cached)
+        XCTAssertTrue(fromCached.isShowingStaleCache)
+    }
 }

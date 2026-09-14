@@ -14,9 +14,9 @@ struct TokenBarApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     // Perceived startup: show the last normalized report immediately so the
     // menu is useful before the full history scan finishes. First run with
-    // no cache keeps the previous empty + loading behavior.
-    @State private var report: LoadReport = StartupReportCache.load()
-        ?? LoadReport(records: [], skippedCodexLines: 0, skippedOpenCodeRows: 0, warnings: [])
+    // no cache keeps the previous empty + loading behavior. Both values
+    // derive from one shared seed so startup reads/decodes the file once.
+    @State private var report: LoadReport
     @State private var source: SourceFilter = .all
     @State private var preset: DatePreset = .today
     @State private var isLoading = false
@@ -24,10 +24,16 @@ struct TokenBarApp: App {
     // True only when the on-screen report came from the startup cache and
     // the fresh background scan has not finished yet. Cleared on the first
     // fresh completion so cached values read as stale, never as live.
-    @State private var isShowingStaleCache: Bool = (StartupReportCache.load()?.records.isEmpty == false)
+    @State private var isShowingStaleCache: Bool
     @State private var refreshState = StartupRefreshState()
     @StateObject private var loginItem = LaunchAtLoginController()
     @StateObject private var pricing = PricingController()
+
+    init() {
+        let initial = StartupReportCache.initialState(cached: StartupReportCache.load())
+        _report = State(initialValue: initial.report)
+        _isShowingStaleCache = State(initialValue: initial.isShowingStaleCache)
+    }
 
     var body: some Scene {
         // One explicit clock per render: the snapshot reuses it for the
