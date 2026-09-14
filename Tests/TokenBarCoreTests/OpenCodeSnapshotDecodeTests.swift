@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import TokenBarCore
 
-/// Snapshot decode parity for the per-record lowercase-index hot path.
+/// Snapshot decode parity for the lazy case-insensitive fallback.
 /// Hermetic, no timing assertions, no private files. Synthetic only.
 final class OpenCodeSnapshotDecodeTests: XCTestCase {
     func testMixedCasingDecodesLikeCanonical() {
@@ -166,14 +166,67 @@ final class OpenCodeSnapshotDecodeTests: XCTestCase {
         ]
         XCTAssertEqual(
             OpenCodeStore.decodeSnapshotRecord(exactWins)?.inputTokens, 111)
-        // No exact alias present: lexicographically smallest original key
-        // wins ("INPUTTOKENS" < "InputTokens" in byte order).
+        // No exact alias present: the lazy fallback resolves the collision to
+        // the lexicographically smallest original key
+        // ("INPUTTOKENS" < "InputTokens" in byte order).
         let smallestWins: [String: Any] = [
             "timestamp": "2026-09-11T10:00:00Z", "model": "m",
             "INPUTTOKENS": 111, "InputTokens": 222,
         ]
         XCTAssertEqual(
             OpenCodeStore.decodeSnapshotRecord(smallestWins)?.inputTokens, 111)
+    }
+
+    func testHeterogeneousCollisionKeepsValidString() {
+        // An Int under the smaller key must not hide a valid string collision
+        // for text fields (matches the old scan, which skipped non-strings).
+        let dict: [String: Any] = [
+            "timestamp": "2026-09-11T10:00:00Z",
+            "MODEL": 123, "Model": "kept-model",
+            "inputTokens": 10, "outputTokens": 5,
+        ]
+        XCTAssertEqual(
+            OpenCodeStore.decodeSnapshotRecord(dict)?.model, "kept-model")
+    }
+
+    func testCoercionParity() {
+        let base: [String: Any] = [
+            "timestamp": "2026-09-11T10:00:00Z", "model": "m",
+            "sessionId": "s", "requestId": "r",
+        ]
+        // Bool counts are rejected (that field reads as missing).
+        var bools = base
+        bools["inputTokens"] = true
+        bools["outputTokens"] = 5
+        let boolRecord = OpenCodeStore.decodeSnapshotRecord(bools)
+        XCTAssertNotNil(boolRecord)
+        XCTAssertEqual(boolRecord?.inputTokens, 0)
+        XCTAssertEqual(boolRecord?.outputTokens, 5)
+        var allBools = base
+        allBools["inputTokens"] = true
+        allBools["outputTokens"] = false
+        XCTAssertNil(OpenCodeStore.decodeSnapshotRecord(allBools))
+        // String integers are accepted.
+        var strings = base
+        strings["inputTokens"] = "120"
+        strings["outputTokens"] = "34"
+        let stringRecord = OpenCodeStore.decodeSnapshotRecord(strings)
+        XCTAssertEqual(stringRecord?.inputTokens, 120)
+        XCTAssertEqual(stringRecord?.outputTokens, 34)
+        // String decimals truncate toward zero.
+        var decimals = base
+        decimals["inputTokens"] = "10.9"
+        decimals["outputTokens"] = "5.1"
+        let decimalRecord = OpenCodeStore.decodeSnapshotRecord(decimals)
+        XCTAssertEqual(decimalRecord?.inputTokens, 10)
+        XCTAssertEqual(decimalRecord?.outputTokens, 5)
+        // Doubles truncate toward zero.
+        var doubles = base
+        doubles["inputTokens"] = 10.9
+        doubles["outputTokens"] = 5.9
+        let doubleRecord = OpenCodeStore.decodeSnapshotRecord(doubles)
+        XCTAssertEqual(doubleRecord?.inputTokens, 10)
+        XCTAssertEqual(doubleRecord?.outputTokens, 5)
     }
 
     func testTimestampAndCachedAliases() {

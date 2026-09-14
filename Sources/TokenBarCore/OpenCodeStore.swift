@@ -535,22 +535,56 @@ public enum OpenCodeStore {
         _ dict: [String: Any],
         originFallback: String = "homeserver"
     ) -> NormalizedUsage? {
-        // One per-record lowercase index: the old text/int/raw closures each
-        // rescanned every key case-insensitively, so a record paid O(fields x
-        // aliases x keys). This builds O(keys) once and reuses it.
+        // Lazy case-insensitive fallback: exact canonical keys take the old
+        // O(1) dictionary path with no extra allocation. Only on the first
+        // exact miss is a fallback built (single O(K) pass, reused for the
+        // rest of this record), so canonical records never pay for it.
         //
         // Duplicate case-insensitive key precedence (explicit): exact-case
-        // keys win per alias (helpers check `dict[key]` first). The index
+        // keys win per alias (helpers check `dict[key]` first). The fallback
         // only decides collisions where no alias matches exactly, and there
-        // the lexicographically smallest original key wins (sorted insert),
-        // deterministic across runs. Coercion applies after precedence.
-        var lowerIndex: [String: Any] = [:]
-        lowerIndex.reserveCapacity(dict.count)
-        for key in dict.keys.sorted() {
-            let low = key.lowercased()
-            if lowerIndex[low] == nil {
-                lowerIndex[low] = dict[key]
+        // the lexicographically smallest original key wins (tracked with a
+        // min comparison during the single build pass, no sort), deterministic
+        // across runs. Two maps are kept so heterogeneous collisions keep the
+        // old text behavior: `fallbackText` holds the smallest-keyed non-empty
+        // String per lowercased key (an Int/empty under a smaller key never
+        // hides a valid string collision, matching the old scan-which-skipped
+        // non-strings), while `fallbackRaw` holds the smallest-keyed raw value
+        // for int/raw parity. Coercion applies after precedence.
+        var fallbackRaw: [String: Any]? = nil
+        var fallbackText: [String: String]? = nil
+        func ensureFallback() {
+            if fallbackRaw != nil { return }
+            var raw: [String: Any] = [:]
+            raw.reserveCapacity(dict.count)
+            var rawKey: [String: String] = [:]
+            var txt: [String: String] = [:]
+            var txtKey: [String: String] = [:]
+            for (key, value) in dict {
+                let low = key.lowercased()
+                if let seen = rawKey[low] {
+                    if key < seen {
+                        rawKey[low] = key
+                        raw[low] = value
+                    }
+                } else {
+                    rawKey[low] = key
+                    raw[low] = value
+                }
+                if let s = value as? String, !s.isEmpty {
+                    if let seen = txtKey[low] {
+                        if key < seen {
+                            txtKey[low] = key
+                            txt[low] = s
+                        }
+                    } else {
+                        txtKey[low] = key
+                        txt[low] = s
+                    }
+                }
             }
+            fallbackRaw = raw
+            fallbackText = txt
         }
         func coerceInt(_ value: Any?) -> Int? {
             guard let value else { return nil }
@@ -570,23 +604,26 @@ public enum OpenCodeStore {
         func text(_ keys: String...) -> String? {
             for key in keys {
                 if let value = dict[key] as? String, !value.isEmpty { return value }
-                if let value = lowerIndex[key.lowercased()] as? String, !value.isEmpty { return value }
+                ensureFallback()
+                if let value = fallbackText?[key.lowercased()], !value.isEmpty { return value }
             }
             return nil
         }
         func int(_ keys: String...) -> Int? {
             for key in keys {
-                let low = key.lowercased()
                 if let parsed = coerceInt(dict[key]) { return parsed }
+                let low = key.lowercased()
                 if low != key, let parsed = coerceInt(dict[low]) { return parsed }
-                if let parsed = coerceInt(lowerIndex[low]) { return parsed }
+                ensureFallback()
+                if let parsed = coerceInt(fallbackRaw?[low]) { return parsed }
             }
             return nil
         }
         func raw(_ keys: String...) -> Any? {
             for key in keys {
                 if let hit = dict[key] { return hit }
-                if let hit = lowerIndex[key.lowercased()] { return hit }
+                ensureFallback()
+                if let hit = fallbackRaw?[key.lowercased()] { return hit }
             }
             return nil
         }
