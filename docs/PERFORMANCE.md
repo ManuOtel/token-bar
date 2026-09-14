@@ -386,8 +386,9 @@ Change (`perf/aggregate-price-memo`):
   by `Pricing.normalizedKey(forModel:)`. Each unique normalized key
   resolves once via the existing `PricingContext.resolve`; every later
   record with the same key reuses the exact stored price for cost math.
-  Cost math is written inline and is identical to
-  `Pricing.cost(model:inputTokens:outputTokens:cachedTokens:)`
+  Cost math calls the shared non-resolving helper
+  `Pricing.cost(price:inputTokens:outputTokens:cachedTokens:)` (also used
+  by `Pricing.cost(model:inputTokens:outputTokens:cachedTokens:)`)
   (clamped input/output, cached clamped as a subset of input,
   reasoning rides inside output, total never used for cost).
 - `PricingContext` keeps value semantics and thread safety: no shared
