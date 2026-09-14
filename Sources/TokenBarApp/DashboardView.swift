@@ -8,8 +8,10 @@ import TokenBarCore
 ///   and a clear Details action. Fits a ~400pt popover without scrolling.
 /// - Expanded (Details): the full readable breakdown (metric cards,
 ///   composition, source rows with OpenCode origin split, model bars,
-///   14-day trend, notices, launch-at-login toggle), scrollable.
+///   14-day trend, notices), scrollable.
 ///
+/// Launch at login and pricing live behind the gear button in the header
+/// (a small settings popover), never as always-visible footer sections.
 /// Labels stay short and single-line so nothing wraps or clips at the
 /// compact size; every control is a real button (keyboard focusable) with
 /// a tooltip and accessibility label.
@@ -40,6 +42,8 @@ struct DashboardView: View {
     /// when cached records exist, never on every menu open.
     var onInitialAppear: () -> Void
     @ObservedObject var loginItem: LaunchAtLoginController
+    @ObservedObject var pricing: PricingController
+    @State private var showSettings = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -77,12 +81,10 @@ struct DashboardView: View {
             }
             if report.records.isEmpty || scopedCount == 0 {
                 notices
-                loginSection
             } else if !isExpanded {
                 compactFooter
             } else {
                 notices
-                loginSection
             }
         }
         .padding(16)
@@ -90,6 +92,13 @@ struct DashboardView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             onInitialAppear()
+        }
+        .onDisappear {
+            // If the outer menu-bar window is dismissed while the nested
+            // settings popover is open, the presentation flag can stay true
+            // and restore settings unexpectedly on the next reopen. Reset it
+            // on teardown; normal popover open/close never triggers this.
+            showSettings = false
         }
     }
 
@@ -121,6 +130,18 @@ struct DashboardView: View {
             .disabled(isLoading)
             .help("Reload local histories now")
             .accessibilityLabel("Refresh")
+            Button(action: { showSettings = true }) {
+                Label("Settings", systemImage: "gearshape")
+                    .labelStyle(.iconOnly)
+                    .font(.body)
+            }
+            .buttonStyle(.bordered)
+            .help("Open settings: launch at login and pricing")
+            .accessibilityLabel("Settings")
+            .accessibilityHint("Opens launch at login and pricing settings")
+            .popover(isPresented: $showSettings) {
+                SettingsView(loginItem: loginItem, pricing: pricing)
+            }
             Button(action: { isExpanded.toggle() }) {
                 Label(
                     isExpanded ? "Show less" : "Details",
@@ -293,10 +314,6 @@ struct DashboardView: View {
                 .accessibilityLabel("\(clean.count) notices, expand details to read")
             }
             Spacer()
-            Text(loginItem.statusMessage)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
         }
         .accessibilityElement(children: .combine)
     }
@@ -606,32 +623,6 @@ struct DashboardView: View {
                 }
             }
         }
-    }
-
-    private var loginSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle(
-                "Launch at login",
-                isOn: Binding(
-                    get: { loginItem.isEnabled },
-                    set: { loginItem.setEnabled($0) }
-                )
-            )
-            .disabled(!loginItem.isBundled || !loginItem.isAvailable)
-            .accessibilityLabel("Launch at login")
-            Text(loginItem.statusMessage)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            Text(loginItem.helpText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-            if let error = loginItem.errorMessage {
-                Text(error).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .padding(.top, 2)
     }
 
     // MARK: - Formatting helpers (display only, no semantics)
