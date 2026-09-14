@@ -33,13 +33,21 @@ Sources/TokenBarCLI/    # thin terminal front-end (Foundation only)
                         # parsing, prints Report (offline static by default)
 Sources/TokenBarApp/    # SwiftUI + AppKit menu bar shell (macOS 14+)
   TokenBarApp.swift     # @main App, MenuBarExtra, accessory AppDelegate, refresh
-                        # + pricing footer (status line, user-initiated refresh)
+                        # + settings surface (header gear opens SettingsView;
+                        # launch-at-login + pricing live there, never in the
+                        # dashboard footer)
   PricingController.swift # @MainActor ObservableObject over PricingService:
                         # offline cache at startup, cancellable Task refresh,
                         # usage loading never blocks on pricing
-  DashboardView.swift   # dark cockpit: source/range chips, hero total,
-                        # metric cards, always-visible source rows, models,
-                        # trend, empty/notice states (display only)
+  DashboardView.swift   # dark cockpit: header with refresh + settings gear,
+                        # source/range chips, hero total, metric cards,
+                        # always-visible source rows, models, trend,
+                        # empty/notice states (display only); Settings gear
+                        # opens the SettingsView popover
+  SettingsView.swift    # secondary settings surface (~300pt popover):
+                        # launch-at-login toggle + pricing refresh group
+                        # (status line, user-initiated refresh, error);
+                        # usage filters/details stay in DashboardView
   LaunchAtLoginController.swift # SMAppService.mainApp wrapper, unbundled fallback
 Sources/TokenBarCore/LaunchAtLogin.swift # pure bundled/status policy (tested)
 Tests/TokenBarCoreTests/
@@ -94,7 +102,7 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   then cached catalog entry, then exact normalized `provider/model`, then
   family/substring, then fallback. Every rate carries a `PriceOrigin`
   (`dynamicCatalog | cachedCatalog | staticEstimate | fallback`) surfaced in
-  the app footer and CLI `Pricing:` line. Static estimate only, never a
+  the Settings pricing status line and CLI `Pricing:` line. Static estimate only, never a
   bill; subscription use is not an API invoice.
   Fallback rate keeps unknown models visible instead of zeroed.
 - **One bounded network call**: `PricingService` is the only type allowed to
@@ -121,6 +129,9 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   as the accessory-policy delegate + `MenuBarExtra` host. Launch at login is
   split the same way: pure `LaunchAtLoginPolicy` in Core, thin
   `SMAppService.mainApp` controller in the App target (no entitlements).
+  Settings surface: the dashboard header gear opens `SettingsView` (launch
+  at login + pricing refresh); usage filters and details stay in
+  `DashboardView`, so the main popover never carries a pricing footer.
 - **CLI is thin**: `TokenBarCLI/main.swift` only parses
   `--preset/--source/--all-presets/--json`, calls `TokenBarStore.load`, then
   `ReportFormatter.section/render/encodeJSON`. All formatting lives in pure
