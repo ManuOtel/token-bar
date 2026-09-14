@@ -47,22 +47,28 @@ jobs:
           test -x scripts/package-release.sh
 
   privacy:
-    name: Privacy gate (bounded pricing network use)
+    name: Privacy gate (bounded opt-in network/subprocess use)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Confine network use to the documented pricing refresh
+      - name: Confine network and subprocess use to the documented opt-ins
         run: |
           set -eu
-          # The ONLY network call in the codebase is the opt-in pricing
-          # refresh (PricingService: one GET of public model/pricing
-          # metadata, no prompts/counts/paths/credentials sent; see
-          # docs/PRICING.md). It is safe because the request is built by
-          # PricingService.makeCatalogRequest (pure, unit-pinned: GET, no
-          # body, no query, no auth/cookie headers) and refresh is strictly
-          # user-initiated (app button / CLI --refresh-pricing). Usage
-          # loading, tests, and default CLI runs never touch the network.
+          # The ONLY network/subprocess uses in the codebase are opt-in:
+          # - the pricing refresh (PricingService: one GET of public
+          #   model/pricing metadata, no prompts/counts/paths/credentials
+          #   sent; see docs/PRICING.md). Request is built by
+          #   PricingService.makeCatalogRequest (pure, unit-pinned: GET, no
+          #   body, no query, no auth/cookie headers) and refresh is strictly
+          #   user-initiated (app button / CLI --refresh-pricing).
+          # - the homeserver sync (OpenCodeSync: an ssh/scp download of the
+          #   token-only snapshot over the user's own SSH setup, never a
+          #   shell, BatchMode=yes, no credentials stored, no usage data
+          #   sent; disabled by default). Triggered only by enabling sync in
+          #   Settings (startup, interval, Sync Now) or CLI --sync-now.
+          #   Usage loading, tests, and default CLI runs never touch the
+          #   network or spawn a subprocess.
           #
           # 1. URLSession may appear ONLY in PricingService.swift.
           #    (pre-existing local-only comment in Store.swift and the
@@ -77,6 +83,23 @@ jobs:
               exit 1
             fi
           done
+          # 1b. Process( subprocess use may appear ONLY in OpenCodeSync.swift.
+          #     (ProcessInfo environment reads elsewhere are not subprocesses.)
+          process_hits="$(grep -rln 'Process(' Sources/ || true)"
+          echo "$process_hits"
+          for file in $process_hits; do
+            if [ "$file" != "Sources/TokenBarCore/OpenCodeSync.swift" ]; then
+              echo "Privacy gate failed: Process( outside OpenCodeSync.swift: $file"
+              exit 1
+            fi
+          done
+          # 1c. No shell invocation: the sync pull uses argv arrays only.
+          shell_hits="$(grep -rn '/bin/sh\|sh -c\|system(' Sources/TokenBarCore/OpenCodeSync.swift Sources/TokenBarApp/OpenCodeSyncController.swift || true)"
+          if [ -n "$shell_hits" ]; then
+            echo "Privacy gate failed: shell use in sync code:"
+            echo "$shell_hits"
+            exit 1
+          fi
           # 2. No credential headers are ever set (Cookie / Authorization).
           #    PricingService documents the never-send policy in comments and
           #    sets httpCookieAcceptPolicy=.never; grep for actual header use.

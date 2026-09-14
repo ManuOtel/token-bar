@@ -65,9 +65,11 @@ every rate; the UI/CLI surface it as `Pricing: <origin> (<host>,
 
 ## Refresh bounds and cache
 
-- The ONLY network call in the codebase is `PricingService.refresh()`:
+- The only HTTP network call in the codebase is `PricingService.refresh()`:
   one `GET` against the catalog URL, 15s request timeout (30s resource),
   5MB response cap, 10k-model decode cap. Cancellable via `Task` cancel.
+  (The only other network use is the opt-in homeserver SSH/scp snapshot
+  pull in `OpenCodeSync.swift` -- no HTTP, no pricing data involved.)
 - Refresh is strictly user-initiated or explicitly flagged: the app
   **Update pricing** button, or CLI `--refresh-pricing`. Startup, usage
   loading, tests, and default CLI runs never touch the network.

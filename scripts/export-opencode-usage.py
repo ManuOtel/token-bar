@@ -11,7 +11,9 @@ network) and emits a JSON array of normalized token records only:
 Never emits prompts, tool calls, file paths, credentials, or message text.
 Only token counts, timestamps, model labels, and session/message IDs leave
 the host. Copy the resulting file to the Mac yourself (for example with a
-USB stick or any file copy you operate); Token Bar never fetches it.
+USB stick or any file copy you operate); or enable homeserver sync in the
+Mac app Settings and let it pull this file over your own SSH setup
+(TokenBar ships with sync disabled and never guesses a host).
 
 Semantics mirror `OpenCodeStore` in Swift exactly:
 - Per-message tables (`message`, `session_message`) are authoritative with

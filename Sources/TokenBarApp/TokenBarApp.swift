@@ -28,6 +28,7 @@ struct TokenBarApp: App {
     @State private var refreshState = StartupRefreshState()
     @StateObject private var loginItem = LaunchAtLoginController()
     @StateObject private var pricing = PricingController()
+    @StateObject private var sync = OpenCodeSyncController()
 
     init() {
         let initial = StartupReportCache.initialState(cached: StartupReportCache.load())
@@ -69,11 +70,23 @@ struct TokenBarApp: App {
                 onRefresh: refresh,
                 onInitialAppear: ensureInitialLoad,
                 loginItem: loginItem,
-                pricing: pricing
+                pricing: pricing,
+                sync: sync,
+                onSyncNow: syncNow
             )
             .frame(width: 400, height: isExpanded ? 660 : nil)
         }
         .menuBarExtraStyle(.window)
+        .onReceive(sync.$config.map(\.enabled).removeDuplicates()) { enabled in
+            // Enabling starts the periodic pull; disabling cancels it.
+            // The controller owns the timer; the app only restarts it so a
+            // Settings toggle takes effect without relaunch.
+            if enabled {
+                sync.startPolling(onTick: refresh)
+            } else {
+                sync.stopPolling()
+            }
+        }
     }
 
     private func refresh() {
@@ -83,24 +96,52 @@ struct TokenBarApp: App {
         startLoad(generation: generation)
     }
 
+    /// Sync Now (Settings): pulls the homeserver snapshot first when sync is
+    /// enabled, then runs the normal usage reload. With sync disabled it is
+    /// just a refresh. Never blocks the popover: both steps run off-main.
+    private func syncNow() {
+        guard sync.config.enabled else {
+            refresh()
+            return
+        }
+        var state = refreshState
+        let generation = state.beginForced()
+        refreshState = state
+        startLoad(generation: generation, withSync: true)
+    }
+
     /// First-appearance entry point: succeeds exactly once per process, even
     /// when cached records exist, so a cached menu still refreshes in the
     /// background. Menu opens never call this twice; the refresh button
-    /// stays on `refresh()`.
+    /// stays on `refresh()`. With sync enabled the first load pulls the
+    /// homeserver snapshot first, then scans; the periodic timer starts too.
     private func ensureInitialLoad() {
         var state = refreshState
         guard let generation = state.beginInitial() else { return }
         refreshState = state
-        startLoad(generation: generation)
+        if sync.config.enabled {
+            sync.startPolling(onTick: refresh)
+            startLoad(generation: generation, withSync: true)
+        } else {
+            startLoad(generation: generation)
+        }
     }
 
     /// Off-main full scan with last-write-wins: only the latest generation
     /// may publish, so a stale/late completion is dropped instead of
     /// overwriting a newer report. Cache write failure is ignored so it
-    /// never breaks a successful fresh load.
-    private func startLoad(generation: Int) {
+    /// never breaks a successful fresh load. With `withSync`, the opt-in
+    /// homeserver pull runs first (bounded, cancellable, last-good-cache
+    /// preserving); usage loading never waits on pricing and never fails
+    /// because sync failed.
+    private func startLoad(generation: Int, withSync: Bool = false) {
         isLoading = true
         DispatchQueue.global(qos: .utility).async {
+            if withSync {
+                let semaphore = DispatchSemaphore(value: 0)
+                Task { await self.sync.performSync(); semaphore.signal() }
+                _ = semaphore.wait(timeout: .now() + .seconds(310))
+            }
             let loaded = TokenBarStore.load()
             try? StartupReportCache.save(loaded)
             DispatchQueue.main.async {

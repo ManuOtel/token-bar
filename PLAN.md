@@ -13,13 +13,14 @@ Scope: local-only macOS menu-bar usage totals. No accounts, no network, no auth.
 
 ## Non-goals
 
-- No live sync, network multi-machine merge, or cloud dashboard. Offline
-  file-copy merge (extra DBs + sanitized snapshots) is the only
-  multi-machine path, and it never touches the network.
-- No provider APIs, cookies, keychain reads, or network calls.
+- No cloud dashboard. Multi-machine merge has two paths: the opt-in SSH
+  snapshot pull (`OpenCodeSync`, disabled by default, user's own SSH setup)
+  and the offline file-copy merge (extra DBs + sanitized snapshots), both
+  rejoining the same combine/dedupe with no network inside usage loading.
+- No provider APIs, cookies, keychain reads, or other network calls.
 - No prompt/message body storage, export, or log upload. The homeserver
   exporter emits token counts, timestamps, model labels, and session /
-  message IDs only.
+  message IDs only, and the sync pull downloads that snapshot only.
 - No auto-updater or paid billing in this phase.
 - No Windows/Linux app target (Linux stays logic-verification only).
 
@@ -140,9 +141,10 @@ Acceptance:
 
 - Cost is always an estimate; static table drifts from provider price lists.
 - Parser heuristics skip exotic future schemas (counted, visible as warnings).
-- Multi-machine merge is offline file copy only (no live sync, no network,
-  no HTTP API, no assumed SSH hostname). `7D` is record-timestamp based;
-  lifetime can be nonzero when recent data lives on another host.
+- Multi-machine merge: manual copy is offline file copy only (no HTTP API);
+  auto-sync is an opt-in SSH pull over the user's own SSH setup (no guessed
+  hosts, no stored credentials). `7D` is record-timestamp based; lifetime
+  can be nonzero when recent data lives on another host.
 - App needs macOS 14+; Linux runs verification only.
 - Best-month ties go to earliest month by design.
 - Future timestamps excluded by preset upper bound (`now`).
@@ -158,3 +160,34 @@ Acceptance:
 7. Implement M4 Claude parser (`UsageSource.claude`, `TOKENBAR_CLAUDE_ROOT`, CLI `--source claude`, dashboard filter, fixtures, docs); open PR.
 8. Implement M5 packaging (bundle, `SMAppService` login toggle, signing/notarization doc, `.dmg`/`.zip` path); verify on clean Mac profile.
 9. Cut M6 release: run full checklist, tag, attach signed artifact, file future-source issues.
+
+### M8 - Homeserver auto-sync (opt-in SSH pull)
+
+Status: shipped on `feat/opencode-homeserver-sync`. Keeps the manual-copy
+path intact and adds the smallest complete pull design on top.
+
+Acceptance:
+
+- `OpenCodeSync` service + config in `TokenBarCore`: non-secret SSH host
+  alias, remote snapshot path (or remote exporter invocation), local cache
+  path, poll interval (default 15 min, 5 min-24 h), timeout (default 60 s,
+  5-300 s). System ssh/scp via `Process` argument arrays only, never a
+  shell; `BatchMode=yes` always; no credential fields exist. Ships
+  disabled with blank host/path.
+- Exporter stays token-only and read-only; the pull prefers a
+  pre-generated sanitized snapshot, validates JSON before replacement
+  (array with at least one decodable opencode record, or empty; 32 MB
+  cap), writes temp-then-atomic, and preserves the last good cache on any
+  error (timeout, unreachable, invalid payload, cancellation) with one
+  sanitized message.
+- App startup, periodic background sync, and Sync Now run sync-then-load
+  off-main without blocking the popover; local data and
+  aggregation/dedupe unchanged; synced rows are origin `homeserver`,
+  source `opencode`. CLI gains `--sync-now` (failures only add a warning).
+- Settings carries the compact sync surface (toggle, host/path/command,
+  interval, Sync Now, one-line status); the dashboard gains no setup prose.
+- Tests: `OpenCodeSyncTests` (config validation, safe argv, cache
+  validation/atomic replacement, failure fallback incl. sanitized errors,
+  refresh integration proving a synced recent row lands in 24 h) plus
+  `verify_logic.py` mirror; fixtures synthetic under `Fixtures/`. No real
+  server access. `swift build` + `swift test` green on Mac.

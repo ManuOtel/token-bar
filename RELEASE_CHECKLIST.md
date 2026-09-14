@@ -1,8 +1,10 @@
 # Release Checklist (M6)
 
 Docs-only gate for cutting a Token Bar release. No product behavior changes
-here; the app stays local-only (file reads only, no accounts, no network,
-no auth). Work through top to bottom on a Mac for the build/sign steps;
+here; the app stays local-first (file reads only, no accounts, no provider
+APIs). The only network uses are strictly opt-in and user-initiated: the
+pricing catalog GET and the homeserver SSH snapshot pull (both disabled by
+default). Work through top to bottom on a Mac for the build/sign steps;
 the Linux mirror covers logic only.
 
 ## 1. Data sources and permissions
@@ -15,7 +17,13 @@ Current sources (read-only; see README "Data sources"):
 | OpenCode | `~/.local/share/opencode/opencode.db` | `TOKENBAR_OPENCODE_DB` |
 | OpenCode extras | extra read-only DB copies | `TOKENBAR_OPENCODE_DB_EXTRA` |
 | OpenCode snapshot | sanitized snapshot files | `TOKENBAR_OPENCODE_USAGE_JSON` |
+| OpenCode sync cache | `~/Library/Application Support/TokenBar/opencode-homeserver.json` (opt-in SSH pull) | `TOKENBAR_OPENCODE_SYNC_CACHE` |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | `TOKENBAR_CLAUDE_ROOT` |
+
+Sync config lives in `~/Library/Application Support/TokenBar/opencode-sync.json`
+(override `TOKENBAR_OPENCODE_SYNC_CONFIG`; status beside it, override
+`TOKENBAR_OPENCODE_SYNC_STATUS`). Ships disabled with blank host/path; the
+config stores no password, key, or token.
 
 - [ ] Confirm adapters open files read-only and missing roots/tables degrade
       to empty + sanitized warning (never a crash, never a raw path).
@@ -78,11 +86,16 @@ Developer ID Application certificate:
 ## 7. Privacy and credential scan
 
 - [ ] `grep -rniE 'URLSession|http|cookie' Sources/` returns nothing
-      except the documented local-only comment in
-      `Sources/TokenBarCore/Store.swift` (`No auth, no cookies, no network`)
-      and the documented `privacy-denylist` forbidden-field names in
+      except the documented opt-in pricing GET in
+      `Sources/TokenBarCore/PricingService.swift` (`URLSession` confined
+      there), the documented opt-in SSH pull in
+      `Sources/TokenBarCore/OpenCodeSync.swift` (`Process(` confined there;
+      no shell, discrete argv, `BatchMode=yes`), the documented
+      local-only comment in `Sources/TokenBarCore/Store.swift`
+      (usage loading never touches the network), and the documented
+      `privacy-denylist` forbidden-field names in
       `Sources/TokenBarCore/OpenCodeStore.swift` (sanitizer denylist only,
-      never transmitted). No `URLSession`/`http` use exists.
+      never transmitted).
 - [ ] CLI/JSON output contains no absolute paths, prompt text, or message
       bodies (sanitized warnings only; covered by `ReportTests` + smoke).
 - [ ] No secrets committed: synthetic fixtures only under `Fixtures/`;
@@ -101,14 +114,19 @@ Developer ID Application certificate:
       (`today|24h|7d|30d|best-month|lifetime`), each `--source`
       (`all|codex|opencode|claude`), and `--preset lifetime --json` all work.
       `--preset lifetime --json` carries `byOrigin` (`source/origin` pairs).
-- [ ] Homeserver workflow: `python3 scripts/export-opencode-usage.py --db
+- [ ] Homeserver workflows: `python3 scripts/export-opencode-usage.py --db
       <copy> --out <snapshot> --origin homeserver` emits token-only JSON
       (no prompts/paths/credentials); user-copied snapshot loads via
       `TOKENBAR_OPENCODE_USAGE_JSON` with combined OpenCode total plus
-      local/homeserver split in CLI (`By origin`) and dashboard.
+      local/homeserver split in CLI (`By origin`) and dashboard. With sync
+      configured, `Sync Now` / `--sync-now` pulls the same shape over SSH
+      (validates before replacing the cache; failures keep the last good
+      cache and warn only) with identical combined totals.
 - [ ] Dashboard: source/preset filters, totals, breakdowns (OpenCode local
       vs homeserver sub-lines, combined total kept), trend, empty and
-      no-scope states, sanitized warnings, launch-at-login toggle.
+      no-scope states, sanitized warnings, launch-at-login toggle, sync
+      status line in Settings (off by default; enabling with a blank host
+      is rejected with a short message, never a subprocess).
 - [ ] Missing-data hints point at the `TOKENBAR_*` overrides without
       leaking paths (see README troubleshooting).
 
@@ -117,7 +135,9 @@ Developer ID Application certificate:
 - [ ] App rollback: toggle launch at login off, quit from the menu bar,
       delete `/Applications/TokenBar.app`. The app writes no data files,
       so nothing else needs cleaning; cached login-item state clears on
-      unregister.
+      unregister. To fully disconnect sync, turn the toggle off in
+      Settings (in-flight pulls cancel) and optionally delete
+      `~/Library/Application Support/TokenBar/opencode-homeserver.json`.
 - [ ] Release rollback: re-tag/re-publish the previous versioned artifact
       + checksum; note that a bundle-id change resets the login item
       (toggle off/on once).

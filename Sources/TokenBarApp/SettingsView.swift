@@ -1,15 +1,19 @@
 import SwiftUI
+import TokenBarCore
 
 /// Focused settings surface for the menu-bar popover.
 ///
-/// Holds the two controls that used to sit at the bottom of the main
-/// dashboard: Launch at login and the pricing refresh. The main popover
-/// stays a compact usage dashboard; this view opens from the gear button
-/// in the dashboard header. Sized deliberately small (~300pt) so it reads
-/// as a secondary surface, not a second dashboard.
+/// Holds the controls that used to sit at the bottom of the main
+/// dashboard: Launch at login, the pricing refresh, and the opt-in
+/// homeserver sync. The main popover stays a compact usage dashboard; this
+/// view opens from the gear button in the dashboard header. Sized
+/// deliberately small (~300pt) so it reads as a secondary surface, not a
+/// second dashboard.
 struct SettingsView: View {
     @ObservedObject var loginItem: LaunchAtLoginController
     @ObservedObject var pricing: PricingController
+    @ObservedObject var sync: OpenCodeSyncController
+    var onSyncNow: () -> Void
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -31,6 +35,8 @@ struct SettingsView: View {
             loginGroup
             Divider()
             pricingGroup
+            Divider()
+            syncGroup
         }
         .padding(14)
         .frame(width: 300)
@@ -116,5 +122,107 @@ struct SettingsView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
+    }
+
+    // MARK: - Homeserver sync (opt-in SSH pull, off by default)
+
+    private var syncGroup: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("HOMESERVER SYNC")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .tracking(1.2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityHidden(true)
+            Toggle(
+                "Homeserver sync",
+                isOn: Binding(
+                    get: { sync.config.enabled },
+                    set: { sync.config.enabled = $0; sync.saveConfig() }
+                )
+            )
+            .accessibilityLabel("Homeserver sync")
+            if sync.config.enabled {
+                TextField(
+                    "SSH host alias",
+                    text: textBinding(\.hostAlias),
+                    prompt: Text("SSH host alias (e.g. homeserver)")
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .onSubmit { sync.saveConfig() }
+                .help("Non-secret SSH host alias from your own ssh config. No passwords or keys are stored.")
+                .accessibilityLabel("SSH host alias")
+                TextField(
+                    "Remote snapshot path",
+                    text: textBinding(\.remotePath),
+                    prompt: Text("Remote snapshot path")
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .onSubmit { sync.saveConfig() }
+                .help("Path of the pre-generated token-only snapshot on the remote host. Leave empty when using a remote exporter command.")
+                .accessibilityLabel("Remote snapshot path")
+                TextField(
+                    "Remote exporter command (optional)",
+                    text: textBinding(\.remoteCommand),
+                    prompt: Text("Remote exporter command (optional)")
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .onSubmit { sync.saveConfig() }
+                .help("Runs the read-only exporter on the remote host and captures its output instead of copying the snapshot path.")
+                .accessibilityLabel("Remote exporter command, optional")
+                Stepper(
+                    "Every \(sync.config.pollIntervalSeconds / 60) min",
+                    value: intervalMinutes, in: 5...1440, step: 5
+                )
+                .font(.caption)
+                .help("Background sync interval, 5 minutes to 24 hours")
+                .accessibilityLabel("Background sync interval in minutes")
+                HStack(spacing: 8) {
+                    if sync.isSyncing {
+                        ProgressView().scaleEffect(0.7)
+                        Text("Syncing…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Button("Cancel", action: sync.cancel)
+                            .buttonStyle(.bordered)
+                            .help("Cancel the in-flight sync")
+                    } else {
+                        Button("Sync Now") {
+                            sync.saveConfig()
+                            onSyncNow()
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Pull the homeserver snapshot now over SSH, then reload usage")
+                    }
+                    Spacer()
+                }
+            }
+            Text(sync.statusLine)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+    }
+
+    private func textBinding(_ keyPath: WritableKeyPath<OpenCodeSyncConfig, String>) -> Binding<String> {
+        Binding(
+            get: { sync.config[keyPath: keyPath] },
+            set: { sync.config[keyPath: keyPath] = $0 }
+        )
+    }
+
+    private var intervalMinutes: Binding<Int> {
+        Binding(
+            get: { max(5, sync.config.pollIntervalSeconds / 60) },
+            set: {
+                sync.config.pollIntervalSeconds = min(max($0, 5), 1440) * 60
+                sync.saveConfig()
+            }
+        )
     }
 }
