@@ -1279,6 +1279,183 @@ def run():
     check("old report without claude skips defaults to zero",
           {"skippedCodexLines": 2}.get("skippedClaudeLines", 0) == 0)
 
+    # Bounded JSONL streaming mirror (JSONLLineReader.swift semantics):
+    # exact components(separatedBy: .newlines) fidelity: strict UTF-8
+    # whole-file (None when undecodable), split on every .newlines member
+    # (U+000A-U+000D, U+0085, U+2028, U+2029), each occurrence separately,
+    # so CRLF keeps its phantom empty component and line numbers. No timing
+    # here; allocation is measured by the count-only
+    # scripts/bench-jsonl-streaming.py.
+    _SEPS = {"\n", "\x0b", "\x0c", "\r", "\x85", "\u2028", "\u2029"}
+
+    def stream_lines(raw):
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        parts, cur = [], []
+        for ch in text:
+            if ch in _SEPS:
+                parts.append("".join(cur))
+                cur = []
+            else:
+                cur.append(ch)
+        parts.append("".join(cur))
+        return [(part, idx) for idx, part in enumerate(parts, start=1)]
+
+    lf_raw = (b'{"timestamp":"2026-09-10T08:15:00Z","input_tokens":10,"output_tokens":1}\n'
+              b'{"timestamp":"2026-09-10T08:15:00Z","input_tokens":20,"output_tokens":2}\n')
+    check("jsonl LF numbering matches components",
+          stream_lines(lf_raw) is not None
+          and [n for _, n in stream_lines(lf_raw)] == [1, 2, 3]
+          and stream_lines(lf_raw)[2][0] == "")
+    crlf_raw = lf_raw.replace(b"\n", b"\r\n")
+    check("jsonl CRLF keeps phantom empty components",
+          stream_lines(crlf_raw) is not None
+          and [t for t, _ in stream_lines(crlf_raw)][1] == ""
+          and [n for _, n in stream_lines(crlf_raw)] == [1, 2, 3, 4, 5])
+    check("jsonl CRLF/LF same non-blank text",
+          [t for t, _ in stream_lines(crlf_raw) if t.strip()]
+          == [t for t, _ in stream_lines(lf_raw) if t.strip()])
+    check("jsonl unterminated final parsed, trailing sep adds blank tail",
+          stream_lines(b'{"a":1}') is not None and len(stream_lines(b'{"a":1}')) == 1
+          and len(stream_lines(b'{"a":1}\n')) == 2
+          and stream_lines(b'{"a":1}\n')[1][0] == ""
+          and stream_lines(b'')[0][0] == ""
+          and len(stream_lines(b'\n\n')) == 3)
+    lone_raw = 'l1\rl2\x85l3\u2028l4\u2029l5\x0bl6\x0cl7'.encode("utf-8")
+    check("jsonl lone-CR and unicode separators all split",
+          stream_lines(lone_raw) is not None
+          and [t for t, _ in stream_lines(lone_raw)]
+          == ["l1", "l2", "l3", "l4", "l5", "l6", "l7"])
+    bad_raw = (b'{"timestamp":"2026-09-10T08:15:00Z","input_tokens":1,"output_tokens":1}\n'
+               b'{\x22\xff\xfe}\n'
+               b'{"timestamp":"2026-09-10T08:15:00Z","input_tokens":2,"output_tokens":2}\n')
+    check("jsonl invalid UTF-8 aborts whole file",
+          stream_lines(bad_raw) is None)
+    # Streamed Codex file: blanks free, malformed + heartbeat skipped,
+    # id-less record keeps its exact component fallback id.
+    streamed = (b'\n   \n'
+                b'{"timestamp":"2026-09-10T08:15:00Z","input_tokens":4,"output_tokens":1}\n'
+                b'not json\n'
+                b'{"type":"heartbeat","timestamp":"2026-09-10T09:00:00Z"}\n'
+                b'{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+                b'"payload":{"response_id":"r-kept","usage":{"input_tokens":9,"output_tokens":1}}}\n')
+    slines = stream_lines(streamed)
+    kept_ids, skipped = [], 0
+    for text, no in slines:
+        if not text.strip():
+            continue
+        rec = parse_codex_line(text)
+        if rec is None:
+            skipped += 1
+        elif rec["request"]:
+            kept_ids.append("codex:" + rec["request"])
+        else:
+            kept_ids.append(f"codex:s.jsonl:{no}")
+    check("jsonl streamed codex counts + fallback id",
+          kept_ids == ["codex:s.jsonl:3", "codex:r-kept"] and skipped == 2)
+    gap_raw = (b'{"timestamp":"2026-09-10T08:15:00Z","input_tokens":10,"output_tokens":1}\r\n'
+               b'{"timestamp":"2026-09-10T08:15:00Z","input_tokens":20,"output_tokens":2}\r\n')
+    gap_ids = []
+    for text, no in stream_lines(gap_raw):
+        if not text.strip():
+            continue
+        rec = parse_codex_line(text)
+        if rec is not None and not rec["request"]:
+            gap_ids.append(f"codex:s.jsonl:{no}")
+    check("jsonl CRLF phantom fallback ids preserved",
+          gap_ids == ["codex:s.jsonl:1", "codex:s.jsonl:3"])
+    attr_fwd, sk_fwd = parse_codex_file_lines([
+        '{"type":"turn_context","timestamp":"2026-09-10T08:14:00Z",'
+        '"payload":{"turn_id":"t-stream","thread_id":"th","model":"synth-m"}}',
+        '{"type":"token_usage_record","timestamp":"2026-09-10T08:15:00Z",'
+        '"payload":{"response_id":"r","turn_id":"t-stream","thread_id":"th",'
+        '"usage":{"input_tokens":10,"output_tokens":5}}}',
+    ])
+    check("jsonl streamed attribution forward-only",
+          len(attr_fwd) == 1 and attr_fwd[0]["model"] == "synth-m" and sk_fwd == 1)
+    # Chunked scan mirror (mirrors the Swift chunk loop, including the
+    # carry for multi-byte separators split across chunks): 7-byte chunks
+    # over multibyte content plus every separator kind must match the
+    # whole-split, trailing blank tail included.
+    def chunked_lines(raw, size):
+        lines, pending, carry = [], bytearray(), b""
+        chunks = [raw[i:i + size] for i in range(0, len(raw), size)] or [b""]
+        for ci, ch in enumerate(chunks):
+            buf = carry + ch
+            carry = b""
+            last = ci == len(chunks) - 1
+            i, n = 0, len(buf)
+            while i < n:
+                b = buf[i]
+                if b in (0x0A, 0x0B, 0x0C, 0x0D):
+                    lines.append(bytes(pending).decode("utf-8"))
+                    pending = bytearray()
+                    i += 1
+                elif b == 0xC2:
+                    if i + 1 < n and buf[i + 1] == 0x85:
+                        lines.append(bytes(pending).decode("utf-8"))
+                        pending = bytearray()
+                        i += 2
+                    elif i + 1 >= n and not last:
+                        carry = bytes([b])
+                        i += 1
+                    else:
+                        pending.append(b)
+                        i += 1
+                elif b == 0xE2:
+                    if (i + 2 < n and buf[i + 1] == 0x80
+                            and buf[i + 2] in (0xA8, 0xA9)):
+                        lines.append(bytes(pending).decode("utf-8"))
+                        pending = bytearray()
+                        i += 3
+                    elif i + 2 >= n and not last:
+                        carry = buf[i:n]
+                        i = n
+                    else:
+                        pending.append(b)
+                        i += 1
+                else:
+                    pending.append(b)
+                    i += 1
+        # Trailing separator leaves no observable empty line (blank tail is
+        # always skipped free), so only a non-empty tail is emitted.
+        if pending:
+            lines.append(bytes(pending).decode("utf-8"))
+        return lines
+
+    wide_line = ('{"timestamp":"2026-09-10T08:15:00Z","input_tokens":5,'
+                 '"note":"' + "é" * 50 + '😀"}')
+    wide_raw = (wide_line + "\n" + '{"b":2\u2028"c":3}' + "\x85"
+                + '{"d":4}').encode("utf-8")
+    whole = [t for t, _ in stream_lines(wide_raw)]
+    if whole and whole[-1] == "":
+        whole = whole[:-1]  # unobservable blank tail, not emitted by chunks
+    check("jsonl chunked scan matches whole split incl. separators",
+          chunked_lines(wide_raw, 7) == whole
+          and chunked_lines(wide_raw, 1) == whole
+          and chunked_lines(wide_raw, 65536) == whole)
+    # Streamed Claude file: CRLF + unterminated, phantom-gap fallback id.
+    claude_streamed = (b'{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+                       b'"message":{"model":"m","id":"msg-a",'
+                       b'"usage":{"input_tokens":10,"output_tokens":5}}}\r\n'
+                       b'{"type":"user","timestamp":"2026-09-10T09:00:00Z","message":{}}\r\n'
+                       b'{"type":"assistant","timestamp":"2026-09-10T08:15:00Z",'
+                       b'"message":{"model":"m","usage":{"input_tokens":3,"output_tokens":2}}}')
+    clines = stream_lines(claude_streamed)
+    c_kept, c_skip = [], 0
+    for text, no in clines:
+        if not text.strip():
+            continue
+        rec = parse_claude_line(text, file_id="c.jsonl", line_no=no)
+        if rec is None:
+            c_skip += 1
+        else:
+            c_kept.append(rec["id"])
+    check("jsonl streamed claude CRLF + unterminated",
+          c_kept == ["claude:msg-a", "claude:c.jsonl:5"] and c_skip == 1)
+
     # Report formatter mirror (matches Report.swift semantics)
     def sanitize(w):
         if "Codex sessions not found" in w:

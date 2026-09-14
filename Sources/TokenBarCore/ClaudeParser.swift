@@ -42,20 +42,24 @@ public enum ClaudeParser {
     }
 
     public static func parseFile(at url: URL, fileId: String? = nil) -> Result {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            return Result(records: [], skippedLines: 0)
-        }
+        // Same bounded-memory stream as Codex: fixed buffers plus longest
+        // line, never the whole file plus a line array. Splitting and
+        // numbering match the old path exactly (see JSONLLineReader).
+        // Unreadable or non-UTF-8 files keep ([], 0).
         let label = fileId ?? url.lastPathComponent
         var records: [NormalizedUsage] = []
         var skipped = 0
-        for (index, rawLine) in text.components(separatedBy: .newlines).enumerated() {
+        let ok = JSONLLineReader.forEachLine(at: url) { rawLine, lineNumber in
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.isEmpty { continue }
-            if let record = parseLine(line, fileId: label, lineNumber: index + 1) {
+            if line.isEmpty { return }
+            if let record = parseLine(line, fileId: label, lineNumber: lineNumber) {
                 records.append(record)
             } else {
                 skipped += 1
             }
+        }
+        guard ok else {
+            return Result(records: [], skippedLines: 0)
         }
         return Result(records: records, skippedLines: skipped)
     }

@@ -293,6 +293,84 @@ Method, split strictly:
   `id`, so this is drift tolerance only; IDs stay deterministic and
   distinct for any recognized-column difference.
 
+## Attempted improvement (slice 7, this branch, allocation only)
+
+`CodexParser.parseFile` and `ClaudeParser.parseFile` each read the whole
+file with `String(contentsOf:)` then split it with
+`components(separatedBy: .newlines)`, materializing one whole-file String
+plus an array holding every line before parsing starts. Large histories
+pay that input peak per file on top of the records themselves.
+
+Change (`perf/jsonl-stream-reader`):
+
+- New `JSONLLineReader`
+  (`Sources/TokenBarCore/JSONLLineReader.swift`): streams the file through
+  `InputStream` in fixed 64 KiB chunks and splits on every
+  `CharacterSet.newlines` member (U+000A-U+000D, U+0085, U+2028, U+2029),
+  each occurrence separately, exactly like
+  `components(separatedBy: .newlines)`. CRLF keeps its phantom empty
+  component and line numbers are identical to the old path, so
+  `path:line` fallback ids never change. Multi-byte separators split
+  across chunk boundaries are recognized via an at-most-2-byte carry;
+  the final line is emitted even without a trailing newline, and strict
+  whole-file UTF-8 is preserved (any undecodable line reports the old
+  `([], 0)`). No shared state, no cache; per-file parsing stays strictly
+  serial and the `ParallelFileParse` bounded scheduler is untouched.
+- Both `parseFile` variants keep their line-by-line bodies verbatim
+  (blank-line free skip, type gates, token math, per-file turn/thread
+  attribution with latest-wins, skipped counts, fallback ids, privacy
+  handling) and only swap the enumeration source for the reader. Record
+  order stays deterministic; cross-file attribution is still impossible
+  (state remains per-file locals).
+
+Tests (hermetic, no network, no timing assertions):
+
+- `Tests/TokenBarCoreTests/JSONLStreamingTests.swift`: Codex CRLF with
+  preserved phantom `:1`/`:3` fallback ids, final line without newline,
+  blank + malformed + heartbeat exact counts with the `:3` fallback pin,
+  forward-only attribution across streamed lines (late context does not
+  leak backwards), LF/CRLF record parity compared separately from the
+  intentionally different fallback ids (`:3` LF vs `:5` CRLF), lone-CR
+  splitting, VT/FF/NEL/LS/PS splitting with exact ids and skips, a
+  separator starting on the last byte of a 64 KiB chunk, whole-file
+  invalid-UTF-8 dropping both parsers to `([], 0)`, empty and
+  newline-only files, a >64 KiB line with multibyte content crossing
+  chunk boundaries, missing-file behavior, and a streaming-path privacy
+  pin (no prompt or path retention in records or rendered output).
+- `scripts/verify_logic.py`: Python mirror of the reader (LF split,
+  CR strip, unterminated/trailing-newline handling, whole-file UTF-8
+  abort, old-phantom-gap demonstration, streamed Codex counts + fallback
+  id, forward-only attribution, 7-byte chunk reassembly over multibyte
+  content, streamed Claude CRLF + unterminated). Run with
+  `python3 scripts/verify_logic.py`.
+- `scripts/bench-jsonl-streaming.py`: deterministic count-only
+  measurement (no wall-clock, CI-safe). Same 5,500 synthetic lines both
+  paths.
+
+Method, split strictly:
+
+- Measured facts (this worker host, same synthetic data, repeatable):
+  `python3 scripts/bench-jsonl-streaming.py` reports 5,500 lines,
+  911,279 file bytes, old input peak 1,817,058 bytes (file + all lines)
+  vs new 131,241 bytes (2 x 64 KiB buffers + 169-byte longest line):
+  1,685,817 saved (92.8%), and 5,501 live line objects old vs 1 new.
+  Counts scale with file size on the old path and stay flat (buffers +
+  longest line) on the new path; real-host savings scale with actual
+  file sizes.
+- No wall-clock is claimed. Swift is unavailable on this worker host
+  (Linux runs `verify_logic.py` + the count-only bench only), and no Mac
+  before/after on the same session tree was run here. To measure on Mac,
+  compare warm `parseDirectory` / per-source CLI wall time before/after
+  on the same large local tree; do not claim numbers without rerunning
+  there.
+- Limitations: splitting and line numbering are identical to the old
+  path by construction (including CRLF phantom components and lone-CR /
+  Unicode separators), so there is no fallback-id drift to qualify. The
+  parsed records array is unchanged output work and still fully
+  materialized; single huge files gain allocation-only benefit (no
+  additional parallelism within a file). Whole-file invalid-UTF-8 still
+  yields `([], 0)`, by design.
+
 ## Next safe slices (pure core, behavior-preserving)
 
 1. Per-model price memoization inside aggregate: cache resolved
