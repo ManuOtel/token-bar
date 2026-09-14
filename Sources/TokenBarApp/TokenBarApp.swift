@@ -72,21 +72,12 @@ struct TokenBarApp: App {
                 loginItem: loginItem,
                 pricing: pricing,
                 sync: sync,
-                onSyncNow: syncNow
+                onSyncNow: syncNow,
+                onPollTick: pollTick
             )
             .frame(width: 400, height: isExpanded ? 660 : nil)
         }
         .menuBarExtraStyle(.window)
-        .onReceive(sync.$config.map(\.enabled).removeDuplicates()) { enabled in
-            // Enabling starts the periodic pull; disabling cancels it.
-            // The controller owns the timer; the app only restarts it so a
-            // Settings toggle takes effect without relaunch.
-            if enabled {
-                sync.startPolling(onTick: refresh)
-            } else {
-                sync.stopPolling()
-            }
-        }
     }
 
     private func refresh() {
@@ -110,6 +101,17 @@ struct TokenBarApp: App {
         startLoad(generation: generation, withSync: true)
     }
 
+    /// Periodic tick: sync-then-load only when no scan is already in
+    /// flight. Unlike the explicit Sync Now button, this never supersedes
+    /// a manual refresh; it simply skips the round.
+    private func pollTick() {
+        guard sync.config.enabled else { return }
+        var state = refreshState
+        guard let generation = state.beginManual() else { return }
+        refreshState = state
+        startLoad(generation: generation, withSync: true)
+    }
+
     /// First-appearance entry point: succeeds exactly once per process, even
     /// when cached records exist, so a cached menu still refreshes in the
     /// background. Menu opens never call this twice; the refresh button
@@ -120,7 +122,7 @@ struct TokenBarApp: App {
         guard let generation = state.beginInitial() else { return }
         refreshState = state
         if sync.config.enabled {
-            sync.startPolling(onTick: refresh)
+            sync.startPolling(onTick: pollTick)
             startLoad(generation: generation, withSync: true)
         } else {
             startLoad(generation: generation)
@@ -133,18 +135,19 @@ struct TokenBarApp: App {
     /// never breaks a successful fresh load. With `withSync`, the opt-in
     /// homeserver pull runs first (bounded, cancellable, last-good-cache
     /// preserving); usage loading never waits on pricing and never fails
-    /// because sync failed.
+    /// because sync failed. Structured concurrency throughout: no semaphores,
+    /// no blocked threads; the heavy scan runs on a detached utility task.
     private func startLoad(generation: Int, withSync: Bool = false) {
         isLoading = true
-        DispatchQueue.global(qos: .utility).async {
+        Task {
             if withSync {
-                let semaphore = DispatchSemaphore(value: 0)
-                Task { await self.sync.performSync(); semaphore.signal() }
-                _ = semaphore.wait(timeout: .now() + .seconds(310))
+                await sync.performSync()
             }
-            let loaded = TokenBarStore.load()
+            let loaded = await Task.detached(priority: .utility) {
+                TokenBarStore.load()
+            }.value
             try? StartupReportCache.save(loaded)
-            DispatchQueue.main.async {
+            await MainActor.run {
                 var state = self.refreshState
                 guard state.finish(generation: generation) else { return }
                 self.refreshState = state

@@ -46,6 +46,7 @@ struct DashboardView: View {
     @ObservedObject var pricing: PricingController
     @ObservedObject var sync: OpenCodeSyncController
     var onSyncNow: () -> Void
+    var onPollTick: () -> Void
     @State private var showSettings = false
 
     var body: some View {
@@ -102,6 +103,17 @@ struct DashboardView: View {
             // and restore settings unexpectedly on the next reopen. Reset it
             // on teardown; normal popover open/close never triggers this.
             showSettings = false
+        }
+        .onReceive(sync.$config.map(\.enabled).removeDuplicates()) { enabled in
+            // View-level lifecycle hook (Scene has no onReceive): a Settings
+            // toggle takes effect without relaunch. The periodic tick is the
+            // polite pollTick (skips when a scan is in flight); the explicit
+            // Sync Now button stays forced via onSyncNow.
+            if enabled {
+                sync.startPolling(onTick: onPollTick)
+            } else {
+                sync.stopPolling()
+            }
         }
     }
 
