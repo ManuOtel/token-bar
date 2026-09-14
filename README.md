@@ -33,9 +33,9 @@ Xcode alternative: open the folder in Xcode (`File > Open`), select the
 ## Install (packaged app)
 
 ```sh
-./scripts/build-app.sh --version 0.1.0            # dist/TokenBar.app
-./scripts/package-release.sh --version 0.1.0 --format zip
-(cd dist && shasum -a 256 -c TokenBar-0.1.0-macos.zip.sha256)
+./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.3.0)
+./scripts/package-release.sh --format zip
+(cd dist && shasum -a 256 -c TokenBar-0.3.0-macos.zip.sha256)
 ```
 
 Unzip, drag `TokenBar.app` to Applications, open. Dev loop needs no bundle:

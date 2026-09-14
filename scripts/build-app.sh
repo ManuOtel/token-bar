@@ -2,12 +2,16 @@
 # Build a versioned TokenBar.app from the TokenBarApp SwiftPM product.
 #
 # Usage:
-#   ./scripts/build-app.sh [--version 0.1.0] [--build 1]
+#   ./scripts/build-app.sh [--version 0.3.0] [--build 1]
 #                          [--bundle-id com.manuotel.TokenBar]
 #                          [--output dist/TokenBar.app]
 #
 # Env overrides (same effect as flags):
-#   TOKENBAR_VERSION=0.2.0 TOKENBAR_BUILD=3 TOKENBAR_BUNDLE_ID=com.example.TokenBar
+#   TOKENBAR_VERSION=0.3.0 TOKENBAR_BUILD=3 TOKENBAR_BUNDLE_ID=com.example.TokenBar
+#
+# Default version comes from the VERSION file at the repo root (single
+# source of truth). Precedence: explicit --version flag, then
+# TOKENBAR_VERSION env, then the VERSION file, then the builtin fallback.
 #
 # Output: <output>/Contents/{MacOS/TokenBar,Resources,Info.plist}
 # Requires: macOS 14 SDK + Swift 5.9+ (run on a Mac). No signing, no network,
@@ -15,7 +19,20 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-VERSION="${TOKENBAR_VERSION:-0.1.0}"
+# Single source of truth: the VERSION file at the repo root. A missing or
+# malformed file falls back to the builtin below (scripts stay runnable
+# from a bare copy); TOKENBAR_VERSION env and --version still win.
+DEFAULT_VERSION="0.3.0"
+if [ -f VERSION ]; then
+  _file_version="$(tr -d ' \t\r\n' < VERSION 2>/dev/null || true)"
+  case "$_file_version" in
+    ""|*[!0-9A-Za-z.\-]*) ;;
+    *) DEFAULT_VERSION="$_file_version" ;;
+  esac
+  unset _file_version
+fi
+
+VERSION="${TOKENBAR_VERSION:-$DEFAULT_VERSION}"
 BUILD="${TOKENBAR_BUILD:-1}"
 BUNDLE_ID="${TOKENBAR_BUNDLE_ID:-com.manuotel.TokenBar}"
 OUTPUT="dist/TokenBar.app"
