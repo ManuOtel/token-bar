@@ -10,7 +10,7 @@ import TokenBarCore
 ///   composition, source rows with OpenCode origin split, model bars,
 ///   14-day trend, notices), scrollable.
 ///
-/// Launch at login, pricing, and homeserver sync live behind the gear button
+/// Launch at login, pricing, and remote sync live behind the gear button
 /// in the header (a small settings popover), never as always-visible footer
 /// sections.
 /// Labels stay short and single-line so nothing wraps or clips at the
@@ -150,7 +150,7 @@ struct DashboardView: View {
                     .font(.body)
             }
             .buttonStyle(.bordered)
-            .help("Open settings: launch at login, pricing, homeserver sync")
+            .help("Open settings: launch at login, pricing, remote sync")
             .accessibilityLabel("Settings")
             .accessibilityHint("Opens launch at login, pricing, and sync settings")
             .popover(isPresented: $showSettings) {
@@ -496,7 +496,7 @@ struct DashboardView: View {
                         ? "\(sourceName(usageSource)): no records"
                         : "\(sourceName(usageSource)): \(fullCount(entry!.totalTokens)) tokens, \(entry!.requests) requests")
                     // OpenCode origin split: combined total stays on the row
-                    // above; local vs homeserver read as one short line each.
+                    // above; local vs remote read as one short line each.
                     if usageSource == .opencode {
                         let origins = opencodeOriginRows
                         if origins.count > 1 {
@@ -766,7 +766,7 @@ struct DashboardView: View {
         if warning.contains("extra database skipped") { return "OpenCode extra skipped: SQLite unavailable." }
         if warning.contains("snapshot not found") { return "OpenCode snapshot not found; using local data." }
         if warning.contains("snapshot unreadable") { return "OpenCode snapshot unreadable; others still load." }
-        if warning.contains("sync cache unreadable") { return "Homeserver sync cache unreadable; using local data." }
+        if warning.contains("sync cache unreadable") { return "Remote sync cache unreadable; using local data." }
         if warning.contains("extra non-token fields") { return "Snapshot had extra fields; token counts only." }
         if warning.contains("snapshot row(s) skipped") { return "Some snapshot rows skipped; counts only." }
         return warning

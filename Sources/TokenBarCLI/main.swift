@@ -108,8 +108,8 @@ func usageText(executable: String = "token-bar") -> String {
       --refresh-pricing fetch the public model pricing catalog before reporting
                         (GET \(OpenRouterCatalog.defaultURLString); no usage data sent).
                         Without it the CLI is fully offline and uses the static table.
-      --sync-now        pull the homeserver snapshot over SSH before reporting
-                        (opt-in; needs Settings homeserver sync configured).
+      --sync-now        pull the remote snapshot over SSH before reporting
+                        (opt-in; needs Settings remote sync configured).
                         Without it the CLI reads the local sync cache as-is.
       --help, -h        show this help
 
@@ -147,7 +147,7 @@ do {
 
 let now = Date()
 
-// MARK: - Homeserver sync (explicit opt-in only)
+// MARK: - Remote sync (explicit opt-in only)
 
 // Disabled by default: without --sync-now the CLI reads the local sync
 // cache as-is (or nothing, when sync was never enabled). With --sync-now

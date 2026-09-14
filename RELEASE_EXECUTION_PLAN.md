@@ -112,11 +112,15 @@ Acceptance evidence:
 
 ## Status log (dated, append-only)
 
+Note: machine-specific values below use neutral placeholders (no hostnames,
+usernames, absolute paths, or run URLs). The shipped bundle-id default lives
+in `scripts/build-app.sh`; CI run status is referenced by PR number.
+
 ### 2026-09-10 - Plan created, execution starts
 
 - Base confirmed: `origin/main` = `323ee30d0abb58aae759178d94d20f6bcccde03f`.
 - Worktree: `/tmp/opencode/token-bar-release-execution` on branch `feat/release-execution`.
-- Host for this run: Linux (`Linux manuotel 6.17.0-40-generic`, no `sw_vers`, no Swift toolchain). Mac-only tasks will be attempted and recorded as blocked-with-evidence where the OS/SDK is missing.
+- Host for this run: Linux (generic Linux worker host, no `sw_vers`, no Swift toolchain). Mac-only tasks will be attempted and recorded as blocked-with-evidence where the OS/SDK is missing.
 - Signing/notary policy: presence/status checks only, values redacted, never commit credentials.
 - Next: run Tasks 1-9 in order, update below with evidence.
 
@@ -127,9 +131,9 @@ Acceptance evidence:
   - `PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify_logic.py`: PASS, `All verify_logic checks passed` (Python 3.13.7).
   - Shell syntax: PASS. `bash -n` + `sh -n` clean on all four `scripts/*.sh`; executable bits set (`-rwxr-xr-x` on build-app, package-release, run-token-bar, show-usage).
   - `swift build` / `swift test`: BLOCKED locally on Linux (`swift: command not found`; requires Mac Xcode 15+ / macOS 14 SDK). CI macOS job is source of truth - see 2026-09-10 CI update below.
-- Task 2 CI update 2026-09-10: PASS on PR #10. `macOS build + test` pass (18s), `Linux verify + shell syntax` pass (6s), `Privacy gate` pass (5s). Run https://github.com/ManuOtel/token-bar/actions/runs/34516816265.
+- Task 2 CI update 2026-09-10: PASS on PR #10. `macOS build + test` pass, `Linux verify + shell syntax` pass, `Privacy gate` pass (see PR #10 checks).
 - Task 3 local CLI smoke: BLOCKED (needs Swift). `./scripts/show-usage.sh --preset lifetime --source all` fails with `./scripts/show-usage.sh: 22: exec: swift: not found` (script execs `swift run TokenBarCLI`). Requires Mac with Swift 5.9+. No product output invented.
-- Task 4 menu-bar app build/launch/quit smoke: BLOCKED (needs Mac). `./scripts/build-app.sh --version 0.1.0` prints `Building TokenBar 0.1.0 (1) id=com.manuotel.TokenBar` then `./scripts/build-app.sh: 103: swift: not found`. No `dist/TokenBar.app` produced; no fake bundle created. Reversible smoke (`open dist/TokenBar.app`, `pgrep -af TokenBar`, quit) requires macOS 14+; launch-at-login toggle check requires bundled app per `docs/MACOS_PACKAGING.md`.
+- Task 4 menu-bar app build/launch/quit smoke: BLOCKED (needs Mac). `./scripts/build-app.sh --version 0.1.0` prints the build line (name, version, bundle id) then fails with `./scripts/build-app.sh: 103: swift: not found`. No `dist/TokenBar.app` produced; no fake bundle created. Reversible smoke (`open dist/TokenBar.app`, `pgrep -af TokenBar`, quit) requires macOS 14+; launch-at-login toggle check requires bundled app per `docs/MACOS_PACKAGING.md`.
 - Task 5 versioned packaging: BLOCKED (needs built .app). `./scripts/package-release.sh --version 0.1.0 --format zip` fails with `Error: app bundle missing at dist/TokenBar.app. Run ./scripts/build-app.sh first.` Requires Mac build first, then package after signing/stapling per docs. `dist/` absent (git-ignored, expected).
 - Task 6 checksum: BLOCKED (no artifact to checksum). `shasum 6.04` and `sha256sum` present on host, but no `dist/TokenBar-*-macos.zip` exists. Verify command for Mac release: `(cd dist && shasum -a 256 -c TokenBar-<x.y.z>-macos.zip.sha256)`.
 - Task 7 Developer ID signing: NOT AVAILABLE (external prerequisite). Presence-only check, no secrets printed: `codesign` missing, `xcrun` missing, no `TOKENBAR/DEVELOPER/NOTARY/APPLE/SIGN` env vars present. Exact prerequisite for signed release: Mac with Developer ID Application certificate (`codesign --deep --force --verify --verbose --sign "Developer ID Application: Your Name (TEAMID)" dist/TokenBar.app`, then `codesign --verify --deep --strict` + `spctl -a -vvv -t install`), per `docs/MACOS_PACKAGING.md`. Unsigned local builds remain valid for dev. No credentials added or committed.
@@ -152,7 +156,7 @@ Base for this follow-up: `origin/main` at `7cb4c71` (merge of PR #10). Branch: `
   - `swift test`: passed with 88 tests and 0 failures.
 - Task 4 menu-bar app build / launch / quit smoke (Mac, reversible): PASS.
   - `./scripts/build-app.sh --version 0.1.0 --build 1`: built `dist/TokenBar.app` (git-ignored).
-  - `Info.plist` verified: bundle id `com.manuotel.TokenBar`, version `0.1.0 (1)`, minimum macOS `14.0`, `LSUIElement` true.
+  - `Info.plist` verified: shipped bundle id, version `0.1.0 (1)`, minimum macOS `14.0`, `LSUIElement` true.
   - `open dist/TokenBar.app`: started TokenBar process; confirmed running, then cleanly terminated (reversible smoke, no install to /Applications).
 - Task 5 versioned packaging (Mac): PASS.
   - `package-release.sh` produced `dist/TokenBar-0.1.0-macos.zip` and `dist/TokenBar-0.1.0-macos.zip.sha256` (git-ignored).

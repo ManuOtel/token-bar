@@ -18,7 +18,7 @@ Scope: local-only macOS menu-bar usage totals. No accounts, no network, no auth.
   and the offline file-copy merge (extra DBs + sanitized snapshots), both
   rejoining the same combine/dedupe with no network inside usage loading.
 - No provider APIs, cookies, keychain reads, or other network calls.
-- No prompt/message body storage, export, or log upload. The homeserver
+- No prompt/message body storage, export, or log upload. The remote
   exporter emits token counts, timestamps, model labels, and session /
   message IDs only, and the sync pull downloads that snapshot only.
 - No auto-updater or paid billing in this phase.
@@ -124,7 +124,7 @@ catalog with offline static fallback; see `docs/PRICING.md`).
 Acceptance:
 
 - Compact initial popover (400pt, no scroll): hero token total, estimated cost + req/sess line, source/range chips, composition ring + stacked source bar + mini 14-day trend, a `Details` expand action, and a one-line notices/login-status footer. No clipped or wrapped controls.
-- Expanded Details mode: toggles back via `Show less`; exposes metric cards, composition card, always-visible source rows with OpenCode local/homeserver sub-lines, top-5 model bars, full 14-day trend with date range, full sanitized notices, and the launch-at-login toggle. Existing filters, refresh, empty states, warnings, origin split, and login behavior all preserved.
+- Expanded Details mode: toggles back via `Show less`; exposes metric cards, composition card, always-visible source rows with OpenCode local/remote sub-lines, top-5 model bars, full 14-day trend with date range, full sanitized notices, and the launch-at-login toggle. Existing filters, refresh, empty states, warnings, origin split, and login behavior all preserved.
 - Charts (`DashboardCharts.swift` on SwiftUI/macOS 14 only, shares from `DashboardInsights`): ring splits the total into input vs output only; cached reads "subset of input" and reasoning "subset of output" in legend + caption; source/model bars show percent-of-total shares; trend bars scale to the peak bucket with tooltips and accessibility labels.
 - Tests: `DashboardInsightsTests` covers empty scope (zero shares, no NaN), input/output split + subset ratios, share normalization/order, trend peak scaling, and top-model limits. No screenshot tests. `PricingCatalogTests` covers OpenRouter decode/normalization, catalog-first precedence, stale/offline cache behavior, the privacy boundary of the catalog GET, and malformed catalogs (fixtures only, no network). `swift build` + `swift test` green on Mac; existing pricing tests keep passing with the static offline path unchanged.
 - Performance slice 1 shipped on `perf/catalog-lookup` (see `docs/PERFORMANCE.md`): immutable catalog lookup built once per `Aggregator.aggregate` call; identical pricing precedence and offline behavior, no parser/merge/UI/total changes.
@@ -161,15 +161,17 @@ Acceptance:
 8. Implement M5 packaging (bundle, `SMAppService` login toggle, signing/notarization doc, `.dmg`/`.zip` path); verify on clean Mac profile.
 9. Cut M6 release: run full checklist, tag, attach signed artifact, file future-source issues.
 
-### M8 - Homeserver auto-sync (opt-in SSH pull)
+### M8 - Remote auto-sync (opt-in SSH pull)
 
-Status: shipped on `feat/opencode-homeserver-sync`. Keeps the manual-copy
+Status: shipped on `feat/opencode-homeserver-sync` (historic branch name;
+product terminology since generalized to remote host). Keeps the manual-copy
 path intact and adds the smallest complete pull design on top.
 
 Acceptance:
 
 - `OpenCodeSync` service + config in `TokenBarCore`: non-secret SSH host
-  alias, remote snapshot path (or remote exporter invocation), local cache
+  alias, remote snapshot path (or remote exporter invocation), optional
+  origin label, local cache
   path, poll interval (default 15 min, 5 min-24 h), timeout (default 60 s,
   5-300 s). System ssh/scp via `Process` argument arrays only, never a
   shell; `BatchMode=yes` always; no credential fields exist. Ships
@@ -182,9 +184,11 @@ Acceptance:
   sanitized message.
 - App startup, periodic background sync, and Sync Now run sync-then-load
   off-main without blocking the popover; local data and
-  aggregation/dedupe unchanged; synced rows are origin `homeserver`,
+  aggregation/dedupe unchanged; synced rows keep their embedded origin
+  (`remote` when omitted; legacy `homeserver` still loads),
   source `opencode`. CLI gains `--sync-now` (failures only add a warning).
 - Settings carries the compact sync surface (toggle, host/path/command,
+  optional origin label,
   interval, Sync Now, one-line status); the dashboard gains no setup prose.
 - Tests: `OpenCodeSyncTests` (config validation, safe argv, cache
   validation/atomic replacement, failure fallback incl. sanitized errors,

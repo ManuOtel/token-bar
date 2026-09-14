@@ -44,11 +44,12 @@ public enum DatePreset: String, Codable, Hashable, Sendable, CaseIterable {
 /// One normalized usage event from either adapter.
 ///
 /// `origin` is the host label for OpenCode multi-machine merge: `"local"`
-/// for the Mac database, `"homeserver"` (or a custom label from a sanitized
-/// snapshot) for imported rows. Codex/Claude rows are always `"local"`.
+/// for the Mac database, `"remote"` (or a custom label from a sanitized
+/// snapshot, e.g. the configured SSH alias) for imported rows. Legacy
+/// `"homeserver"` labels still load. Codex/Claude rows are always `"local"`.
 /// Old encoded records without the key decode with the `"local"` default so
 /// prior reports keep loading. `source` stays `.opencode` for both local
-/// and homeserver OpenCode rows; origin never changes source routing.
+/// and remote OpenCode rows; origin never changes source routing.
 public struct NormalizedUsage: Codable, Hashable, Sendable {
     public var id: String
     public var source: UsageSource
@@ -174,7 +175,7 @@ public struct DailyBucket: Codable, Hashable, Sendable {
 /// Aggregated stats for the current filter/preset scope.
 ///
 /// `byOrigin` groups by `"source/origin"` (for example `"opencode/local"`,
-/// `"opencode/homeserver"`, `"codex/local"`), tokens desc then key asc.
+/// `"opencode/remote"`, `"codex/local"`), tokens desc then key asc.
 /// Single-origin scopes carry one entry; multi-origin scopes carry one per
 /// present pair. Old payloads without the key decode with an empty list.
 public struct AggregatedStats: Codable, Hashable, Sendable {

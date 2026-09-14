@@ -8,16 +8,19 @@ import Foundation
 ///   per-session `session_v2` / `session` rollups fill uncovered sessions only)
 /// - OpenCode extras (offline multi-machine merge, no network):
 ///   `TOKENBAR_OPENCODE_DB_EXTRA` (comma- or newline-separated read-only DB
-///   paths, origin `"homeserver"`) plus `TOKENBAR_OPENCODE_USAGE_JSON`
+///   paths, origin `"remote"`) plus `TOKENBAR_OPENCODE_USAGE_JSON`
 ///   (comma- or newline-separated sanitized snapshot paths as written by
 ///   `scripts/export-opencode-usage.py`). Empty entries are ignored. Missing
 ///   extras are warnings only and never stop Codex/Claude/local usage.
 ///   With only `TOKENBAR_OPENCODE_DB` set, behavior is exactly as before.
+///   Legacy `homeserver` origin labels embedded in snapshots still load.
 /// - OpenCode sync cache (opt-in SSH pull, no manual copy): when
 ///   `OpenCodeSync` has ever synced successfully, its local cache
-///   (`~/Library/Application Support/TokenBar/opencode-homeserver.json`,
-///   override `TOKENBAR_OPENCODE_SYNC_CACHE`) loads here as one more
-///   sanitized snapshot (origin `"homeserver"`, source `.opencode`). A
+///   (`~/Library/Application Support/TokenBar/opencode-remote.json`,
+///   override `TOKENBAR_OPENCODE_SYNC_CACHE`; legacy
+///   `opencode-homeserver.json` still read as a fallback) loads here as one
+///   more sanitized snapshot (origin `"remote"` when the snapshot omits it,
+///   source `.opencode`). A
 ///   missing cache is silent (sync ships disabled); an unreadable one warns
 ///   only. The pull itself happens in `OpenCodeSyncService`, never in this
 ///   file: `load` stays file-reads-only and never touches the network.
@@ -154,7 +157,7 @@ public enum TokenBarStore {
         for extra in opencodeDBExtraPaths {
             if fileManager.fileExists(atPath: extra) {
                 do {
-                    let parts = try OpenCodeStore.loadDatabaseParts(at: extra, origin: "homeserver")
+                    let parts = try OpenCodeStore.loadDatabaseParts(at: extra, origin: "remote")
                     allMessages.append(contentsOf: parts.messages)
                     allRollups.append(contentsOf: parts.rollups)
                     skippedOpenCode += parts.skipped
@@ -171,7 +174,7 @@ public enum TokenBarStore {
         for snapshot in opencodeUsageJSONPaths {
             appendSnapshotFile(
                 snapshot,
-                originFallback: "homeserver",
+                originFallback: "remote",
                 missingWarning: "OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON).",
                 unreadableWarning: "OpenCode snapshot unreadable; others still load.",
                 fileManager: fileManager,
@@ -185,13 +188,15 @@ public enum TokenBarStore {
         // Opt-in sync cache: loads exactly like a hand-copied snapshot when
         // present, stays silent when sync was never enabled. Shares the
         // global combine + dedupe below, so aggregation semantics are
-        // unchanged and synced rows keep origin `homeserver`, source
-        // `.opencode`.
+        // unchanged and synced rows keep their embedded origin (`remote`
+        // when omitted; legacy `homeserver` still loads), source
+        // `.opencode`. Reads the generic cache first, then the legacy
+        // pre-rename file, so upgrades keep their last good pull.
         appendSnapshotFile(
-            OpenCodeSync.defaultCacheURL(fileManager: fileManager).path,
-            originFallback: "homeserver",
+            OpenCodeSync.cacheURLToLoad(fileManager: fileManager).path,
+            originFallback: "remote",
             missingWarning: nil,
-            unreadableWarning: "OpenCode homeserver sync cache unreadable; others still load.",
+            unreadableWarning: "OpenCode remote sync cache unreadable; others still load.",
             fileManager: fileManager,
             allMessages: &allMessages,
             allRollups: &allRollups,

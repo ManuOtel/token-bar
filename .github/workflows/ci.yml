@@ -37,21 +37,26 @@ jobs:
           bash -n scripts/run-token-bar.sh
           bash -n scripts/build-app.sh
           bash -n scripts/package-release.sh
+          bash -n scripts/check-privacy.sh
           sh -n scripts/show-usage.sh
           sh -n scripts/run-token-bar.sh
           sh -n scripts/build-app.sh
           sh -n scripts/package-release.sh
+          sh -n scripts/check-privacy.sh
           test -x scripts/show-usage.sh
           test -x scripts/run-token-bar.sh
           test -x scripts/build-app.sh
           test -x scripts/package-release.sh
+          test -x scripts/check-privacy.sh
 
   privacy:
-    name: Privacy gate (bounded opt-in network/subprocess use)
+    name: Privacy gate (bounded opt-in network/subprocess use + public-repo guard)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Public-repo privacy guard (tracked files only)
+        run: ./scripts/check-privacy.sh
       - name: Confine network and subprocess use to the documented opt-ins
         run: |
           set -eu
@@ -62,7 +67,7 @@ jobs:
           #   PricingService.makeCatalogRequest (pure, unit-pinned: GET, no
           #   body, no query, no auth/cookie headers) and refresh is strictly
           #   user-initiated (app button / CLI --refresh-pricing).
-          # - the homeserver sync (OpenCodeSync: an ssh/scp download of the
+          # - the remote sync (OpenCodeSync: an ssh/scp download of the
           #   token-only snapshot over the user's own SSH setup, never a
           #   shell, BatchMode=yes, no credentials stored, no usage data
           #   sent; disabled by default). Triggered only by enabling sync in

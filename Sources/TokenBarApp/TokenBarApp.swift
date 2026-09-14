@@ -87,7 +87,7 @@ struct TokenBarApp: App {
         startLoad(generation: generation)
     }
 
-    /// Sync Now (Settings): pulls the homeserver snapshot first when sync is
+    /// Sync Now (Settings): pulls the remote snapshot first when sync is
     /// enabled, then runs the normal usage reload. With sync disabled it is
     /// just a refresh. Never blocks the popover: both steps run off-main.
     private func syncNow() {
@@ -116,7 +116,7 @@ struct TokenBarApp: App {
     /// when cached records exist, so a cached menu still refreshes in the
     /// background. Menu opens never call this twice; the refresh button
     /// stays on `refresh()`. With sync enabled the first load pulls the
-    /// homeserver snapshot first, then scans; the periodic timer starts too.
+    /// remote snapshot first, then scans; the periodic timer starts too.
     private func ensureInitialLoad() {
         var state = refreshState
         guard let generation = state.beginInitial() else { return }
@@ -133,7 +133,7 @@ struct TokenBarApp: App {
     /// may publish, so a stale/late completion is dropped instead of
     /// overwriting a newer report. Cache write failure is ignored so it
     /// never breaks a successful fresh load. With `withSync`, the opt-in
-    /// homeserver pull runs first (bounded, cancellable, last-good-cache
+    /// remote pull runs first (bounded, cancellable, last-good-cache
     /// preserving); usage loading never waits on pricing and never fails
     /// because sync failed. Structured concurrency throughout: no semaphores,
     /// no blocked threads; the heavy scan runs on a detached utility task.

@@ -363,7 +363,7 @@ public enum ReportFormatter {
     /// Deterministic JSON: sorted keys + pretty printed. Foundation escapes
     /// `/` as `\/`; both decode identically per the JSON spec, so the output
     /// is unescaped to keep public `source/origin` keys (for example
-    /// `opencode/homeserver`) literal and greppable.
+    /// `opencode/remote`) literal and greppable.
     public static func encodeJSON(sections: [UsageSection], warnings: [String]) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

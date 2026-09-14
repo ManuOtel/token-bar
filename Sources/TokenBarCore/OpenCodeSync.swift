@@ -1,6 +1,7 @@
 import Foundation
 
-/// Opt-in SSH pull of a sanitized OpenCode snapshot from a homeserver.
+/// Opt-in SSH pull of a sanitized OpenCode snapshot from a user-configured
+/// remote host.
 ///
 /// Problem: recent OpenCode tokens live on another host, so local-only
 /// ranges (24h, 7d) read zero until the user hand-copies a snapshot file.
@@ -10,8 +11,14 @@ import Foundation
 /// token-only JSON snapshot (or runs the read-only exporter remotely and
 /// captures its stdout), validates the payload, and atomically replaces the
 /// local sync cache. `TokenBarStore` then loads that cache like any other
-/// snapshot (origin `homeserver`, source `opencode`); aggregation and
+/// snapshot (origin `remote` by default, source `opencode`); aggregation and
 /// dedupe are untouched.
+///
+/// Backward compatibility: snapshots and caches written before the generic
+/// rename use the legacy `homeserver` origin label and the legacy
+/// `opencode-homeserver.json` cache file. Both still load: the legacy cache
+/// file is read when the new one is absent, and embedded `homeserver` labels
+/// pass the origin allowlist unchanged. New writes use the generic names.
 ///
 /// Privacy and safety contract (pinned by tests + CI):
 /// - No shell is ever invoked: `Process(executableURL:arguments:)` with
@@ -50,8 +57,16 @@ public enum OpenCodeSync {
     public static let defaultSSHExecutable = "/usr/bin/ssh"
     public static let defaultSCPExecutable = "/usr/bin/scp"
     public static let configFileName = "opencode-sync.json"
-    public static let cacheFileName = "opencode-homeserver.json"
+    /// Generic sync-cache file for new installs.
+    public static let cacheFileName = "opencode-remote.json"
+    /// Legacy cache file (pre-rename). Read as a fallback when the generic
+    /// file is absent; never written by new code.
+    public static let legacyCacheFileName = "opencode-homeserver.json"
     public static let statusFileName = "opencode-sync-status.json"
+    /// Generic origin for rows without an embedded label.
+    public static let defaultOrigin = "remote"
+    /// Legacy origin label. Still accepted in snapshots and extra DBs.
+    public static let legacyOrigin = "homeserver"
 
     public static var configPathOverride: String? {
         ProcessInfo.processInfo.environment["TOKENBAR_OPENCODE_SYNC_CONFIG"]
@@ -85,6 +100,41 @@ public enum OpenCodeSync {
             return URL(fileURLWithPath: override)
         }
         return supportDirectory(fileManager: fileManager).appendingPathComponent(cacheFileName)
+    }
+
+    /// Legacy cache location (pre-rename). Public so `TokenBarStore` can
+    /// fall back to it without duplicating the filename.
+    public static func legacyCacheURL(fileManager: FileManager = .default) -> URL {
+        supportDirectory(fileManager: fileManager).appendingPathComponent(legacyCacheFileName)
+    }
+
+    /// Cache location to READ: the generic file when present, else the
+    /// legacy file when present, else the generic file (so a missing cache
+    /// stays silent exactly once). Explicit overrides bypass the fallback.
+    public static func cacheURLToLoad(fileManager: FileManager = .default) -> URL {
+        if let override = cachePathOverride, !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        return cacheURLToLoad(
+            supportDirectory: supportDirectory(fileManager: fileManager),
+            fileManager: fileManager)
+    }
+
+    /// Isolated resolution behind `cacheURLToLoad`: the generic cache wins
+    /// when present, else the legacy pre-rename file, else the generic
+    /// destination. Takes the support directory explicitly so tests can use
+    /// temporary directories instead of real user paths. An explicit
+    /// `TOKENBAR_OPENCODE_SYNC_CACHE` override bypasses this fallback
+    /// entirely (handled above: the override path is read exactly as set).
+    public static func cacheURLToLoad(
+        supportDirectory: URL,
+        fileManager: FileManager = .default
+    ) -> URL {
+        let current = supportDirectory.appendingPathComponent(cacheFileName)
+        if fileManager.fileExists(atPath: current.path) { return current }
+        let legacy = supportDirectory.appendingPathComponent(legacyCacheFileName)
+        if fileManager.fileExists(atPath: legacy.path) { return legacy }
+        return current
     }
 
     public static func defaultStatusURL(fileManager: FileManager = .default) -> URL {
@@ -190,8 +240,79 @@ public enum OpenCodeSync {
         else { return false }
         if array.isEmpty { return true }
         return array.contains {
-            OpenCodeStore.decodeSnapshotRecord($0, originFallback: "homeserver") != nil
+            OpenCodeStore.decodeSnapshotRecord($0, originFallback: defaultOrigin) != nil
         }
+    }
+
+    // MARK: - Endpoint origin stamping (pure, unit-pinned)
+
+    /// Stamps a fetched snapshot with the endpoint's effective origin label
+    /// so the configured label (or alias-derived label) actually
+    /// distinguishes this endpoint in `byOrigin`.
+    ///
+    /// Rule (also stated in the Settings help + README):
+    /// - Every `origin`/`host`/`hostname`/`label`/`machine` field is scanned
+    ///   in decode precedence; the first explicitly distinct allowlisted
+    ///   label wins and is canonicalized into the `origin` key. So when
+    ///   `origin` is the default `remote` (any case) but `host` names an
+    ///   explicit endpoint, that explicit label is stored.
+    /// - Records with no explicit label anywhere (missing, empty, hostile,
+    ///   or default-`remote` in every field) get `effectiveLabel`. An empty
+    ///   snapshot (`[]`) passes through byte-identical.
+    /// - Explicitly distinct labels (custom per-host values, `local`, and
+    ///   the legacy pre-rename label) are preserved, so per-host snapshots
+    ///   stay distinguishable and pre-rename payloads keep loading
+    ///   unchanged.
+    /// - Only the `origin` key is ever set; every other key (token counts,
+    ///   timestamps, ids) passes through untouched, and no non-token content
+    ///   is read or written. The applied label is allowlisted, so hostile
+    ///   values can never reach the cache verbatim.
+    ///
+    /// Throws `invalidSnapshot` for non-array payloads, oversized output, or
+    /// re-encoding failure. Callers validate before AND after stamping; any
+    /// failure preserves the last good cache.
+    public static func applyEffectiveOrigin(
+        to data: Data,
+        effectiveLabel: String
+    ) throws -> Data {
+        let label = OpenCodeStore.sanitizeOriginLabel(
+            effectiveLabel, fallback: defaultOrigin)
+        guard let json = try? JSONSerialization.jsonObject(with: data),
+              let array = json as? [[String: Any]]
+        else { throw OpenCodeSyncError.invalidSnapshot }
+        if array.isEmpty { return data }
+        let stamped = array.map { record -> [String: Any] in
+            var record = record
+            var lowered: [String: Any] = [:]
+            lowered.reserveCapacity(record.count)
+            for (key, value) in record { lowered[key.lowercased()] = value }
+            // First explicitly distinct label in decode precedence; the
+            // generic default (any case) and hostile values do not count.
+            let distinct = ["origin", "host", "hostname", "label", "machine"]
+                .lazy
+                .compactMap { lowered[$0] as? String }
+                .map { OpenCodeStore.sanitizeOriginLabel($0, fallback: "") }
+                .first(where: OpenCodeSync.isDistinctLabel)
+            // Explicit endpoints canonicalize into `origin` (which decode
+            // reads first); generic records take the endpoint label.
+            record["origin"] = distinct ?? label
+            return record
+        }
+        guard let output = try? JSONSerialization.data(
+            withJSONObject: stamped, options: []),
+              output.count <= maxSnapshotBytes
+        else { throw OpenCodeSyncError.invalidSnapshot }
+        return output
+    }
+
+    /// An explicitly distinct endpoint label: allowlisted and non-empty, and
+    /// not the generic default (compared case-insensitively, so `REMOTE`
+    /// counts as generic). The legacy pre-rename label always counts as
+    /// distinct, keeping pre-rename payloads on their original attribution.
+    static func isDistinctLabel(_ kept: String) -> Bool {
+        guard !kept.isEmpty else { return false }
+        if kept == legacyOrigin { return true }
+        return kept.lowercased() != defaultOrigin.lowercased()
     }
 
     // MARK: - Atomic cache replacement
@@ -308,16 +429,16 @@ public enum OpenCodeSync {
     // MARK: - Sanitized errors (never paths, usage, or remote output)
 
     public static func sanitizedError(_ error: Error) -> String {
-        if error is CancellationError { return "Homeserver sync cancelled." }
+        if error is CancellationError { return "Remote sync cancelled." }
         if let syncError = error as? OpenCodeSyncError {
             switch syncError {
-            case .timedOut: return "Homeserver sync timed out; kept previous data."
+            case .timedOut: return "Remote sync timed out; kept previous data."
             case .invalidSnapshot: return "Remote snapshot invalid; kept previous data."
             case .configInvalid(let message): return message
-            case .remoteFailed: return "Homeserver sync failed (host unreachable); kept previous data."
+            case .remoteFailed: return "Remote sync failed (host unreachable); kept previous data."
             }
         }
-        return "Homeserver sync failed; kept previous data."
+        return "Remote sync failed; kept previous data."
     }
 }
 
@@ -328,7 +449,7 @@ public struct OpenCodeSyncConfig: Codable, Hashable, Sendable {
     /// Master switch. Default false: upgrade never phones home on its own.
     public var enabled: Bool
     /// Non-secret SSH host alias from the user's own ssh config
-    /// (for example `homeserver`). Never a password, key, or token.
+    /// (for example `myserver`). Never a password, key, or token.
     public var hostAlias: String
     /// Absolute (or `~/`-relative) path of the pre-generated sanitized
     /// snapshot on the remote host. Used in scp mode. Spaces are allowed:
@@ -349,6 +470,15 @@ public struct OpenCodeSyncConfig: Codable, Hashable, Sendable {
     public var pollIntervalSeconds: Int
     /// Per-attempt timeout, seconds. Clamped to 5-300s.
     public var timeoutSeconds: Int
+    /// Optional display/origin label for the remote host (for example
+    /// `myserver`). Sanitized to the short `[A-Za-z0-9_.-]` form; blank
+    /// means derive from `hostAlias`, falling back to `remote`. After a
+    /// successful pull, snapshots exported without a label (or with the
+    /// default `remote` label) are stored under the effective label, so
+    /// per-host snapshots stay distinguishable; explicitly distinct labels
+    /// (including legacy `homeserver`) are preserved. Use it as the
+    /// `--origin` value when exporting.
+    public var originLabel: String
 
     public init(
         enabled: Bool = false,
@@ -356,7 +486,8 @@ public struct OpenCodeSyncConfig: Codable, Hashable, Sendable {
         remotePath: String = "",
         remoteCommand: String = "",
         pollIntervalSeconds: Int = OpenCodeSync.defaultPollIntervalSeconds,
-        timeoutSeconds: Int = OpenCodeSync.defaultTimeoutSeconds
+        timeoutSeconds: Int = OpenCodeSync.defaultTimeoutSeconds,
+        originLabel: String = ""
     ) {
         self.enabled = enabled
         self.hostAlias = hostAlias
@@ -364,6 +495,53 @@ public struct OpenCodeSyncConfig: Codable, Hashable, Sendable {
         self.remoteCommand = remoteCommand
         self.pollIntervalSeconds = pollIntervalSeconds
         self.timeoutSeconds = timeoutSeconds
+        self.originLabel = originLabel
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case enabled
+        case hostAlias
+        case remotePath
+        case remoteCommand
+        case pollIntervalSeconds
+        case timeoutSeconds
+        case originLabel
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        hostAlias = try container.decodeIfPresent(String.self, forKey: .hostAlias) ?? ""
+        remotePath = try container.decodeIfPresent(String.self, forKey: .remotePath) ?? ""
+        remoteCommand = try container.decodeIfPresent(String.self, forKey: .remoteCommand) ?? ""
+        pollIntervalSeconds = try container.decodeIfPresent(Int.self, forKey: .pollIntervalSeconds)
+            ?? OpenCodeSync.defaultPollIntervalSeconds
+        timeoutSeconds = try container.decodeIfPresent(Int.self, forKey: .timeoutSeconds)
+            ?? OpenCodeSync.defaultTimeoutSeconds
+        // Added after the rename: old config files simply decode as blank.
+        originLabel = try container.decodeIfPresent(String.self, forKey: .originLabel) ?? ""
+    }
+
+    /// Effective origin label for this endpoint: the sanitized custom
+    /// `originLabel` when set, else the sanitized `hostAlias`, else the
+    /// generic `remote` default. Never empty, never hostile: anything
+    /// outside the allowlist falls back step by step to `remote`.
+    public var effectiveOriginLabel: String {
+        let custom = originLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !custom.isEmpty {
+            let kept = OpenCodeStore.sanitizeOriginLabel(custom, fallback: "")
+            if !kept.isEmpty { return kept }
+        }
+        let host = hostAlias.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !host.isEmpty {
+            // Host aliases allow `@` (user@host); origin labels do not, so
+            // an alias like `user@host` sanitizes back to the default
+            // instead of leaking verbatim. Users who want that label set it
+            // explicitly via `originLabel` using an allowlisted form.
+            let kept = OpenCodeStore.sanitizeOriginLabel(host, fallback: "")
+            if !kept.isEmpty { return kept }
+        }
+        return OpenCodeSync.defaultOrigin
     }
 
     /// Allowed host-alias shape: short, no whitespace, no shell
@@ -385,7 +563,7 @@ public struct OpenCodeSyncConfig: Codable, Hashable, Sendable {
         guard enabled else { return nil }
         let host = hostAlias.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !host.isEmpty else {
-            return "Homeserver sync needs an SSH host alias."
+            return "Remote sync needs an SSH host alias."
         }
         guard Self.isValidHostAlias(host) else {
             return "Sync host alias has invalid characters (letters, digits, ., _, -, @)."
@@ -394,13 +572,17 @@ public struct OpenCodeSyncConfig: Codable, Hashable, Sendable {
         let path = remotePath.trimmingCharacters(in: .whitespacesAndNewlines)
         if command.isEmpty {
             guard !path.isEmpty else {
-                return "Homeserver sync needs a remote snapshot path or exporter command."
+                return "Remote sync needs a remote snapshot path or exporter command."
             }
             guard !path.contains("\n") && !path.contains("\r") else {
                 return "Remote snapshot path must not contain line breaks."
             }
         } else if command.contains("\n") || command.contains("\r") {
             return "Remote exporter command must not contain line breaks."
+        }
+        let label = originLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !label.isEmpty, OpenCodeStore.sanitizeOriginLabel(label, fallback: "").isEmpty {
+            return "Remote origin label must be 1-64 chars of letters, digits, ., _, -."
         }
         guard (OpenCodeSync.minPollIntervalSeconds...OpenCodeSync.maxPollIntervalSeconds)
             .contains(pollIntervalSeconds)
@@ -592,8 +774,8 @@ public struct OpenCodeSyncService: @unchecked Sendable {
         let statusDestination = statusURL ?? OpenCodeSync.defaultStatusURL(fileManager: fileManager)
         if !config.enabled {
             return OpenCodeSyncResult(
-                didUpdateCache: false, message: "Homeserver sync is disabled.",
-                error: "Homeserver sync is disabled.")
+                didUpdateCache: false, message: "Remote sync is disabled.",
+                error: "Remote sync is disabled.")
         }
         if let problem = config.validated() {
             saveStatus(OpenCodeSyncStatus(
@@ -608,10 +790,19 @@ public struct OpenCodeSyncService: @unchecked Sendable {
             guard OpenCodeSync.validateSnapshotData(data) else {
                 throw OpenCodeSyncError.invalidSnapshot
             }
-            try OpenCodeSync.writeSnapshotAtomically(data, to: destination, fileManager: fileManager)
+            // Stamp the endpoint label per `applyEffectiveOrigin` (every
+            // origin-ish field scanned; explicit distinct and legacy labels
+            // preserved, generic records take the configured label).
+            // Re-validated: any failure preserves the last good cache.
+            let stamped = try OpenCodeSync.applyEffectiveOrigin(
+                to: data, effectiveLabel: config.effectiveOriginLabel)
+            guard OpenCodeSync.validateSnapshotData(stamped) else {
+                throw OpenCodeSyncError.invalidSnapshot
+            }
+            try OpenCodeSync.writeSnapshotAtomically(stamped, to: destination, fileManager: fileManager)
             saveStatus(OpenCodeSyncStatus(
                 lastSuccessAt: now, lastAttemptAt: now, lastError: nil), to: statusDestination)
-            return OpenCodeSyncResult(didUpdateCache: true, message: "Homeserver sync updated.")
+            return OpenCodeSyncResult(didUpdateCache: true, message: "Remote sync updated.")
         } catch {
             let message = OpenCodeSync.sanitizedError(error)
             let previous = loadStatus(from: statusDestination).lastSuccessAt

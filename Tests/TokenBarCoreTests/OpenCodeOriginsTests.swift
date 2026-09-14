@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import TokenBarCore
 
-/// Multi-origin OpenCode merge: local DB + homeserver extras/snapshots.
+/// Multi-origin OpenCode merge: local DB + remote extras/snapshots.
 /// Synthetic data only. Identity rules under test:
 /// - Same `source + requestId` collapses to larger `totalTokens` (max-total
 ///   mirror selection); exact ties break to earliest `(timestamp, id)`.
@@ -102,15 +102,20 @@ final class OpenCodeOriginsTests: XCTestCase {
             "id": "opencode:msg-1", "source": "opencode",
             "timestamp": "2026-09-11T10:00:00Z", "model": "opencode-go/m",
             "inputTokens": 100, "outputTokens": 50, "totalTokens": 150,
-            "sessionId": "ses-1", "requestId": "msg-1", "origin": "homeserver",
+            "sessionId": "ses-1", "requestId": "msg-1", "origin": "myserver",
         ]
         let record = OpenCodeStore.decodeSnapshotRecord(dict)
-        XCTAssertEqual(record?.origin, "homeserver")
+        XCTAssertEqual(record?.origin, "myserver")
         XCTAssertEqual(record?.source, .opencode)
         var missingOrigin = dict
         missingOrigin.removeValue(forKey: "origin")
         XCTAssertEqual(
-            OpenCodeStore.decodeSnapshotRecord(missingOrigin)?.origin, "homeserver")
+            OpenCodeStore.decodeSnapshotRecord(missingOrigin)?.origin, "remote")
+        // Legacy pre-rename labels still load unchanged.
+        var legacy = dict
+        legacy["origin"] = "homeserver"
+        XCTAssertEqual(
+            OpenCodeStore.decodeSnapshotRecord(legacy)?.origin, "homeserver")
         var codex = dict
         codex["source"] = "codex"
         XCTAssertNil(OpenCodeStore.decodeSnapshotRecord(codex))
@@ -125,7 +130,7 @@ final class OpenCodeOriginsTests: XCTestCase {
         let payload: [[String: Any]] = [[
             "id": "opencode:msg-1", "timestamp": "2026-09-11T10:00:00Z",
             "model": "m", "inputTokens": 10, "outputTokens": 5,
-            "sessionId": "s", "requestId": "msg-1", "origin": "homeserver",
+            "sessionId": "s", "requestId": "msg-1", "origin": "remote",
             "prompt": "SECRET-PROMPT-XYZ", "path": "/Users/someone/secret",
         ]]
         let url = FileManager.default.temporaryDirectory
@@ -147,7 +152,7 @@ final class OpenCodeOriginsTests: XCTestCase {
             id: "opencode:msg-1", source: .opencode, timestamp: local.timestamp,
             model: "m", inputTokens: 200, outputTokens: 0, cachedTokens: 0,
             reasoningTokens: 0, totalTokens: 200, sessionId: "s",
-            requestId: "msg-1", origin: "homeserver")
+            requestId: "msg-1", origin: "remote")
         for pair in [[local, remote], [remote, local]] {
             let deduped = TokenBarStore.dedupe(pair)
             XCTAssertEqual(deduped.count, 1)
@@ -157,7 +162,7 @@ final class OpenCodeOriginsTests: XCTestCase {
 
     func testCrossOriginTieBreaksToEarliest() {
         let earlier = usage("opencode:a", request: "dup", total: 100, origin: "local", hoursAgo: 2)
-        let later = usage("opencode:b", request: "dup", total: 100, origin: "homeserver", hoursAgo: 1)
+        let later = usage("opencode:b", request: "dup", total: 100, origin: "remote", hoursAgo: 1)
         for pair in [[earlier, later], [later, earlier]] {
             let deduped = TokenBarStore.dedupe(pair)
             XCTAssertEqual(deduped.count, 1)
@@ -167,16 +172,17 @@ final class OpenCodeOriginsTests: XCTestCase {
 
     func testIDLessClonesCollapseButDistinctSurvive() {
         let cloneA = usage("opencode:same", request: "", total: 15, origin: "local")
-        let cloneB = usage("opencode:same", request: "", total: 15, origin: "homeserver")
+        let cloneB = usage("opencode:same", request: "", total: 15, origin: "remote")
         // Equal total, equal time, equal id: the origin tiebreak keeps
-        // attribution stable in both input orders.
+        // attribution stable in both input orders (lexically smallest wins,
+        // so local beats remote).
         for pair in [[cloneA, cloneB], [cloneB, cloneA]] {
             let deduped = TokenBarStore.dedupe(pair)
             XCTAssertEqual(deduped.count, 1)
-            XCTAssertEqual(deduped.first?.origin, "homeserver")
+            XCTAssertEqual(deduped.first?.origin, "local")
         }
         let distinctA = usage("opencode:id-a", request: "", total: 15, origin: "local")
-        let distinctB = usage("opencode:id-b", request: "", total: 15, origin: "homeserver")
+        let distinctB = usage("opencode:id-b", request: "", total: 15, origin: "remote")
         XCTAssertEqual(TokenBarStore.dedupe([distinctA, distinctB]).count, 2)
     }
 
@@ -192,18 +198,27 @@ final class OpenCodeOriginsTests: XCTestCase {
                 requestId: "dup", origin: origin)
         }
         let local = record(id: "opencode:dup", origin: "local")
-        let remote = record(id: "opencode:dup", origin: "homeserver")
+        let remote = record(id: "opencode:dup", origin: "remote")
         for pair in [[local, remote], [remote, local]] {
             let deduped = TokenBarStore.dedupe(pair)
             XCTAssertEqual(deduped.count, 1)
-            XCTAssertEqual(deduped.first?.origin, "homeserver")
+            // Lexically smallest origin wins: local beats remote.
+            XCTAssertEqual(deduped.first?.origin, "local")
         }
+    }
+
+    func testLegacyHomeserverOriginStillLoads() {
+        // Pre-rename snapshots and extra DB rows used `homeserver`. The
+        // label passes the allowlist and dedupes like any other origin.
+        let legacy = usage("opencode:old", request: "old", total: 50, origin: "homeserver")
+        XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel("homeserver"), "homeserver")
+        XCTAssertEqual(TokenBarStore.dedupe([legacy]).first?.origin, "homeserver")
     }
 
     func testCoveredRollupDroppedAcrossOrigins() {
         let message = usage("opencode:msg-fresh", request: "msg-fresh", total: 200, session: "ses-old", origin: "local")
-        let coveredRollup = usage("opencode:ses-old#1", request: "ses-old#1", total: 150, session: "ses-old", origin: "homeserver")
-        let legacy = usage("opencode:ses-legacy#1", request: "ses-legacy#1", total: 150, session: "ses-legacy", origin: "homeserver")
+        let coveredRollup = usage("opencode:ses-old#1", request: "ses-old#1", total: 150, session: "ses-old", origin: "remote")
+        let legacy = usage("opencode:ses-legacy#1", request: "ses-legacy#1", total: 150, session: "ses-legacy", origin: "remote")
         let combined = OpenCodeStore.combineMessageAndRollup(
             messages: [message], rollups: [coveredRollup, legacy])
         XCTAssertEqual(combined.count, 2)
@@ -213,20 +228,20 @@ final class OpenCodeOriginsTests: XCTestCase {
     func testOriginBreakdownInStatsJSONAndRender() throws {
         let records = [
             usage("a", request: "a", total: 100, origin: "local"),
-            usage("b", request: "b", total: 300, origin: "homeserver"),
+            usage("b", request: "b", total: 300, origin: "remote"),
         ]
         let scoped = Aggregator.filter(records, source: .opencode, preset: .lifetime, now: now, calendar: calendar)
         let stats = Aggregator.aggregate(scoped, calendar: calendar)
         XCTAssertEqual(stats.totalTokens, 400) // combined total retained
-        XCTAssertEqual(Set(stats.byOrigin.map(\.key)), ["opencode/local", "opencode/homeserver"])
+        XCTAssertEqual(Set(stats.byOrigin.map(\.key)), ["opencode/local", "opencode/remote"])
         let section = ReportFormatter.section(records: records, source: .opencode, preset: .lifetime, now: now, calendar: calendar)
         let text = ReportFormatter.render(section: section)
         XCTAssertTrue(text.contains("By origin:"))
         XCTAssertTrue(text.contains("opencode/local"))
-        XCTAssertTrue(text.contains("opencode/homeserver"))
+        XCTAssertTrue(text.contains("opencode/remote"))
         let json = try ReportFormatter.encodeJSON(sections: [section], warnings: [])
         XCTAssertTrue(json.contains("byOrigin"))
-        XCTAssertTrue(json.contains("opencode/homeserver"))
+        XCTAssertTrue(json.contains("opencode/remote"))
     }
 
     func testSanitizedExtrasProduceNoPaths() {
@@ -263,25 +278,26 @@ final class OpenCodeOriginsTests: XCTestCase {
     }
 
     func testSnapshotOriginLabelSanitized() {
+        XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel("remote"), "remote")
         XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel("homeserver"), "homeserver")
         XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel("local"), "local")
         XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel("my-mac_2.0"), "my-mac_2.0")
-        XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel(nil), "homeserver")
-        XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel(""), "homeserver")
+        XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel(nil), "remote")
+        XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel(""), "remote")
         // Slashes, newlines, spaces, and shell metacharacters fall back.
         for hostile in ["a/b", "a\nb", "a b", "$(rm)", "`x`", "a;b", "../x", "a$b"] {
-            XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel(hostile), "homeserver", hostile)
+            XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel(hostile), "remote", hostile)
         }
         // Bounded at 64 chars.
         XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel(String(repeating: "x", count: 64)).count, 64)
-        XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel(String(repeating: "x", count: 65)), "homeserver")
+        XCTAssertEqual(OpenCodeStore.sanitizeOriginLabel(String(repeating: "x", count: 65)), "remote")
         // A hostile snapshot label never survives decoding.
         let dict: [String: Any] = [
             "timestamp": "2026-09-11T10:00:00Z", "model": "m",
             "inputTokens": 10, "outputTokens": 5,
             "sessionId": "s", "requestId": "r", "origin": "evil/x\ny",
         ]
-        XCTAssertEqual(OpenCodeStore.decodeSnapshotRecord(dict)?.origin, "homeserver")
+        XCTAssertEqual(OpenCodeStore.decodeSnapshotRecord(dict)?.origin, "remote")
     }
 
     func testSnapshotCachedReadWriteSummedLikeSQLite() {
@@ -307,6 +323,8 @@ final class OpenCodeOriginsTests: XCTestCase {
     }
 
     func testFixtureSnapshotRoundTrip() throws {
+        // Legacy fixture keeps the pre-rename `homeserver` label: it must
+        // still load byte-identically (backward compatibility).
         let url = repoRoot.appendingPathComponent("Fixtures/synthetic-opencode-snapshot.json")
         let loaded = try OpenCodeStore.loadSnapshot(at: url.path)
         XCTAssertEqual(loaded.records.count, 2)
@@ -328,6 +346,15 @@ final class OpenCodeOriginsTests: XCTestCase {
         }
         let combined = OpenCodeStore.combineMessageAndRollup(messages: messages, rollups: rollups)
         XCTAssertEqual(TokenBarStore.dedupe(combined).count, 2)
+    }
+
+    func testGenericRemoteFixtureRoundTrip() throws {
+        // New generic fixture: `remote` default plus a custom per-host label.
+        let url = repoRoot.appendingPathComponent("Fixtures/synthetic-remote-sync-snapshot.json")
+        let loaded = try OpenCodeStore.loadSnapshot(at: url.path)
+        XCTAssertEqual(loaded.records.count, 2)
+        XCTAssertFalse(loaded.sawExtraFields)
+        XCTAssertEqual(Set(loaded.records.map(\.origin)), ["remote", "myserver"])
     }
 
     func testLocalUnreadableWarningHidesRawPath() {
