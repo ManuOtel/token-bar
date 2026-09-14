@@ -92,9 +92,22 @@ public enum Aggregator {
             group.requests += 1
             group.cost += recordCost
             sourceGroups[sourceKey] = group
-            // `NormalizedUsage.init` already trims `origin` and defaults
-            // blanks to "local", so reuse it directly (no per-record trim).
-            let originKey = "\(record.source.rawValue)/\(record.origin.isEmpty ? "local" : record.origin)"
+            // `NormalizedUsage.init` trims `origin` and defaults blanks to
+            // "local", but `origin` is a public var so callers can mutate it
+            // afterwards (including to whitespace-only). Preserve the prior
+            // trim-and-default behavior; fast-path the already-normalized
+            // case so well-formed records pay no trim allocation.
+            let rawOrigin = record.origin
+            let originValue: String
+            if rawOrigin.isEmpty {
+                originValue = "local"
+            } else if rawOrigin.first?.isWhitespace == true || rawOrigin.last?.isWhitespace == true {
+                let trimmed = rawOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+                originValue = trimmed.isEmpty ? "local" : trimmed
+            } else {
+                originValue = rawOrigin
+            }
+            let originKey = "\(record.source.rawValue)/\(originValue)"
             var originGroup = originGroups[originKey] ?? (0, 0, 0)
             originGroup.tokens += record.totalTokens
             originGroup.requests += 1

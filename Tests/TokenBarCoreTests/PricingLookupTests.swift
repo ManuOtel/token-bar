@@ -142,6 +142,90 @@ final class PricingLookupTests: XCTestCase {
         XCTAssertEqual(viaLookup.origin, viaSnapshot.origin)
     }
 
+    // MARK: - Duplicate ids and multi-slash suffixes
+
+    func testDuplicateNormalizedIdsAndMultiSlashSuffix() {
+        // Duplicate normalized ids: exact uses last-wins (same as
+        // `PricingCatalog.index()`); the bare-suffix map keeps the
+        // lexically smallest normalized id (same as `suffixMatch`, which
+        // keeps the first entry on an exact tie).
+        let duplicates = [
+            CatalogEntry(model: "openai/gpt-4o", inputPerMTok: 1.0, outputPerMTok: 1.0, cachedPerMTok: 1.0),
+            CatalogEntry(model: "OPENAI/GPT-4O", inputPerMTok: 2.0, outputPerMTok: 2.0, cachedPerMTok: 2.0),
+            CatalogEntry(model: "  openai/gpt-4o  ", inputPerMTok: 3.0, outputPerMTok: 3.0, cachedPerMTok: 3.0),
+        ]
+        let snap = snapshot(entries: duplicates, fresh: true)
+        let context = PricingContext(snapshot: snap)
+        let lookup = CatalogLookup(snapshot: snap)
+        // Exact full id: last entry wins on both paths.
+        XCTAssertEqual(
+            Pricing.resolve(forModel: "openai/gpt-4o", snapshot: snap).price.inputPerMTok,
+            3.0, accuracy: 0.0000001)
+        XCTAssertEqual(
+            context.resolve(forModel: "openai/gpt-4o").price.inputPerMTok,
+            3.0, accuracy: 0.0000001)
+        XCTAssertEqual(lookup.match(forModel: "openai/gpt-4o")?.inputPerMTok ?? -1, 3.0, accuracy: 0.0000001)
+        // Bare suffix "gpt-4o": all three normalize identically, so the
+        // first entry wins on both paths (lexical tie => first kept).
+        XCTAssertEqual(
+            Pricing.resolve(forModel: "gpt-4o", snapshot: snap).price.inputPerMTok,
+            1.0, accuracy: 0.0000001)
+        XCTAssertEqual(
+            context.resolve(forModel: "gpt-4o").price.inputPerMTok,
+            1.0, accuracy: 0.0000001)
+        XCTAssertEqual(lookup.match(forModel: "gpt-4o")?.inputPerMTok ?? -1, 1.0, accuracy: 0.0000001)
+
+        // Multi-slash ids: the suffix is the text after the last "/".
+        // Bare "tail-model" matches the lexically smallest full id;
+        // slash-containing keys never take the suffix path.
+        let multi = [
+            CatalogEntry(model: "org/team/tail-model", inputPerMTok: 9.0, outputPerMTok: 9.0, cachedPerMTok: 9.0),
+            CatalogEntry(model: "other/tail-model", inputPerMTok: 4.0, outputPerMTok: 4.0, cachedPerMTok: 4.0),
+        ]
+        let multiSnap = snapshot(entries: multi, fresh: true)
+        let multiContext = PricingContext(snapshot: multiSnap)
+        let multiLookup = CatalogLookup(snapshot: multiSnap)
+        // "org/team/tail-model" < "other/tail-model" lexically, so it wins.
+        for model in ["tail-model", "TAIL-MODEL"] {
+            XCTAssertEqual(
+                Pricing.resolve(forModel: model, snapshot: multiSnap).price.inputPerMTok,
+                9.0, accuracy: 0.0000001, model)
+            XCTAssertEqual(
+                multiContext.resolve(forModel: model).price.inputPerMTok,
+                9.0, accuracy: 0.0000001, model)
+        }
+        XCTAssertEqual(multiLookup.match(forModel: "tail-model")?.inputPerMTok ?? -1, 9.0, accuracy: 0.0000001)
+        // Exact multi-slash id resolves directly on both paths.
+        XCTAssertEqual(
+            Pricing.resolve(forModel: "org/team/tail-model", snapshot: multiSnap).price.inputPerMTok,
+            9.0, accuracy: 0.0000001)
+        XCTAssertEqual(
+            multiContext.resolve(forModel: "org/team/tail-model").price.inputPerMTok,
+            9.0, accuracy: 0.0000001)
+        // A slash-containing non-exact key never suffix-matches: it falls
+        // through to static/fallback identically on both paths.
+        let partialSnapshot = Pricing.resolve(forModel: "team/tail-model", snapshot: multiSnap)
+        let partialContext = multiContext.resolve(forModel: "team/tail-model")
+        XCTAssertEqual(partialSnapshot.origin, partialContext.origin)
+        XCTAssertEqual(
+            partialSnapshot.price.inputPerMTok, partialContext.price.inputPerMTok, accuracy: 0.0000001)
+        XCTAssertNil(multiLookup.match(forModel: "team/tail-model"))
+    }
+
+    func testWhitespaceMutatedOriginAggregatesToLocal() {
+        // `origin` is a public var, so post-init mutation to whitespace-only
+        // must still group under "codex/local" as before this slice.
+        var mutated = record("w-1", model: "gpt-4o")
+        mutated.origin = "   "
+        var blank = record("w-2", model: "gpt-4o")
+        blank.origin = ""
+        let stats = Aggregator.aggregate([mutated, blank], snapshot: nil)
+        XCTAssertEqual(stats.requests, 2)
+        XCTAssertEqual(stats.byOrigin.count, 1)
+        XCTAssertEqual(stats.byOrigin.first?.key, "codex/local")
+        XCTAssertEqual(stats.byOrigin.first?.requests, 2)
+    }
+
     // MARK: - Large synthetic catalog with repeated records
 
     func testAggregateWithLargeCatalogMatchesPerRecordMath() {
@@ -188,37 +272,55 @@ final class PricingLookupTests: XCTestCase {
                 input: 1000 + (index % 5) * 100, output: 500, cached: 200))
         }
 
-        // Expected cost via single-record snapshot math (the old hot path's
-        // result, computed once per record here only to pin equality).
+        // Hardcoded oracle (not self-referential): catalog entry
+        // provider-0000/model-0000 carries input 1.0 / output 2.0 / cached
+        // 0.1 per the generator above. input 1000, output 500, cached 200
+        // => fresh 800: 800/1e6*1.0 + 200/1e6*0.1 + 500/1e6*2.0 = 0.00182.
+        let oracleRecord = record(
+            "oracle", model: "provider-0000/model-0000",
+            input: 1000, output: 500, cached: 200)
+        XCTAssertEqual(
+            Pricing.cost(for: oracleRecord, context: context), 0.00182, accuracy: 0.0000001)
+        // Bare suffix oracle: a-provider/dup-model wins (input 5.0, output
+        // 6.0, cached 0.5). input 1000, output 500, cached 100 => fresh 900:
+        // 900/1e6*5.0 + 100/1e6*0.5 + 500/1e6*6.0 = 0.00755.
+        let suffixOracle = record(
+            "oracle-suffix", model: "dup-model",
+            input: 1000, output: 500, cached: 100)
+        XCTAssertEqual(
+            Pricing.cost(for: suffixOracle, context: context), 0.00755, accuracy: 0.0000001)
+        // Fallback oracle: unknown models price at 3.0 / 12.0 / 1.5.
+        // input 1000, output 500, cached 200 => fresh 800:
+        // 800/1e6*3.0 + 200/1e6*1.5 + 500/1e6*12.0 = 0.0087.
+        let fallbackOracle = record(
+            "oracle-fallback", model: "mystery-model-oracle-zzz",
+            input: 1000, output: 500, cached: 200)
+        XCTAssertEqual(
+            Pricing.cost(for: fallbackOracle, context: context), 0.0087, accuracy: 0.0000001)
+
+        // Expected cost via one reused context (single lookup build), not a
+        // per-record snapshot resolve. Aggregation plumbing (grouping,
+        // totals, breakdowns) is still exercised through `Aggregator`.
         var expected = 0.0
         for r in records {
-            expected += Pricing.cost(for: r, snapshot: fresh)
+            expected += context.cost(for: r)
         }
         let stats = Aggregator.aggregate(records, snapshot: fresh)
         XCTAssertEqual(stats.requests, 3000)
         XCTAssertEqual(stats.estimatedCostUSD, expected, accuracy: 0.0001)
 
-        // Same aggregate via an explicitly reused context-lookup: identical.
-        var viaContext = 0.0
-        for r in records {
-            viaContext += Pricing.cost(for: r, context: context)
-        }
-        XCTAssertEqual(viaContext, expected, accuracy: 0.0001)
-
-        // Precedence spot checks inside the large run.
+        // Precedence spot checks inside the large run (single shared
+        // context; snapshot-vs-context parity is pinned separately above).
         XCTAssertEqual(
-            Pricing.resolve(forModel: "dup-model", snapshot: fresh).price.inputPerMTok, 5.0, accuracy: 0.0001)
-        XCTAssertEqual(
-            Pricing.resolve(forModel: "openai/gpt-5.6-luna", snapshot: fresh).origin, .staticEstimate)
-        XCTAssertEqual(
-            Pricing.resolve(forModel: "gpt-5", snapshot: fresh).origin, .staticEstimate)
-        XCTAssertEqual(
-            Pricing.resolve(forModel: "mystery-model-0", snapshot: fresh).origin, .fallback)
+            context.resolve(forModel: "dup-model").price.inputPerMTok, 5.0, accuracy: 0.0001)
+        XCTAssertEqual(context.resolve(forModel: "openai/gpt-5.6-luna").origin, .staticEstimate)
+        XCTAssertEqual(context.resolve(forModel: "gpt-5").origin, .staticEstimate)
+        XCTAssertEqual(context.resolve(forModel: "mystery-model-0").origin, .fallback)
 
         // byModel breakdown costs match the same per-record math.
         var expectedByModel: [String: Double] = [:]
         for r in records {
-            expectedByModel[r.model, default: 0] += Pricing.cost(for: r, snapshot: fresh)
+            expectedByModel[r.model, default: 0] += context.cost(for: r)
         }
         for entry in stats.byModel {
             XCTAssertEqual(

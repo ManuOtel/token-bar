@@ -24,6 +24,7 @@ xcuserdata/
 # Real usage data - never commit
 *.codex/
 opencode.db
+opencode-homeserver.json
 sessions/
 
 # Release outputs - rebuilt by scripts/build-app.sh
