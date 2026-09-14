@@ -535,42 +535,58 @@ public enum OpenCodeStore {
         _ dict: [String: Any],
         originFallback: String = "homeserver"
     ) -> NormalizedUsage? {
+        // One per-record lowercase index: the old text/int/raw closures each
+        // rescanned every key case-insensitively, so a record paid O(fields x
+        // aliases x keys). This builds O(keys) once and reuses it.
+        //
+        // Duplicate case-insensitive key precedence (explicit): exact-case
+        // keys win per alias (helpers check `dict[key]` first). The index
+        // only decides collisions where no alias matches exactly, and there
+        // the lexicographically smallest original key wins (sorted insert),
+        // deterministic across runs. Coercion applies after precedence.
+        var lowerIndex: [String: Any] = [:]
+        lowerIndex.reserveCapacity(dict.count)
+        for key in dict.keys.sorted() {
+            let low = key.lowercased()
+            if lowerIndex[low] == nil {
+                lowerIndex[low] = dict[key]
+            }
+        }
+        func coerceInt(_ value: Any?) -> Int? {
+            guard let value else { return nil }
+            // Reject JSON booleans by objCType, never via `is Bool`: on
+            // Darwin every NSNumber holding 0/1 bridges as Bool, so the `is`
+            // gate wrongly rejects valid small counts (Mac CI).
+            if let number = value as? NSNumber, String(cString: number.objCType) == "c" { return nil }
+            if let i = value as? Int { return i }
+            if let d = value as? Double { return Int(d) }
+            if let n = value as? NSNumber { return n.intValue }
+            if let s = value as? String {
+                if let parsed = Int(s) { return parsed }
+                if let parsed = Double(s) { return Int(parsed) }
+            }
+            return nil
+        }
         func text(_ keys: String...) -> String? {
             for key in keys {
                 if let value = dict[key] as? String, !value.isEmpty { return value }
-                let low = key.lowercased()
-                for (k, v) in dict where k.lowercased() == low {
-                    if let s = v as? String, !s.isEmpty { return s }
-                }
+                if let value = lowerIndex[key.lowercased()] as? String, !value.isEmpty { return value }
             }
             return nil
         }
         func int(_ keys: String...) -> Int? {
             for key in keys {
-                let candidates = [key] + [key.lowercased()]
-                for candidate in candidates {
-                    var raw: Any?
-                    if let hit = dict[candidate] { raw = hit }
-                    else {
-                        for (k, v) in dict where k.lowercased() == candidate.lowercased() { raw = v; break }
-                    }
-                    guard let value = raw else { continue }
-                    if let number = value as? NSNumber, String(cString: number.objCType) == "c" { continue }
-                    if let i = value as? Int { return i }
-                    if let d = value as? Double { return Int(d) }
-                    if let n = value as? NSNumber { return n.intValue }
-                    if let s = value as? String {
-                        if let parsed = Int(s) { return parsed }
-                        if let parsed = Double(s) { return Int(parsed) }
-                    }
-                }
+                let low = key.lowercased()
+                if let parsed = coerceInt(dict[key]) { return parsed }
+                if low != key, let parsed = coerceInt(dict[low]) { return parsed }
+                if let parsed = coerceInt(lowerIndex[low]) { return parsed }
             }
             return nil
         }
         func raw(_ keys: String...) -> Any? {
             for key in keys {
                 if let hit = dict[key] { return hit }
-                for (k, v) in dict where k.lowercased() == key.lowercased() { return v }
+                if let hit = lowerIndex[key.lowercased()] { return hit }
             }
             return nil
         }

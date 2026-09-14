@@ -138,6 +138,50 @@ Method, split strictly:
   compare warm `parseDirectory` / per-source CLI wall time before/after on
   the same large local tree; do not claim numbers without rerunning there.
 
+## Verified issue (slice 4, this branch)
+
+`OpenCodeStore.decodeSnapshotRecord` rescanned each element dictionary
+case-insensitively inside every `text`/`int`/`raw` closure: one full key
+scan per alias per field, so per-record work grew with fields x aliases x
+keys.
+
+Fix (`perf/opencode-snapshot-decode`):
+
+- Build one per-record lowercase index (`Sources/TokenBarCore/OpenCodeStore.swift`):
+  O(keys) once per record via sorted insert, then reuse it for all field
+  reads. Exact-case `dict[key]` is still checked first per alias, so
+  exact-key precedence is preserved; the index only decides collisions
+  where no alias matches exactly.
+- Duplicate case-insensitive key precedence is explicit: lexicographically
+  smallest original key wins in the index, deterministic across runs.
+  Coercion (String non-empty, Int/Double/NSNumber/string-number, Bool
+  rejection by `objCType`) is unchanged.
+- No token-math, dedupe, timestamp, provider+model, source-filter, origin,
+  fallback-ID, forbidden-key, skipped-count, or contract changes.
+
+Tests (`Tests/TokenBarCoreTests/OpenCodeSnapshotDecodeTests.swift`, hermetic, no
+network, no timing assertions): mixed-casing parity, snake_case alias
+fallback, provider+model composition, source rejection (including uppercase
+keys), forbidden-key detection plus non-retention, origin sanitization,
+deterministic fallback IDs (request vs content-hashed, distinct rows stay
+distinct), positive-token gate, timestamp plus cached read/write aliases,
+and the explicit duplicate-key precedence (exact wins, then smallest wins).
+
+Method, split strictly:
+
+- Reported Mac audit (not rerun here): the sanitized OpenCode snapshot is
+  about 8 MB and `loadSnapshot` alone takes about 6.48 seconds. Host- and
+  data-dependent.
+- Code-inspection claim only (no new wall-clock): per-record field lookups
+  drop from repeated full-dictionary scans to one index build plus hash
+  hits; total decode work per record is linear in keys plus aliases. No
+  speedup number is claimed.
+- No worker-host benchmark: this worker host has no Swift toolchain (Linux
+  runs `verify_logic.py` only) and carries no snapshot data, so no
+  before/after timing was run here. To measure on Mac, compare warm
+  `loadSnapshot` wall time before/after on the same snapshot file; do not
+  claim numbers without rerunning there.
+
 ## Next safe slices (pure core, behavior-preserving)
 
 1. Per-model price memoization inside aggregate: cache resolved
