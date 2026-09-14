@@ -706,6 +706,78 @@ public enum OpenCodeStore {
         return record
     }
 
+    /// Bounded SQLite projection: every column name the decoders can
+    /// probe, lowercased. `loadTable` selects only the intersection of
+    /// this set with the live table, so wide unrelated columns (prompt
+    /// text, tool I/O, future drift columns) are never copied off SQLite
+    /// and never materialized into the per-row dictionary.
+    ///
+    /// Coverage contract (keep in sync with the probes):
+    /// - `decodeRow`: all timestamp / token / cache / reasoning / total
+    ///   aliases, model + session + request aliases, the six JSON-blob
+    ///   keys (`data`, `payload`, `info`, `value`, `content`, `meta`).
+    /// - `decodeMessageRow`: `data` blob, `type`/`role`, flat time /
+    ///   model / provider / session / message-ID columns, the same flat
+    ///   token aliases as drift fallback.
+    ///
+    /// Future columns with brand-new names were already ignored by the
+    /// decoders (alias lists are closed); projection only moves that
+    /// ignore earlier (no copy) instead of later (copy then ignore).
+    /// One intentional semantic delta: `fallbackMessageID` hashes the
+    /// projected columns only, so two ID-less rows differing solely in
+    /// ignored wide columns now share an ID (they carry identical usage
+    /// semantics). Real tables always carry `id`, so this is drift
+    /// tolerance only; IDs stay deterministic and distinct for any
+    /// recognized-column difference.
+    public static let projectedColumns: Set<String> = [
+        // JSON-blob columns merged underneath explicit columns.
+        "data", "payload", "info", "value", "content", "meta",
+        // Timestamps (rollup + message flat columns).
+        "timestamp", "time", "time_created", "timecreated",
+        "created_at", "createdat", "created",
+        "updated_at", "updatedat", "updated",
+        "time_updated", "timeupdated", "date",
+        // Token counts: input / output.
+        "input_tokens", "inputtokens", "prompt_tokens", "prompttokens",
+        "tokens_input", "tokensinput", "input",
+        "output_tokens", "outputtokens", "completion_tokens",
+        "completiontokens", "tokens_output", "tokensoutput", "output",
+        // Cache read / write components.
+        "cached_tokens", "cachedtokens", "cached_input_tokens",
+        "cachedinputtokens", "tokens_cache_read", "tokenscacheread",
+        "cache_write_input_tokens", "cachewriteinputtokens",
+        "tokens_cache_write", "tokenscachewrite",
+        // Reasoning / total.
+        "reasoning_tokens", "reasoningtokens",
+        "reasoning_output_tokens", "reasoningoutputtokens",
+        "tokens_reasoning", "tokensreasoning",
+        "total_tokens", "totaltokens", "tokens_total", "tokenstotal",
+        "total", "tokens",
+        // Model identity.
+        "model", "model_name", "modelname", "provider_model",
+        "modelid", "model_id", "providerid", "provider_id", "provider",
+        // Session / request identity.
+        "session_id", "sessionid", "session", "id", "key",
+        "request_id", "requestid", "message_id", "messageid", "rowid",
+        // Role gate (message tables).
+        "type", "role",
+    ]
+
+    /// Pure projection helper (testable without SQLite): intersects live
+    /// table columns with `projectedColumns`, preserving table order.
+    /// Comparison is case-insensitive; the returned names keep their
+    /// original case for quoted SELECT emission.
+    public static func projectedSelection(actualColumns: [String]) -> [String] {
+        actualColumns.filter { projectedColumns.contains($0.lowercased()) }
+    }
+
+    /// Quote an SQLite identifier (table or column) with embedded
+    /// double quotes escaped by doubling. Table names here are
+    /// constants, but quoting stays correct if a future name drifts.
+    public static func quoteIdentifier(_ name: String) -> String {
+        "\"" + name.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+    }
+
     // MARK: - Private helpers
 
     /// Reduces a model column value to a concise stable label. Accepts plain
@@ -867,19 +939,65 @@ public enum OpenCodeStore {
         return (messages, rollups, skipped)
     }
 
+    /// Reads live column names via `PRAGMA table_info`, preserving table
+    /// order. Returns nil when the table is missing/unreadable so callers
+    /// keep the graceful skip contract.
+    private static func actualTableColumns(db: OpaquePointer, table: String) -> [String]? {
+        var stmt: OpaquePointer?
+        let sql = "PRAGMA table_info(\(quoteIdentifier(table)))"
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+        var columns: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            // PRAGMA table_info: cid(0), name(1), type(2), notnull(3),
+            // dflt_value(4), pk(5). Name is TEXT at index 1.
+            if let text = sqlite3_column_text(stmt, 1) {
+                columns.append(String(cString: text))
+            }
+        }
+        return columns
+    }
+
     private static func loadTable(
         db: OpaquePointer,
         table: String,
         decode: ([String: String?], String) -> NormalizedUsage?
     ) -> (records: [NormalizedUsage], skipped: Int) {
-        var stmt: OpaquePointer?
-        let sql = "SELECT * FROM \"\(table)\""
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+        guard let actual = actualTableColumns(db: db, table: table) else {
             return ([], 0) // missing table: skip gracefully
+        }
+        if actual.isEmpty {
+            return ([], 0) // table with no columns: nothing to decode
+        }
+        let selected = projectedSelection(actualColumns: actual)
+        if selected.isEmpty {
+            // Table exists but carries none of our columns: every row
+            // would skip. Count rows without materializing any cells.
+            var countStmt: OpaquePointer?
+            let countSQL = "SELECT 1 FROM \(quoteIdentifier(table))"
+            guard sqlite3_prepare_v2(db, countSQL, -1, &countStmt, nil) == SQLITE_OK,
+                  let countStmt else {
+                return ([], 0)
+            }
+            defer { sqlite3_finalize(countStmt) }
+            var skipped = 0
+            while sqlite3_step(countStmt) == SQLITE_ROW {
+                skipped += 1
+            }
+            return ([], skipped)
+        }
+        let columnList = selected.map(quoteIdentifier).joined(separator: ",")
+        let sql = "SELECT \(columnList) FROM \(quoteIdentifier(table))"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return ([], 0) // unreadable selection: skip gracefully
         }
         defer { sqlite3_finalize(stmt) }
         let columnCount = Int(sqlite3_column_count(stmt))
         var names: [String] = []
+        names.reserveCapacity(columnCount)
         for index in 0..<columnCount {
             guard let namePtr = sqlite3_column_name(stmt, Int32(index)) else { continue }
             names.append(String(cString: namePtr).lowercased())
@@ -888,6 +1006,7 @@ public enum OpenCodeStore {
         var skipped = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
             var columns: [String: String?] = [:]
+            columns.reserveCapacity(names.count)
             for (index, name) in names.enumerated() {
                 if sqlite3_column_type(stmt, Int32(index)) == SQLITE_NULL {
                     columns[name] = nil
