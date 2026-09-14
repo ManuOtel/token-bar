@@ -51,13 +51,47 @@ synthetic catalog (1,502 entries) with 3,000 heavily repeated records
 asserting aggregate cost equals per-record math and `byModel` costs match,
 and nil-snapshot offline parity. No timing assertions.
 
+## Verified issue (slice 2, shipped)
+
+`TokenBarApp.body` recomputed the full report on every SwiftUI render: one
+`Aggregator.filter` (full scan + sort) each for the scoped rows, the
+selected stats, the best-month key, and four source chips, plus a second
+`Date()` + filter + reduce for the menu title. A render cost ~7-9 filter
+sorts and two clock values that could disagree on boundary records.
+
+Fix (`perf/single-pass-dashboard`):
+
+- New pure `DashboardSnapshot` (`Sources/TokenBarCore/DashboardSnapshot.swift`):
+  one explicit `now` drives one sorted selected-scope filter, one
+  `Aggregator.aggregate` (which keeps the slice-1 single `PricingContext`
+  reuse), and one unsorted single pass for the four chip totals (counts +
+  tokens only, no sorted arrays). No cache, no shared state: pricing changes
+  are an input snapshot, so costs recompute without stale values.
+- `TokenBarApp.body` builds one snapshot per render and derives the menu
+  title, stats, scoped count, chips, and best-month key from it. Menu title
+  formatting and the `.bestMonth` lifetime-title semantics are preserved
+  byte-for-byte; only the duplicate second `Date()` is gone.
+- No token-total, dedupe, cost-math, parser, or pricing-precedence changes.
+
+Tests (`Tests/TokenBarCoreTests/DashboardSnapshotTests.swift`, hermetic, no
+network, no timing assertions): selected stats vs legacy filter + aggregate
+parity across window presets/sources, menu total agreement, per-chip vs
+filter totals with all-source reconciliation, best-month key/stats agreement
+with the preserved lifetime menu total, pricing-snapshot cost recompute, and
+menu-title formatting pins.
+
+Method: pass counting by code inspection only. No wall-clock measured here:
+this worker host has no Swift toolchain (Linux runs `verify_logic.py` only).
+To measure on Mac, compare menu-open render work before/after on a large
+local report; do not claim numbers without rerunning there.
+
 ## Next safe slices (pure core, behavior-preserving)
 
 1. Per-model price memoization inside aggregate: cache resolved
    `(price, origin)` per normalized model key so repeated models pay one
    dictionary hit + one static-table scan total, not one per record.
 2. Static-table fast path: keep table order/precedence byte-identical but
-   avoid repeated substring scans for the same key (follows from slice 2's
+   avoid repeated substring scans for the same key (follows from item 1's
    cache; no rate or order change).
 3. Aggregate allocation hygiene: reuse calendar/formatter work in
    `dailyTrend`, keep breakdown sorting identical, extend reserve-capacity
