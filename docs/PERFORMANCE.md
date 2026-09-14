@@ -228,6 +228,71 @@ still depends on source size. No wall-clock is claimed here: measure on
 Mac by comparing time-to-first-paint before/after on the same large tree;
 do not claim numbers without rerunning there.
 
+## Attempted improvement (slice 6, this branch, allocation only)
+
+`OpenCodeStore.loadTable` used `SELECT *` and materialized every column
+into `[String: String?]` per row, although decoding probes a bounded set
+of token, timestamp, identity, role, JSON-blob, and model fields. Wide
+unrelated columns (prompt text, tool I/O, future drift columns) were
+copied off SQLite and allocated per row, then ignored.
+
+Change (`perf/opencode-sqlite-projection`):
+
+- New `projectedColumns` allowlist
+  (`Sources/TokenBarCore/OpenCodeStore.swift`, 76 lowercased names):
+  the six JSON-blob keys plus every timestamp / token / cache /
+  reasoning / total / model / session / request / role alias the pure
+  decoders probe. `projectedSelection(actualColumns:)` intersects the
+  live table with the allowlist (case-insensitive, table order kept);
+  `quoteIdentifier` quotes with embedded-quote doubling.
+- `loadTable` now reads live columns via `PRAGMA table_info`, selects
+  only the intersection (`SELECT "a","b",... FROM "t"`), and
+  materializes only those cells with `reserveCapacity`. Missing tables
+  still skip gracefully (`([], 0)`); a table with zero recognized
+  columns counts rows via `SELECT 1` without materializing cells.
+- No alias, JSON-blob, precedence, mirror, skipped-count, ordering, or
+  privacy change: all six blob keys still merge underneath explicit
+  columns, message-beats-rollup and mirror rules are untouched, and
+  wide columns were already ignored by the closed alias lists
+  (projection moves the ignore earlier, no copy, instead of later,
+  copy then ignore).
+
+Tests (hermetic, no network, no timing assertions):
+
+- `Tests/TokenBarCoreTests/OpenCodeProjectionTests.swift`: allowlist
+  coverage pins, wide-column decode parity for rollup + message rows,
+  all six blob keys surviving with wide columns present, quoting pins,
+  plus SQLite integration (guarded by `canImport(SQLite3)`): a temp DB
+  with wide `prompt_text` / `tool_*` / `future_col_v2` columns proves
+  required + blob decode with identical skipped counts, no wide-content
+  leakage, deterministic reload, and graceful missing-table skip.
+- `scripts/verify_logic.py`: Python mirror of the allowlist, rollup +
+  message wide-column parity, per-blob survival, and a real SQLite
+  fixture proving the bounded `SELECT` subset plus parity/skipped
+  counts. Run with `python3 scripts/verify_logic.py`.
+- `scripts/bench-opencode-projection.py`: deterministic count-only
+  measurement (no wall-clock, CI-safe). Same 50 synthetic wide rows
+  both paths.
+
+Method, split strictly:
+
+- Measured facts (this worker host, same synthetic data, repeatable):
+  `python3 scripts/bench-opencode-projection.py` reports 12 columns
+  per row old vs 7 new, 600 cells old vs 350 new (250 saved, 41.7%),
+  about 5,008,090 bytes old vs 8,090 new (5,000,000 saved, 99.8%).
+  Counts are synthetic-filler dominated (20KB x 5 wide columns per
+  row); real-host savings scale with actual wide-column width.
+- No wall-clock is claimed. Swift is unavailable on this worker host
+  (Linux runs `verify_logic.py` + the count-only bench only), and no
+  Mac before/after on the same database was run here. To measure on
+  Mac, compare warm `loadDatabase` wall time before/after on the same
+  database file; do not claim numbers without rerunning there.
+- Limitation: `fallbackMessageID` now hashes the projected columns
+  only. Two ID-less rows differing solely in ignored wide columns now
+  share an ID (identical usage semantics). Real tables always carry
+  `id`, so this is drift tolerance only; IDs stay deterministic and
+  distinct for any recognized-column difference.
+
 ## Next safe slices (pure core, behavior-preserving)
 
 1. Per-model price memoization inside aggregate: cache resolved

@@ -1048,6 +1048,118 @@ def run():
          "tokens": {"input": 1, "output": 1}})})
     check("opencode top-level blob timestamp ignored", noto is None)
 
+    # SQLite projection slice: bounded allowlist covers every decoder
+    # probe; wide unrelated columns are ignored with identical decode.
+    projected = {
+        "data", "payload", "info", "value", "content", "meta",
+        "timestamp", "time", "time_created", "timecreated",
+        "created_at", "createdat", "created",
+        "updated_at", "updatedat", "updated",
+        "time_updated", "timeupdated", "date",
+        "input_tokens", "inputtokens", "prompt_tokens", "prompttokens",
+        "tokens_input", "tokensinput", "input",
+        "output_tokens", "outputtokens", "completion_tokens",
+        "completiontokens", "tokens_output", "tokensoutput", "output",
+        "cached_tokens", "cachedtokens", "cached_input_tokens",
+        "cachedinputtokens", "tokens_cache_read", "tokenscacheread",
+        "cache_write_input_tokens", "cachewriteinputtokens",
+        "tokens_cache_write", "tokenscachewrite",
+        "reasoning_tokens", "reasoningtokens",
+        "reasoning_output_tokens", "reasoningoutputtokens",
+        "tokens_reasoning", "tokensreasoning",
+        "total_tokens", "totaltokens", "tokens_total", "tokenstotal",
+        "total", "tokens",
+        "model", "model_name", "modelname", "provider_model",
+        "modelid", "model_id", "providerid", "provider_id", "provider",
+        "session_id", "sessionid", "session", "id", "key",
+        "request_id", "requestid", "message_id", "messageid", "rowid",
+        "type", "role",
+    }
+    probe_keys = ["data", "time_created", "tokens_input", "tokens_output",
+                  "model", "id", "session_id", "type",
+                  "tokens_cache_read", "total_tokens", "timestamp"]
+    check("projection covers decoder probes",
+          all(k in projected for k in probe_keys))
+    check("projection excludes wide privacy columns",
+          all(k not in projected for k in
+              ("prompt", "prompt_text", "tool_input", "tool_output",
+               "text", "body", "path", "secret")))
+    base_row = {"id": "sess-1", "time_created": "1757325600000",
+                "tokens_input": "1000", "tokens_output": "250", "model": "m"}
+    wide_row = dict(base_row, prompt_text="x" * 1000, tool_output="y" * 1000,
+                    future_col_v2="123", path="/Users/someone/secret")
+    base_rec = decode_opencode_row(base_row)
+    wide_rec = decode_opencode_row(wide_row)
+    check("projection wide-column parity (rollup)",
+          base_rec is not None and wide_rec is not None
+          and base_rec["total"] == wide_rec["total"]
+          and base_rec["input"] == wide_rec["input"]
+          and base_rec["request"] == wide_rec["request"])
+    check("projection wide content never leaks",
+          "/Users/someone" not in json.dumps(wide_rec, default=str))
+    for blob_key in ("data", "payload", "info", "value", "content", "meta"):
+        blob = json.dumps({"model": "m", "input_tokens": 700,
+                           "output_tokens": 300,
+                           "timestamp": "2026-09-09T10:00:00Z"})
+        rec = decode_opencode_row({"id": "r", blob_key: blob,
+                                   "prompt_text": "wide"})
+        check(f"projection blob {blob_key} survives",
+              rec is not None and rec["total"] == 1000)
+    msg_base = msg_cols(dict(assistant_blob,
+                             time={"created": recent_ms}),
+                        session="ses-1", row_id="msg-1")
+    msg_wide = dict(msg_base, prompt_text="q" * 1000,
+                    tool_input="w" * 1000, future_col_v2="999")
+    msg_a = decode_opencode_message(msg_base)
+    msg_b = decode_opencode_message(msg_wide)
+    check("projection wide-column parity (message)",
+          msg_a is not None and msg_b is not None
+          and msg_a["total"] == msg_b["total"]
+          and msg_a["request"] == msg_b["request"])
+    # SQLite fixture: same required + blob decode with wide columns
+    # present in the table but never selected.
+    import sqlite3 as _sqlite3
+    import tempfile as _tempfile
+    tmp = _tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+    tmp.close()
+    try:
+        con = _sqlite3.connect(tmp.name)
+        con.execute("CREATE TABLE session_v2 (id TEXT, time_created TEXT,"
+                    " tokens_input TEXT, tokens_output TEXT, model TEXT,"
+                    " prompt_text TEXT, future_col_v2 TEXT)")
+        con.execute("INSERT INTO session_v2 VALUES "
+                    "('ses-1','1757325600000','100','50','m','SECRET','123'),"
+                    "('bad',NULL,'10','5','m','SECRET','123')")
+        cols = [r[1] for r in con.execute("PRAGMA table_info(session_v2)")]
+        selected = [c for c in cols if c.lower() in projected]
+        check("projection fixture selects bounded subset",
+              set(selected) == {"id", "time_created", "tokens_input",
+                                "tokens_output", "model"}
+              and "prompt_text" not in selected
+              and "future_col_v2" not in selected)
+        cur = con.execute("SELECT \"id\",\"time_created\",\"tokens_input\","
+                          "\"tokens_output\",\"model\" FROM \"session_v2\"")
+        names = [d[0].lower() for d in cur.description]
+        recs, skipped = [], 0
+        for tup in cur.fetchall():
+            row = {n: v for n, v in zip(names, tup)}
+            rec = decode_opencode_row({k: (None if v is None else str(v))
+                                       for k, v in row.items()})
+            if rec is not None:
+                recs.append(rec)
+            else:
+                skipped += 1
+        check("projection fixture parity + skipped",
+              len(recs) == 1 and skipped == 1
+              and recs[0]["total"] == 150
+              and "SECRET" not in json.dumps(recs, default=str))
+        con.close()
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
     # Dedupe earliest kept
     seen, unique = set(), []
     for rid, src in (("dup", "codex"), ("dup", "codex"), ("dup", "opencode")):
