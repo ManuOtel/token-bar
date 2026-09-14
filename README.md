@@ -2,10 +2,12 @@
 
 [![CI](https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml/badge.svg)](https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml)
 
-Native macOS menu bar utility that totals token usage from local Codex,
-OpenCode, and Claude Code history. File reads only, plus one strictly
-opt-in pricing refresh (public catalog GET, no usage data sent).
-No accounts, no cookies.
+Native macOS 14+ SwiftUI MenuBarExtra utility that totals token usage from
+local Codex, OpenCode, and Claude Code history. File reads only, plus
+offline multi-machine OpenCode file/snapshot merge, plus one strictly
+opt-in public OpenRouter pricing GET (no usage data sent).
+No accounts, no provider APIs, no cookies. Costs are estimates only,
+never a bill.
 
 ## Requirements
 
@@ -36,9 +38,9 @@ Xcode alternative: open the folder in Xcode (`File > Open`), select the
 ```
 
 Unzip, drag `TokenBar.app` to Applications, open. Dev loop needs no bundle:
-`./scripts/run-token-bar.sh`. The dashboard has a launch-at-login toggle
-(`SMAppService.mainApp`); under `swift run` it stays disabled with dev-run
-copy. Uninstall: toggle login off, quit, delete the app. Full path
+`./scripts/run-token-bar.sh`. Launch at login is available from the
+Settings gear popover (`SMAppService.mainApp`); under `swift run` it stays
+disabled with dev-run copy. Uninstall: toggle login off, quit, delete the app. Full path
 (signing, `notarytool`, staple, DMG, troubleshooting): `docs/MACOS_PACKAGING.md`.
 
 ## Direct terminal usage (no menu bar)
@@ -95,7 +97,7 @@ What each report means:
 - **source splits**: per-source tokens/requests/cost, sorted tokens desc.
 - **cost**: always labelled `Estimated cost ... (estimate only; static table,
   not a bill; subscription use is not an API invoice)`; with
-  `--refresh-pricing` (or the app Update pricing button) a `Pricing:` line
+  `--refresh-pricing` (or the Settings Update pricing button) a `Pricing:` line
   names the rate basis (`dynamic catalog` / `cached catalog` / `static
   estimates` with host, model count, age). Resolution: fresh catalog, cached
   catalog, exact provider/model static table, family static table, fallback.
@@ -258,11 +260,11 @@ clearly labeled approximations.
 
 Dark usage cockpit in the macOS menu bar popover (400pt, macOS 14 SwiftUI, no extra chart dependency).
 
-- **Compact (initial, no scroll):** hero token total for the active source/range, estimated cost (estimate only), `Source` chips (All / Codex / OpenCode / Claude with per-source tokens in range) and `Range` chips (Today / 24H / 7D / 30D / Best / All), a compact visual summary (input/output composition ring with cached/reasoning labelled as subsets, stacked source bar, 14-day mini trend), and a clear `Details` expand action plus a one-line notices/login status footer.
-- **Expanded (Details, scrollable):** toggles back to compact via `Show less` in the header. Exposes input/output/cached/reasoning cards (cached reads "subset of input", reasoning "subset of output"), a composition card whose ring splits the total into input vs output only with subset percentages in text, an always-visible source breakdown (zero sources stay listed as `no records`) with a stacked distribution bar, top-5 model bars with share tooltips, the full 14-day trend with date range, sanitized notices, and the launch-at-login toggle.
+- **Compact (initial, no scroll):** hero token total for the active source/range, estimated cost (estimate only), `Source` chips (All / Codex / OpenCode / Claude with per-source tokens in range) and `Range` chips (Today / 24H / 7D / 30D / Best / All), a compact visual summary (input/output composition ring with cached/reasoning labelled as subsets, stacked source bar, 14-day mini trend), and a clear `Details` expand action plus a one-line updated/notices footer.
+- **Expanded (Details, scrollable):** toggles back to compact via `Show less` in the header. Exposes input/output/cached/reasoning cards (cached reads "subset of input", reasoning "subset of output"), a composition card whose ring splits the total into input vs output only with subset percentages in text, an always-visible source breakdown (zero sources stay listed as `no records`) with a stacked distribution bar, top-5 model bars with share tooltips, the full 14-day trend with date range, and sanitized notices.
 - Charts are custom SwiftUI (`DashboardCharts.swift`: ring, stacked bar, model bars, daily bars) fed by `DashboardInsights` shares in `TokenBarCore`. Cached and reasoning tokens never render as extra ring slices.
-- Preserved in both modes: source/range filtering, refresh button + loading state, empty-range states (with one-tap jumps to All sources / Lifetime), sanitized warnings (never paths), the OpenCode combined total plus local vs homeserver sub-lines when both origins are present, best-month key, last-updated line, and launch-at-login (`SMAppService.mainApp`; disabled dev-run copy under `swift run`).
-- Below the dashboard, a pricing footer shows the rate basis (`Pricing: ...` line) with an `Update pricing` button (user-initiated catalog GET, cancellable, offline-safe) and any refresh error. It never blocks usage loading.
+- Preserved in both modes: source/range filtering, refresh button + loading state, empty-range states (with one-tap jumps to All sources / Lifetime), sanitized warnings (never paths), the OpenCode combined total plus local vs homeserver sub-lines when both origins are present, best-month key, and last-updated line.
+- **Settings (gear popover):** the gear button in the dashboard header opens `SettingsView` with the launch-at-login toggle and the pricing section (rate-basis status line, user-initiated `Update pricing` catalog GET, cancellable, offline-safe, plus any refresh error). Both live only in Settings, never as an always-visible dashboard footer. Usage filters and details stay in the dashboard. Pricing refresh never blocks usage loading.
 - **Startup cache (perceived startup only):** the app shows the last normalized report from `~/Library/Application Support/TokenBar/startup-report.json` immediately, marks it `Showing previous data - updating…` while the full history scan runs in the background, then atomically replaces it with fresh data. Cached values are previous normalized data until the background refresh finishes; the first-ever load with no cache still depends on source size and shows the loading state. Only token counts, model/source/origin labels, counters, and sanitized warnings are cached (no prompts, message bodies, tool I/O, file paths, or credentials).
 
 ## Testing
