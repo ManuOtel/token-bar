@@ -535,10 +535,11 @@ public enum OpenCodeStore {
         _ dict: [String: Any],
         originFallback: String = "homeserver"
     ) -> NormalizedUsage? {
-        // Lazy case-insensitive fallback: exact canonical keys take the old
-        // O(1) dictionary path with no extra allocation. Only on the first
-        // exact miss is a fallback built (single O(K) pass, reused for the
-        // rest of this record), so canonical records never pay for it.
+        // Lazy case-insensitive fallback: exact keys take the old O(1)
+        // dictionary path with no extra allocation. Records where every
+        // probed alias hits an exact key pay no fallback index cost; any
+        // missing alias triggers one linear fallback build (single O(K) pass,
+        // reused for the rest of this record).
         //
         // Duplicate case-insensitive key precedence (explicit): exact-case
         // keys win per alias (helpers check `dict[key]` first). The fallback

@@ -148,11 +148,11 @@ canonical keys already took the O(1) dictionary path.
 Attempt (`perf/opencode-snapshot-decode`, lazy fallback only):
 
 - Exact-case `dict[key]` lookups stay as-is with no extra allocation
-  (`Sources/TokenBarCore/OpenCodeStore.swift`). Only on the first exact
-  miss is a fallback built: a single O(K) pass over the record's keys,
-  reused for the rest of that record. Canonical records therefore pay no
-  index cost at all; mixed-case records pay at most one linear pass plus
-  hash hits instead of one scan per missed alias.
+  (`Sources/TokenBarCore/OpenCodeStore.swift`). Records where every probed
+  alias hits an exact key pay no fallback index cost; any missing alias
+  triggers one linear fallback build: a single O(K) pass over the record's
+  keys, reused for the rest of that record, so a mixed-case record pays at
+  most one linear pass plus hash hits instead of one scan per missed alias.
 - Duplicate case-insensitive key precedence is explicit: exact-case wins
   per alias; otherwise the lexicographically smallest original key wins
   (min comparison during the single build pass, no sort), deterministic
