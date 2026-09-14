@@ -151,7 +151,26 @@ public enum Pricing {
         cachedTokens: Int,
         context: PricingContext
     ) -> Double {
-        let price = price(forModel: model, context: context)
+        cost(
+            price: price(forModel: model, context: context),
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            cachedTokens: cachedTokens
+        )
+    }
+
+    /// Shared non-resolving cost math: the single implementation behind
+    /// every `cost` path. `price` must already be resolved (catalog,
+    /// static, or fallback); token counts are clamped here so callers
+    /// never duplicate the formula. Cached tokens are a subset of input
+    /// (billed at the cached rate); reasoning rides inside output and is
+    /// never added on top; total is never used for cost.
+    public static func cost(
+        price: ModelPrice,
+        inputTokens: Int,
+        outputTokens: Int,
+        cachedTokens: Int
+    ) -> Double {
         let input = max(0, inputTokens)
         let output = max(0, outputTokens)
         let cached = min(max(0, cachedTokens), input)

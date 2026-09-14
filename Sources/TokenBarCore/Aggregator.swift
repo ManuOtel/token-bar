@@ -88,10 +88,9 @@ public enum Aggregator {
             output += record.outputTokens
             cached += record.cachedTokens
             reasoning += record.reasoningTokens
-            // One resolve per unique normalized model key. Cost math below
-            // is byte-identical to `Pricing.cost(model:inputTokens:...)`:
-            // cached is a subset of input (clamped), reasoning rides inside
-            // output and is never added on top, total is never used.
+            // One resolve per unique normalized model key, then the shared
+            // non-resolving helper (`Pricing.cost(price:...)`), so there is
+            // exactly one cost-math implementation in the codebase.
             let normalizedModel = Pricing.normalizedKey(forModel: record.model)
             let resolved: (price: ModelPrice, origin: PriceOrigin)
             if let hit = priceCache[normalizedModel] {
@@ -101,14 +100,12 @@ public enum Aggregator {
                 priceCache[normalizedModel] = fresh
                 resolved = fresh
             }
-            let price = resolved.price
-            let clampedInput = max(0, record.inputTokens)
-            let clampedOutput = max(0, record.outputTokens)
-            let clampedCached = min(max(0, record.cachedTokens), clampedInput)
-            let freshTokens = clampedInput - clampedCached
-            let recordCost = Double(freshTokens) / 1_000_000.0 * price.inputPerMTok
-                + Double(clampedCached) / 1_000_000.0 * price.cachedPerMTok
-                + Double(clampedOutput) / 1_000_000.0 * price.outputPerMTok
+            let recordCost = Pricing.cost(
+                price: resolved.price,
+                inputTokens: record.inputTokens,
+                outputTokens: record.outputTokens,
+                cachedTokens: record.cachedTokens
+            )
             cost += recordCost
             if !record.sessionId.isEmpty { sessions.insert(record.sessionId) }
             if lastUpdated == nil || record.timestamp > lastUpdated! {

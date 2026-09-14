@@ -253,4 +253,38 @@ final class AggregateMemoizationTests: XCTestCase {
         XCTAssertEqual(
             Aggregator.aggregate([], snapshot: snap, calendar: calendar).requests, 0)
     }
+
+    func testSharedPriceHelperMatchesResolvingPaths() {
+        // The non-resolving helper is the single cost-math implementation:
+        // feeding it an already-resolved price must equal every resolving
+        // path, including cached-subset clamping edges. Hermetic, no timing.
+        let offline = PricingContext(snapshot: nil)
+        let cases: [(model: String, input: Int, output: Int, cached: Int)] = [
+            ("openai/gpt-5.6-luna", 1000, 500, 100), // static exact
+            ("gpt-5", 1000, 500, 1000), // all input cached
+            ("gpt-4o", 100, 0, 5000), // oversized cached clamps to input
+            ("mystery-model-zzz", 1000, 500, 200), // fallback
+            ("OPENAI/GPT-5.6-LUNA", 1000, 500, 100), // case variant, same key
+        ]
+        for c in cases {
+            let resolved = offline.resolve(forModel: c.model)
+            let viaHelper = Pricing.cost(
+                price: resolved.price,
+                inputTokens: c.input, outputTokens: c.output, cachedTokens: c.cached)
+            XCTAssertEqual(
+                viaHelper,
+                Pricing.cost(
+                    model: c.model, inputTokens: c.input,
+                    outputTokens: c.output, cachedTokens: c.cached,
+                    context: offline),
+                accuracy: 0.0000001, c.model)
+            XCTAssertEqual(
+                viaHelper,
+                Pricing.cost(
+                    model: c.model, inputTokens: c.input,
+                    outputTokens: c.output, cachedTokens: c.cached,
+                    snapshot: nil),
+                accuracy: 0.0000001, c.model)
+        }
+    }
 }
