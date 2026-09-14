@@ -13,12 +13,15 @@ notarization need a paid Apple Developer account and run only on a Mac.
 On a Mac with Xcode 15+ (macOS 14 SDK):
 
 ```sh
-./scripts/build-app.sh --version 0.1.0 --build 1
-./scripts/build-app.sh --version 0.2.0 --bundle-id com.example.TokenBar
+./scripts/build-app.sh                                   # version defaults to VERSION (currently 0.3.0)
+./scripts/build-app.sh --version 0.3.0 --build 29        # explicit release version + bumped build
+./scripts/build-app.sh --bundle-id com.example.TokenBar  # bundle id override only
 ```
 
 Env equivalents: `TOKENBAR_VERSION`, `TOKENBAR_BUILD`, `TOKENBAR_BUNDLE_ID`
-(default bundle id is the shipped identifier; see `scripts/build-app.sh`). Output is
+(precedence per value: explicit flag, then env, then the `VERSION` file at
+the repo root for the version, then the builtin default; default bundle id
+is the shipped identifier; see `scripts/build-app.sh`). Output is
 `dist/TokenBar.app` (ignored by git):
 
 ```text
@@ -39,8 +42,8 @@ hosts the UI. Dev loop needs no bundle:
 ## Package (zip default, DMG optional) + checksum
 
 ```sh
-./scripts/package-release.sh --version 0.1.0 --format zip
-./scripts/package-release.sh --version 0.1.0 --format dmg   # macOS only
+./scripts/package-release.sh --format zip            # version defaults to the built app, then VERSION (currently 0.3.0)
+./scripts/package-release.sh --version 0.3.0 --format dmg   # macOS only
 ```
 
 This writes `dist/TokenBar-<version>-macos.zip` (or `.dmg`) plus
@@ -48,7 +51,7 @@ This writes `dist/TokenBar-<version>-macos.zip` (or `.dmg`) plus
 with:
 
 ```sh
-(cd dist && shasum -a 256 -c TokenBar-0.1.0-macos.zip.sha256)
+(cd dist && shasum -a 256 -c TokenBar-0.3.0-macos.zip.sha256)
 ```
 
 Zip uses `ditto -c -k --sequesterRsrc --keepParent` on macOS (falls back to
@@ -109,15 +112,15 @@ codesign --verify --deep --strict dist/TokenBar.app
 spctl -a -vvv -t install dist/TokenBar.app   # local Gatekeeper check
 
 # 2. Zip the signed app, submit to Apple, wait, staple.
-ditto -c -k --sequesterRsrc --keepParent dist/TokenBar.app dist/TokenBar-0.1.0-macos.zip
-xcrun notarytool submit dist/TokenBar-0.1.0-macos.zip \
+ditto -c -k --sequesterRsrc --keepParent dist/TokenBar.app dist/TokenBar-0.3.0-macos.zip
+xcrun notarytool submit dist/TokenBar-0.3.0-macos.zip \
   --keychain-profile "TOKENBAR-NOTARY" --wait
 xcrun stapler staple dist/TokenBar.app
 xcrun stapler validate dist/TokenBar.app
 spctl -a -vvv -t install dist/TokenBar.app
 
 # 3. Re-package the stapled app and publish the checksum.
-./scripts/package-release.sh --version 0.1.0 --format zip
+./scripts/package-release.sh --version 0.3.0 --format zip
 ```
 
 Notes: `notarytool` stores credentials in the local keychain profile; never

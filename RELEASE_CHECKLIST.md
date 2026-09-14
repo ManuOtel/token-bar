@@ -44,13 +44,38 @@ config stores no password, key, or token.
 
 ## 3. Versioned app build
 
-- [ ] Bump the version (`./scripts/build-app.sh --version <x.y.z>`,
-      optional `--build` / `--bundle-id`; env equivalents
-      `TOKENBAR_VERSION`, `TOKENBAR_BUILD`, `TOKENBAR_BUNDLE_ID`).
+Version source of truth: the `VERSION` file at the repo root (currently
+`0.3.0`; the 0.2.0 line accumulated user-visible remote-sync and Settings
+UI functionality, hence the minor bump). `scripts/build-app.sh` defaults
+to it; `scripts/package-release.sh` falls back to the built app's
+`Info.plist`, then to it.
+
+- [ ] Pick the release version per the SemVer policy below and write it to
+      `VERSION` (`x.y.z` only, no prefixes). Every release PR updates
+      `VERSION` and passes a bumped build number (`--build` / env
+      `TOKENBAR_BUILD`); never reuse a build number.
+- [ ] Build with `./scripts/build-app.sh` (explicit `--version` /
+      `TOKENBAR_VERSION` still override the file; optional `--bundle-id` /
+      `TOKENBAR_BUNDLE_ID`).
 - [ ] Confirm output `dist/TokenBar.app` (git-ignored) with `Info.plist`
-      (`LSUIElement=true`, `LSMinimumSystemVersion=14.0`) and the
+      (`LSUIElement=true`, `LSMinimumSystemVersion=14.0`,
+      `CFBundleShortVersionString` matching `VERSION`) and the
       `MenuBarExtra` UI. Full path: `docs/MACOS_PACKAGING.md`.
 - [ ] Confirm dev loop still needs no bundle: `./scripts/run-token-bar.sh`.
+- [ ] Run `./scripts/test-versioning.sh` (default/env/flag precedence,
+      no Swift toolchain needed).
+
+### Version policy (SemVer)
+
+- Patch (`x.y.Z`): fixes only, no user-visible behavior change.
+- Minor (`x.Y.0`): backward-compatible user-visible features
+  (new filters, views, settings, sync behavior, pricing coverage).
+- Major (`X.0.0`): breaking changes (storage paths, CLI output shape,
+  dropped OS support, removed flags).
+- Docs and examples never hardcode an old release as the default: use the
+  bare scripts (they read `VERSION`) or name the current release
+  explicitly. Historical records (for example the 0.1.0 evidence log in
+  `RELEASE_EXECUTION_PLAN.md`) stay untouched.
 
 ## 4. Optional signing and notarization (Developer ID, Mac only, manual)
 

@@ -2,7 +2,7 @@
 # Package a built TokenBar.app into a versioned zip (default) or DMG.
 #
 # Usage:
-#   ./scripts/package-release.sh [--version 0.1.0] [--format zip|dmg]
+#   ./scripts/package-release.sh [--version 0.3.0] [--format zip|dmg]
 #                                [--app dist/TokenBar.app] [--outdir dist]
 #
 # Env overrides: TOKENBAR_VERSION, TOKENBAR_FORMAT, TOKENBAR_APP.
@@ -13,7 +13,8 @@ set -eu
 cd "$(dirname "$0")/.."
 
 # Precedence: explicit --version flag wins, then TOKENBAR_VERSION env,
-# then the built app's Info.plist, then the 0.1.0 default. This keeps the
+# then the built app's Info.plist, then the VERSION file at the repo root
+# (single source of truth), then the builtin fallback. This keeps the
 # artifact name consistent with what the caller asked for.
 VERSION="${TOKENBAR_VERSION:-}"
 VERSION_FROM_FLAG=0
@@ -81,8 +82,16 @@ if [ "$VERSION_FROM_FLAG" -eq 0 ] && [ -z "$VERSION" ] && [ -f "$APP/Contents/In
     VERSION="$PLIST_VERSION"
   fi
 fi
+if [ -z "$VERSION" ] && [ -f VERSION ]; then
+  _file_version="$(tr -d ' \t\r\n' < VERSION 2>/dev/null || true)"
+  case "$_file_version" in
+    ""|*[!0-9A-Za-z.\-]*) ;;
+    *) VERSION="$_file_version" ;;
+  esac
+  unset _file_version
+fi
 if [ -z "$VERSION" ]; then
-  VERSION="0.1.0"
+  VERSION="0.3.0"
 fi
 case "$VERSION" in
   *[!0-9A-Za-z.\-]*)
