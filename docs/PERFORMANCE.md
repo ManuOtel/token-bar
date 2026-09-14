@@ -371,18 +371,84 @@ Method, split strictly:
   additional parallelism within a file). Whole-file invalid-UTF-8 still
   yields `([], 0)`, by design.
 
+## Attempted improvement (slice 8, this branch, resolve-count only)
+
+`Aggregator.aggregate` called `PricingContext.resolve`/`cost` once per
+record, so repeated normalized models repeated the full resolve each
+time (catalog exact + precomputed suffix hit plus the static exact /
+family table scan and fallback). Histories repeat a small model set,
+so the repeated work was pure duplication.
+
+Change (`perf/aggregate-price-memo`):
+
+- One local `priceCache: [String: (ModelPrice, PriceOrigin)]`
+  (`Sources/TokenBarCore/Aggregator.swift`) per `aggregate` call, keyed
+  by `Pricing.normalizedKey(forModel:)`. Each unique normalized key
+  resolves once via the existing `PricingContext.resolve`; every later
+  record with the same key reuses the exact stored price for cost math.
+  Cost math is written inline and is identical to
+  `Pricing.cost(model:inputTokens:outputTokens:cachedTokens:)`
+  (clamped input/output, cached clamped as a subset of input,
+  reasoning rides inside output, total never used for cost).
+- `PricingContext` keeps value semantics and thread safety: no shared
+  mutable global state, no lookup change, no rate change. `byModel`
+  still keys on the raw `record.model`; only the price lookup uses the
+  normalized key. Nil snapshot keeps the deterministic offline static
+  path; fresh vs cached catalog labels come from the same single
+  resolve, so cost math agrees and only `PriceOrigin` differs as before.
+- No UI, rate, precedence, suffix, fallback, clamping, totals,
+  breakdown, sorting, or empty-behavior change.
+
+Tests (hermetic, no network, no timing assertions):
+
+- `Tests/TokenBarCoreTests/AggregateMemoizationTests.swift`:
+  mixed-case/whitespace variants share one normalized key and one
+  `(price, origin)` result (including bare-suffix smallest-wins) across
+  nil, fresh, and cached snapshots; a 240-record heavily repeated set
+  (catalog exact variants, catalog suffix, static exact, static family,
+  fallback, oversized cached, multi-source sessions) matches an
+  independent per-record `Pricing.cost(for:snapshot:)` reference on
+  totals, sessions, recency, `byModel`/`bySource`/`byOrigin` keys plus
+  costs plus sort order, with fresh-vs-cached cost agreement and empty
+  preservation. One deterministic count check only: unique normalized
+  keys < record count (the sharing precondition), with no coupling to
+  the private cache.
+- `scripts/verify_logic.py`: Python mirror of the same sharing plus
+  per-record parity and cached-clamp pins. Run with
+  `python3 scripts/verify_logic.py`.
+- `scripts/bench-aggregate-memoization.py`: deterministic count-only
+  measurement (no wall-clock, CI-safe). Same 240 synthetic repeated
+  records across nil/fresh/cached.
+
+Method, split strictly:
+
+- Measured facts (this worker host, same synthetic data, repeatable):
+  `python3 scripts/bench-aggregate-memoization.py` reports 240
+  records with 5 unique normalized keys on every snapshot path:
+  resolves old 240 vs new 5, 235 saved (97.9%), parity OK on
+  nil/fresh/cached. Counts scale with repetition (records vs unique
+  keys); real-host savings scale with actual model repetition.
+- No wall-clock is claimed. Swift is unavailable on this worker host
+  (Linux runs `verify_logic.py` + the count-only bench only), and no
+  Mac before/after on the same history was run here. To measure on
+  Mac, compare warm all-source aggregation wall time before/after on
+  the same history; do not claim numbers without rerunning there.
+- Limitations: one trim + lowercase per record remains (the cache key
+  itself); the win is the avoided resolve (catalog hit + static scan)
+  per duplicate. Histories with all-distinct models gain nothing
+  except the small dictionary. The records array, grouping maps, and
+  `dailyTrend` work are unchanged output work.
+
 ## Next safe slices (pure core, behavior-preserving)
 
-1. Per-model price memoization inside aggregate: cache resolved
-   `(price, origin)` per normalized model key so repeated models pay one
-   dictionary hit + one static-table scan total, not one per record.
-2. Static-table fast path: keep table order/precedence byte-identical but
-   avoid repeated substring scans for the same key (follows from item 1's
-   cache; no rate or order change).
-3. Aggregate allocation hygiene: reuse calendar/formatter work in
+1. Static-table fast path: keep table order/precedence byte-identical but
+   avoid repeated substring scans for distinct keys (follows from the
+   slice-8 cache for repeats; this covers the all-distinct tail with no
+   rate or order change).
+2. Aggregate allocation hygiene: reuse calendar/formatter work in
    `dailyTrend`, keep breakdown sorting identical, extend reserve-capacity
    coverage where profiling shows it. No output change.
-4. Report/CLI rendering only if profiled: same strings, fewer temporaries.
+3. Report/CLI rendering only if profiled: same strings, fewer temporaries.
 
 Out of scope for perf slices: parser heuristics, merge/dedupe rules, UI
 layout, usage totals, pricing rates/precedence, network or cache policy.
