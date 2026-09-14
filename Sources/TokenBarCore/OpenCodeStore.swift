@@ -535,42 +535,96 @@ public enum OpenCodeStore {
         _ dict: [String: Any],
         originFallback: String = "homeserver"
     ) -> NormalizedUsage? {
+        // Lazy case-insensitive fallback: exact keys take the old O(1)
+        // dictionary path with no extra allocation. Records where every
+        // probed alias hits an exact key pay no fallback index cost; any
+        // missing alias triggers one linear fallback build (single O(K) pass,
+        // reused for the rest of this record).
+        //
+        // Duplicate case-insensitive key precedence (explicit): exact-case
+        // keys win per alias (helpers check `dict[key]` first). The fallback
+        // only decides collisions where no alias matches exactly, and there
+        // the lexicographically smallest original key wins (tracked with a
+        // min comparison during the single build pass, no sort), deterministic
+        // across runs. Two maps are kept so heterogeneous collisions keep the
+        // old text behavior: `fallbackText` holds the smallest-keyed non-empty
+        // String per lowercased key (an Int/empty under a smaller key never
+        // hides a valid string collision, matching the old scan-which-skipped
+        // non-strings), while `fallbackRaw` holds the smallest-keyed raw value
+        // for int/raw parity. Coercion applies after precedence.
+        var fallbackRaw: [String: Any]? = nil
+        var fallbackText: [String: String]? = nil
+        func ensureFallback() {
+            if fallbackRaw != nil { return }
+            var raw: [String: Any] = [:]
+            raw.reserveCapacity(dict.count)
+            var rawKey: [String: String] = [:]
+            var txt: [String: String] = [:]
+            var txtKey: [String: String] = [:]
+            for (key, value) in dict {
+                let low = key.lowercased()
+                if let seen = rawKey[low] {
+                    if key < seen {
+                        rawKey[low] = key
+                        raw[low] = value
+                    }
+                } else {
+                    rawKey[low] = key
+                    raw[low] = value
+                }
+                if let s = value as? String, !s.isEmpty {
+                    if let seen = txtKey[low] {
+                        if key < seen {
+                            txtKey[low] = key
+                            txt[low] = s
+                        }
+                    } else {
+                        txtKey[low] = key
+                        txt[low] = s
+                    }
+                }
+            }
+            fallbackRaw = raw
+            fallbackText = txt
+        }
+        func coerceInt(_ value: Any?) -> Int? {
+            guard let value else { return nil }
+            // Reject JSON booleans by objCType, never via `is Bool`: on
+            // Darwin every NSNumber holding 0/1 bridges as Bool, so the `is`
+            // gate wrongly rejects valid small counts (Mac CI).
+            if let number = value as? NSNumber, String(cString: number.objCType) == "c" { return nil }
+            if let i = value as? Int { return i }
+            if let d = value as? Double { return Int(d) }
+            if let n = value as? NSNumber { return n.intValue }
+            if let s = value as? String {
+                if let parsed = Int(s) { return parsed }
+                if let parsed = Double(s) { return Int(parsed) }
+            }
+            return nil
+        }
         func text(_ keys: String...) -> String? {
             for key in keys {
                 if let value = dict[key] as? String, !value.isEmpty { return value }
-                let low = key.lowercased()
-                for (k, v) in dict where k.lowercased() == low {
-                    if let s = v as? String, !s.isEmpty { return s }
-                }
+                ensureFallback()
+                if let value = fallbackText?[key.lowercased()], !value.isEmpty { return value }
             }
             return nil
         }
         func int(_ keys: String...) -> Int? {
             for key in keys {
-                let candidates = [key] + [key.lowercased()]
-                for candidate in candidates {
-                    var raw: Any?
-                    if let hit = dict[candidate] { raw = hit }
-                    else {
-                        for (k, v) in dict where k.lowercased() == candidate.lowercased() { raw = v; break }
-                    }
-                    guard let value = raw else { continue }
-                    if let number = value as? NSNumber, String(cString: number.objCType) == "c" { continue }
-                    if let i = value as? Int { return i }
-                    if let d = value as? Double { return Int(d) }
-                    if let n = value as? NSNumber { return n.intValue }
-                    if let s = value as? String {
-                        if let parsed = Int(s) { return parsed }
-                        if let parsed = Double(s) { return Int(parsed) }
-                    }
-                }
+                if let parsed = coerceInt(dict[key]) { return parsed }
+                let low = key.lowercased()
+                if low != key, let parsed = coerceInt(dict[low]) { return parsed }
+                ensureFallback()
+                if let parsed = coerceInt(fallbackRaw?[low]) { return parsed }
             }
             return nil
         }
         func raw(_ keys: String...) -> Any? {
             for key in keys {
                 if let hit = dict[key] { return hit }
-                for (k, v) in dict where k.lowercased() == key.lowercased() { return v }
+                ensureFallback()
+                if let hit = fallbackRaw?[key.lowercased()] { return hit }
             }
             return nil
         }

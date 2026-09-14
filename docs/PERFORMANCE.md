@@ -138,6 +138,57 @@ Method, split strictly:
   compare warm `parseDirectory` / per-source CLI wall time before/after on
   the same large local tree; do not claim numbers without rerunning there.
 
+## Attempted optimization (slice 4, this branch, unmeasured)
+
+`OpenCodeStore.decodeSnapshotRecord` fell back to a full case-insensitive
+dictionary scan on every alias miss inside the `text`/`int`/`raw` closures,
+so a mixed-case record paid one scan per missed alias per field. Exact
+canonical keys already took the O(1) dictionary path.
+
+Attempt (`perf/opencode-snapshot-decode`, lazy fallback only):
+
+- Exact-case `dict[key]` lookups stay as-is with no extra allocation
+  (`Sources/TokenBarCore/OpenCodeStore.swift`). Records where every probed
+  alias hits an exact key pay no fallback index cost; any missing alias
+  triggers one linear fallback build: a single O(K) pass over the record's
+  keys, reused for the rest of that record, so a mixed-case record pays at
+  most one linear pass plus hash hits instead of one scan per missed alias.
+- Duplicate case-insensitive key precedence is explicit: exact-case wins
+  per alias; otherwise the lexicographically smallest original key wins
+  (min comparison during the single build pass, no sort), deterministic
+  across runs. Text keeps a separate smallest-keyed valid-string map so a
+  non-String under a smaller key never hides a valid string collision,
+  matching the old scan's skip behavior. Coercion (String non-empty,
+  Int/Double/NSNumber/string-number, Bool rejection by `objCType`) is
+  unchanged.
+- No token-math, dedupe, timestamp, provider+model, source-filter, origin,
+  fallback-ID, forbidden-key, skipped-count, or contract changes.
+
+Tests (`Tests/TokenBarCoreTests/OpenCodeSnapshotDecodeTests.swift`, hermetic, no
+network, no timing assertions): mixed-casing parity, snake_case alias
+fallback, provider+model composition, source rejection (including uppercase
+keys), forbidden-key detection plus non-retention, origin sanitization,
+deterministic fallback IDs (request vs content-hashed, distinct rows stay
+distinct), positive-token gate, timestamp plus cached read/write aliases,
+coercion parity (Bool rejected, string integer accepted, string decimal
+and Double truncation), and the explicit duplicate-key precedence (exact
+wins, then smallest wins; heterogeneous collision keeps the valid string).
+
+Method, split strictly:
+
+- Reported Mac audit (not rerun here): the sanitized OpenCode snapshot is
+  about 8 MB and `loadSnapshot` alone takes about 6.48 seconds. Host- and
+  data-dependent.
+- No speedup is claimed. This is an attempted optimization until a Mac
+  before/after exists: the common canonical-key path is unchanged by
+  construction, and the fallback only removes repeated scans for
+  mixed-case records.
+- No worker-host benchmark: this worker host has no Swift toolchain (Linux
+  runs `verify_logic.py` only) and carries no snapshot data, so no
+  before/after timing was run here. To measure on Mac, compare warm
+  `loadSnapshot` wall time before/after on the same snapshot file; do not
+  claim numbers without rerunning there.
+
 ## Next safe slices (pure core, behavior-preserving)
 
 1. Per-model price memoization inside aggregate: cache resolved
