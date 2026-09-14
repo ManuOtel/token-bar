@@ -1,0 +1,30 @@
+[
+  {
+    "cachedTokens": 40,
+    "id": "opencode:sync-msg-1",
+    "inputTokens": 440,
+    "model": "opencode-go/synth-model-a",
+    "origin": "homeserver",
+    "outputTokens": 100,
+    "reasoningTokens": 10,
+    "requestId": "sync-msg-1",
+    "sessionId": "sync-ses-1",
+    "source": "opencode",
+    "timestamp": "2026-09-12T10:00:00Z",
+    "totalTokens": 540
+  },
+  {
+    "cachedTokens": 0,
+    "id": "opencode:sync-ses-old#1788256800",
+    "inputTokens": 250,
+    "model": "synth-model-b",
+    "origin": "homeserver",
+    "outputTokens": 50,
+    "reasoningTokens": 0,
+    "requestId": "sync-ses-old#1788256800",
+    "sessionId": "sync-ses-old",
+    "source": "opencode",
+    "timestamp": "2026-09-01T10:00:00Z",
+    "totalTokens": 300
+  }
+]

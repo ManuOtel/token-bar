@@ -13,6 +13,14 @@ import Foundation
 ///   `scripts/export-opencode-usage.py`). Empty entries are ignored. Missing
 ///   extras are warnings only and never stop Codex/Claude/local usage.
 ///   With only `TOKENBAR_OPENCODE_DB` set, behavior is exactly as before.
+/// - OpenCode sync cache (opt-in SSH pull, no manual copy): when
+///   `OpenCodeSync` has ever synced successfully, its local cache
+///   (`~/Library/Application Support/TokenBar/opencode-homeserver.json`,
+///   override `TOKENBAR_OPENCODE_SYNC_CACHE`) loads here as one more
+///   sanitized snapshot (origin `"homeserver"`, source `.opencode`). A
+///   missing cache is silent (sync ships disabled); an unreadable one warns
+///   only. The pull itself happens in `OpenCodeSyncService`, never in this
+///   file: `load` stays file-reads-only and never touches the network.
 /// - Claude root: `TOKENBAR_CLAUDE_ROOT` or `~/.claude/projects` (recursive `*.jsonl`)
 /// - No auth, no cookies, no network. Missing roots yield zero records plus a
 ///   warning, never an error.
@@ -161,32 +169,37 @@ public enum TokenBarStore {
         }
 
         for snapshot in opencodeUsageJSONPaths {
-            if fileManager.fileExists(atPath: snapshot) {
-                do {
-                    let loaded = try OpenCodeStore.loadSnapshot(at: snapshot, originFallback: "homeserver")
-                    skippedOpenCode += loaded.skipped
-                    for record in loaded.records {
-                        if record.requestId.isEmpty || OpenCodeStore.isRollupRecord(record) {
-                            if record.requestId.isEmpty {
-                                allMessages.append(record)
-                            } else {
-                                allRollups.append(record)
-                            }
-                        } else {
-                            allMessages.append(record)
-                        }
-                    }
-                    if loaded.sawExtraFields {
-                        warnings.append("OpenCode snapshot contained extra non-token fields (ignored).")
-                    }
-                } catch {
-                    warnings.append("OpenCode snapshot unreadable; others still load.")
-                }
-            } else {
-                warnings.append("OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON).")
-            }
+            appendSnapshotFile(
+                snapshot,
+                originFallback: "homeserver",
+                missingWarning: "OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON).",
+                unreadableWarning: "OpenCode snapshot unreadable; others still load.",
+                fileManager: fileManager,
+                allMessages: &allMessages,
+                allRollups: &allRollups,
+                skippedOpenCode: &skippedOpenCode,
+                warnings: &warnings
+            )
         }
 
+        // Opt-in sync cache: loads exactly like a hand-copied snapshot when
+        // present, stays silent when sync was never enabled. Shares the
+        // global combine + dedupe below, so aggregation semantics are
+        // unchanged and synced rows keep origin `homeserver`, source
+        // `.opencode`.
+        appendSnapshotFile(
+            OpenCodeSync.defaultCacheURL(fileManager: fileManager).path,
+            originFallback: "homeserver",
+            missingWarning: nil,
+            unreadableWarning: "OpenCode homeserver sync cache unreadable; others still load.",
+            fileManager: fileManager,
+            allMessages: &allMessages,
+            allRollups: &allRollups,
+            skippedOpenCode: &skippedOpenCode,
+            warnings: &warnings
+        )
+        // Counted after EVERY OpenCode input (local DBs, extras, hand-copied
+        // snapshots, sync cache) so skipped sync-cache rows are included.
         if skippedOpenCode > 0 {
             warnings.append("\(skippedOpenCode) OpenCode row(s) skipped as undecodable.")
         }
@@ -212,6 +225,48 @@ public enum TokenBarStore {
             warnings: warnings,
             skippedClaudeLines: skippedClaude
         )
+    }
+
+    /// Loads one sanitized snapshot file into the global message/rollup
+    /// combine. Shared by hand-copied `TOKENBAR_OPENCODE_USAGE_JSON` paths
+    /// and the opt-in sync cache so both get identical treatment. A nil
+    /// `missingWarning` keeps absent files silent (the sync cache when sync
+    /// was never enabled); unreadable files always warn only.
+    static func appendSnapshotFile(
+        _ snapshot: String,
+        originFallback: String,
+        missingWarning: String?,
+        unreadableWarning: String,
+        fileManager: FileManager,
+        allMessages: inout [NormalizedUsage],
+        allRollups: inout [NormalizedUsage],
+        skippedOpenCode: inout Int,
+        warnings: inout [String]
+    ) {
+        guard fileManager.fileExists(atPath: snapshot) else {
+            if let missingWarning { warnings.append(missingWarning) }
+            return
+        }
+        do {
+            let loaded = try OpenCodeStore.loadSnapshot(at: snapshot, originFallback: originFallback)
+            skippedOpenCode += loaded.skipped
+            for record in loaded.records {
+                if record.requestId.isEmpty || OpenCodeStore.isRollupRecord(record) {
+                    if record.requestId.isEmpty {
+                        allMessages.append(record)
+                    } else {
+                        allRollups.append(record)
+                    }
+                } else {
+                    allMessages.append(record)
+                }
+            }
+            if loaded.sawExtraFields {
+                warnings.append("OpenCode snapshot contained extra non-token fields (ignored).")
+            }
+        } catch {
+            warnings.append(unreadableWarning)
+        }
     }
 
     /// Deterministic dedupe across origins: same `source + requestId`

@@ -10,8 +10,9 @@ import TokenBarCore
 ///   composition, source rows with OpenCode origin split, model bars,
 ///   14-day trend, notices), scrollable.
 ///
-/// Launch at login and pricing live behind the gear button in the header
-/// (a small settings popover), never as always-visible footer sections.
+/// Launch at login, pricing, and homeserver sync live behind the gear button
+/// in the header (a small settings popover), never as always-visible footer
+/// sections.
 /// Labels stay short and single-line so nothing wraps or clips at the
 /// compact size; every control is a real button (keyboard focusable) with
 /// a tooltip and accessibility label.
@@ -43,6 +44,9 @@ struct DashboardView: View {
     var onInitialAppear: () -> Void
     @ObservedObject var loginItem: LaunchAtLoginController
     @ObservedObject var pricing: PricingController
+    @ObservedObject var sync: OpenCodeSyncController
+    var onSyncNow: () -> Void
+    var onPollTick: () -> Void
     @State private var showSettings = false
 
     var body: some View {
@@ -100,6 +104,16 @@ struct DashboardView: View {
             // on teardown; normal popover open/close never triggers this.
             showSettings = false
         }
+        .onReceive(sync.$config.map(\.enabled).removeDuplicates()) { enabled in
+            // View-level lifecycle hook (Scene has no onReceive): a Settings
+            // toggle takes effect without relaunch. Each tick is one pull
+            // (in the controller) followed by one load-only pollTick here.
+            if enabled {
+                sync.startPolling(onTick: onPollTick)
+            } else {
+                sync.stopPolling()
+            }
+        }
     }
 
     // MARK: - Header
@@ -136,11 +150,11 @@ struct DashboardView: View {
                     .font(.body)
             }
             .buttonStyle(.bordered)
-            .help("Open settings: launch at login and pricing")
+            .help("Open settings: launch at login, pricing, homeserver sync")
             .accessibilityLabel("Settings")
-            .accessibilityHint("Opens launch at login and pricing settings")
+            .accessibilityHint("Opens launch at login, pricing, and sync settings")
             .popover(isPresented: $showSettings) {
-                SettingsView(loginItem: loginItem, pricing: pricing)
+                SettingsView(loginItem: loginItem, pricing: pricing, sync: sync, onSyncNow: onSyncNow)
             }
             Button(action: { isExpanded.toggle() }) {
                 Label(
@@ -752,6 +766,7 @@ struct DashboardView: View {
         if warning.contains("extra database skipped") { return "OpenCode extra skipped: SQLite unavailable." }
         if warning.contains("snapshot not found") { return "OpenCode snapshot not found; using local data." }
         if warning.contains("snapshot unreadable") { return "OpenCode snapshot unreadable; others still load." }
+        if warning.contains("sync cache unreadable") { return "Homeserver sync cache unreadable; using local data." }
         if warning.contains("extra non-token fields") { return "Snapshot had extra fields; token counts only." }
         if warning.contains("snapshot row(s) skipped") { return "Some snapshot rows skipped; counts only." }
         return warning

@@ -4,15 +4,15 @@ Authoritative worker instructions for this repository. Short on purpose. Follow 
 
 ## Project description
 
-Token Bar is a macOS 14+ SwiftUI MenuBarExtra utility aggregating local Codex, OpenCode, and Claude Code usage. It reads local history files read-only, plus offline multi-machine OpenCode file/snapshot merge, plus one strictly opt-in public OpenRouter pricing GET. No accounts, no provider APIs, no cookies.
+Token Bar is a macOS 14+ SwiftUI MenuBarExtra utility aggregating local Codex, OpenCode, and Claude Code usage. It reads local history files read-only, plus multi-machine OpenCode merge (opt-in SSH snapshot pull or offline file/snapshot copy), plus one strictly opt-in public OpenRouter pricing GET. No accounts, no provider APIs, no cookies.
 
 Costs are estimates only, never a bill. Subscription use is not an API invoice.
 
 ## Current product scope
 
-In scope: local token totals, source/range filters, per-source and per-model breakdowns, daily trend, best-month, sanitized warnings, startup cache, launch-at-login toggle, opt-in pricing refresh with offline static fallback.
+In scope: local token totals, source/range filters, per-source and per-model breakdowns, daily trend, best-month, sanitized warnings, startup cache, launch-at-login toggle, opt-in pricing refresh with offline static fallback, opt-in homeserver SSH snapshot pull with validate-before-replace and last-good-cache fallback.
 
-Out of scope: live sync, cloud dashboard, provider auth, prompt/message storage, auto-updater, Windows/Linux app target, new agent sources without a dedicated proposal plus fixtures plus tests plus docs.
+Out of scope: cloud dashboard, provider auth, prompt/message storage, auto-updater, Windows/Linux app target, new agent sources without a dedicated proposal plus fixtures plus tests plus docs.
 
 Do not invent integrations, pricing sources, or product scope.
 
@@ -22,18 +22,18 @@ Do not invent integrations, pricing sources, or product scope.
 Package.swift
 Sources/TokenBarCore/   # pure logic, Foundation only (key files, non-exhaustive)
   Models, CodexParser, ClaudeParser, OpenCodeStore, Aggregator,
-  Pricing, PricingCatalog, PricingService, Store, StartupReportCache, Report
-Sources/TokenBarCLI/    # thin --preset/--source/--all-presets/--json/--refresh-pricing front end
+  Pricing, PricingCatalog, PricingService, OpenCodeSync, Store, StartupReportCache, Report
+Sources/TokenBarCLI/    # thin --preset/--source/--all-presets/--json/--refresh-pricing/--sync-now front end
 Sources/TokenBarApp/    # SwiftUI menu-bar shell (macOS 14+, key files, non-exhaustive)
-  TokenBarApp, DashboardView, SettingsView, PricingController, LaunchAtLoginController
-Tests/TokenBarCoreTests/  # key areas, non-exhaustive: parsers, aggregator, report, pricing catalog
+  TokenBarApp, DashboardView, SettingsView, PricingController, OpenCodeSyncController, LaunchAtLoginController
+Tests/TokenBarCoreTests/  # key areas, non-exhaustive: parsers, aggregator, report, pricing catalog, opencode sync
 Fixtures/               # synthetic samples only
 scripts/                # key scripts, non-exhaustive: show-usage, run-token-bar, build-app,
                         # package-release, export-opencode-usage, verify_logic
 docs/                   # key docs: PRICING, MACOS_PACKAGING, PERFORMANCE
 ```
 
-Rules: all semantics live in `TokenBarCore`. App and CLI are thin renderers. `PricingService.swift` is the only file allowed to touch the network. See ARCHITECTURE.md for the data flow.
+Rules: all semantics live in `TokenBarCore`. App and CLI are thin renderers. `PricingService.swift` is the only file allowed to touch the network. `OpenCodeSync.swift` is the only file allowed to spawn a subprocess (system ssh/scp, argv arrays, never a shell). See ARCHITECTURE.md for the data flow.
 
 ## Current UI behavior
 
@@ -41,7 +41,7 @@ Dashboard popover is 400pt, dark, compact first, no scroll. Compact shows hero t
 
 Expanded Details is scrollable: metric cards, composition card, source rows with OpenCode local/homeserver sub-lines, top-5 models, full trend, notices, Show less to collapse.
 
-Launch-at-login and pricing controls are behind Settings: the gear button in the dashboard header opens the Settings popover (`SettingsView`). Usage filters and details remain in the dashboard, never in Settings.
+Launch-at-login, pricing, and homeserver sync controls are behind Settings: the gear button in the dashboard header opens the Settings popover (`SettingsView`). Usage filters and details remain in the dashboard, never in Settings.
 
 ## Data sources and environment overrides
 
@@ -51,16 +51,23 @@ Launch-at-login and pricing controls are behind Settings: the gear button in the
 | OpenCode | `~/.local/share/opencode/opencode.db` | `TOKENBAR_OPENCODE_DB` |
 | OpenCode extras | extra read-only DB copies | `TOKENBAR_OPENCODE_DB_EXTRA` |
 | OpenCode snapshot | sanitized token-only JSON | `TOKENBAR_OPENCODE_USAGE_JSON` |
+| OpenCode sync cache | auto-synced token-only JSON (opt-in SSH pull) | `TOKENBAR_OPENCODE_SYNC_CACHE` |
+| OpenCode sync config | host alias, remote path/command, interval | `TOKENBAR_OPENCODE_SYNC_CONFIG` |
 | Claude | `~/.claude/projects/**/*.jsonl` | `TOKENBAR_CLAUDE_ROOT` |
 | Pricing cache | `~/Library/Application Support/TokenBar/pricing-catalog.json` | `TOKENBAR_PRICING_CACHE` |
 
-Multi-machine merge is offline file copy only. The user copies the snapshot; the app never fetches it. Extra paths are comma- or newline-separated; missing extras warn only. Export with `scripts/export-opencode-usage.py`. Full semantics in README.
+Multi-machine merge is offline file copy or opt-in SSH pull. Manual path: the user copies the snapshot (no fetch involved). Sync path: the app pulls over the user's own SSH setup when enabled in Settings (ships disabled, no stored credentials, validate-before-replace, last-good-cache fallback). Extra paths are comma- or newline-separated; missing extras warn only. Export with `scripts/export-opencode-usage.py`. Full semantics in README.
 
 ## Privacy boundary
 
 Usage data, prompts, message bodies, paths, credentials, cookies, and subscription sessions never leave the machine. All adapters open files read-only. Warnings and CLI/JSON output are sanitized to generic labels, never absolute paths.
 
-The only network call is the strictly opt-in pricing refresh: one `GET https://openrouter.ai/api/v1/models`, no body, no query, no auth/cookie headers, no usage data sent. Triggered only by the Settings Update pricing button or CLI `--refresh-pricing`. Default runs are fully offline.
+The only network uses are strictly opt-in: the pricing refresh above, and
+the homeserver sync (an SSH/scp download of the token-only snapshot over
+the user's own SSH setup: system executable, argv arrays, never a shell,
+`BatchMode=yes`, no passwords/keys stored, no usage data sent). Triggered
+only by enabling sync in Settings (startup, interval, Sync Now button) or
+CLI `--sync-now`. Default runs are fully offline.
 
 ## Development and test commands
 
@@ -85,7 +92,7 @@ git diff --check
 
 ## CI source of truth
 
-`.github/workflows/ci.yml` runs on `main` and PRs: macOS 14 job (`swift build` + `swift test`), Linux job (`verify_logic.py` plus `bash -n`/`sh -n` shell syntax), privacy-gate job (URLSession confined to `PricingService.swift`, catalog hosts allowlisted to `openrouter.ai`, no Cookie/Authorization headers). macOS `swift test` is the source of truth; the Python script is a mirror only.
+`.github/workflows/ci.yml` runs on `main` and PRs: macOS 14 job (`swift build` + `swift test`), Linux job (`verify_logic.py` plus `bash -n`/`sh -n` shell syntax), privacy-gate job (URLSession confined to `PricingService.swift`, `Process(` confined to `OpenCodeSync.swift`, catalog hosts allowlisted to `openrouter.ai`, no Cookie/Authorization headers). macOS `swift test` is the source of truth; the Python script is a mirror only.
 
 ## Release and package commands
 

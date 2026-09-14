@@ -4,8 +4,9 @@
 
 Native macOS 14+ SwiftUI MenuBarExtra utility that totals token usage from
 local Codex, OpenCode, and Claude Code history. File reads only, plus
-offline multi-machine OpenCode file/snapshot merge, plus one strictly
-opt-in public OpenRouter pricing GET (no usage data sent).
+multi-machine OpenCode merge (opt-in SSH snapshot pull or offline file
+copy), plus one strictly opt-in public OpenRouter pricing GET (no usage
+data sent).
 No accounts, no provider APIs, no cookies. Costs are estimates only,
 never a bill.
 
@@ -84,6 +85,10 @@ Flags:
 - `--refresh-pricing`: fetch the public model pricing catalog before
   reporting (`GET https://openrouter.ai/api/v1/models`; no usage data
   sent). Without it the CLI is fully offline and uses the static table.
+- `--sync-now`: pull the homeserver snapshot over SSH before reporting
+  (opt-in; needs homeserver sync configured in Settings). Without it the
+  CLI reads the local sync cache as-is. Sync failure never stops the
+  local report.
 - `--help` / `-h`: usage.
 
 What each report means:
@@ -114,36 +119,61 @@ What each report means:
 | OpenCode | `~/.local/share/opencode/opencode.db` | SQLite, per-message `message` + `session_message` (authoritative); per-session `session_v2` + `session` rollups fill uncovered sessions only |
 | OpenCode extras | `TOKENBAR_OPENCODE_DB_EXTRA` (extra read-only DB copies) | Same SQLite shape, origin `homeserver` |
 | OpenCode snapshot | `TOKENBAR_OPENCODE_USAGE_JSON` (sanitized snapshot files) | JSON array from `scripts/export-opencode-usage.py` (token counts only) |
+| OpenCode sync cache | `~/Library/Application Support/TokenBar/opencode-homeserver.json` (auto-synced) | Same snapshot shape, pulled over SSH when homeserver sync is enabled |
 | Claude | `~/.claude/projects/**/*.jsonl` | JSONL, assistant `message.usage` records |
 
 Overrides for testing: `TOKENBAR_CODEX_ROOT`, `TOKENBAR_OPENCODE_DB`,
-`TOKENBAR_CLAUDE_ROOT`. Multi-machine merge (offline only, no network):
+`TOKENBAR_CLAUDE_ROOT`. Multi-machine merge, two paths:
+
+**A. Homeserver auto-sync (opt-in SSH pull, recommended).** Enable
+`Homeserver sync` in the Settings gear popover and fill in your own SSH
+host alias (from your existing `~/.ssh/config`, for example `homeserver`)
+plus either the remote snapshot path or a remote exporter command. The app
+pulls at startup, on `Sync Now`, and on a background interval (default 15
+min, 5 min to 24 h), then reloads usage. The CLI equivalent is
+`--sync-now`. Auth comes from your own SSH setup (keys/agent); the config
+stores no password, key, or token, sync runs with `BatchMode=yes` (never
+prompts), and no usage data is ever sent (downloads only). The pull
+validates the snapshot before replacing the local cache (temp file, then
+atomic move) and keeps the last good cache on any failure (timeout,
+unreachable host, invalid payload, cancellation). Setup values you must
+enter yourself: the SSH host alias plus the remote snapshot path (or the
+remote exporter command). Nothing is guessed and sync ships disabled.
+Remote paths may contain spaces (they travel as one argument, never
+word-split); host aliases stay strict. A valid empty snapshot (`[]`)
+honestly replaces the cache with zero rows -- it means the remote host
+has no usage; only malformed or all-skipped payloads preserve the last
+good cache. Trust split: the snapshot-path pull never executes anything
+remote, but the exporter command runs through the remote sshd shell with
+your remote privileges, so enter only the read-only exporter invocation
+you wrote yourself.
+
+**B. Manual file copy (offline, no network).**
 `TOKENBAR_OPENCODE_DB_EXTRA` (comma- or newline-separated extra read-only DB
 paths, empty entries ignored) and `TOKENBAR_OPENCODE_USAGE_JSON`
-(comma- or newline-separated sanitized snapshot paths). Colons and
-semicolons never split: both are legal filename characters, so colon-bearing
-paths stay whole. Extra DB rows load
-with origin `homeserver`; snapshot rows keep their embedded origin
-(`homeserver` when missing). Snapshot origin labels are allowlisted to a
-short `[A-Za-z0-9_.-]` form (anything else falls back to `homeserver`).
-With only `TOKENBAR_OPENCODE_DB` set, behavior
-is exactly as before. Missing extras are warnings only and never stop
-Codex/Claude/local usage. The `By origin` CLI section prints only when more
-than one distinct origin is present, so local-only output never duplicates
-`By source`.
-
-Homeserver-to-Mac workflow (you copy the file; the app never fetches it):
+(comma- or newline-separated sanitized snapshot paths).
 
 ```sh
 # On the homeserver (read-only export, token counts only):
 python3 scripts/export-opencode-usage.py --db ~/.local/share/opencode/opencode.db \
     --out /tmp/opencode-usage.json --origin homeserver
 # Copy /tmp/opencode-usage.json to the Mac by any means you operate
-# (USB stick, existing file sync, manual copy). No HTTP API exists and no
-# SSH hostname is assumed.
+# (USB stick, existing file sync, manual copy). No HTTP API exists.
 # On the Mac:
 TOKENBAR_OPENCODE_USAGE_JSON=/tmp/opencode-usage.json ./scripts/show-usage.sh --preset 7d
 ```
+
+Shared merge semantics for both paths: colons and semicolons never split
+path lists (both are legal filename characters, so colon-bearing paths
+stay whole). Extra DB rows load with origin `homeserver`; snapshot rows
+keep their embedded origin (`homeserver` when missing). Snapshot origin
+labels are allowlisted to a short `[A-Za-z0-9_.-]` form (anything else
+falls back to `homeserver`). With only `TOKENBAR_OPENCODE_DB` set, behavior
+is exactly as before. Missing extras are warnings only (a missing sync
+cache is silent: sync was never enabled) and never stop
+Codex/Claude/local usage. The `By origin` CLI section prints only when more
+than one distinct origin is present, so local-only output never duplicates
+`By source`.
 
 `7D` (and every rolling preset) is based on record timestamps: a session
 created weeks ago still counts when its messages fall in the window.
@@ -151,13 +181,16 @@ Lifetime can be nonzero when recent data lives on another host: import the
 homeserver snapshot and the combined total appears.
 
 Privacy: all adapters open files read-only. Usage data never leaves the
-machine. The only network call in the codebase is the strictly opt-in
+machine. The only network uses in the codebase are strictly opt-in: the
 pricing refresh (`PricingService`: one `GET` of public model/pricing
 metadata, no prompts/counts/paths/credentials sent; see
-`docs/PRICING.md`). No subscription auth, no provider APIs, no cookies
-(verify: `rg -i "URLSession" Sources` hits only `PricingService.swift`;
-`rg -i "cookie|Authorization" Sources` hits only documented never-send
-comments).
+`docs/PRICING.md`) and the homeserver sync (`OpenCodeSync`: an SSH/scp
+download of the token-only snapshot over your own SSH setup, no usage
+data sent, disabled by default). No subscription auth, no provider APIs,
+no cookies (verify: `rg -i "URLSession" Sources` hits only
+`PricingService.swift`; `rg -n "Process(" Sources` hits only
+`OpenCodeSync.swift`; `rg -i "cookie|Authorization" Sources` hits only
+documented never-send comments).
 
 ## Semantics
 
@@ -264,7 +297,7 @@ Dark usage cockpit in the macOS menu bar popover (400pt, macOS 14 SwiftUI, no ex
 - **Expanded (Details, scrollable):** toggles back to compact via `Show less` in the header. Exposes input/output/cached/reasoning cards (cached reads "subset of input", reasoning "subset of output"), a composition card whose ring splits the total into input vs output only with subset percentages in text, an always-visible source breakdown (zero sources stay listed as `no records`) with a stacked distribution bar, top-5 model bars with share tooltips, the full 14-day trend with date range, and sanitized notices.
 - Charts are custom SwiftUI (`DashboardCharts.swift`: ring, stacked bar, model bars, daily bars) fed by `DashboardInsights` shares in `TokenBarCore`. Cached and reasoning tokens never render as extra ring slices.
 - Preserved in both modes: source/range filtering, refresh button + loading state, empty-range states (with one-tap jumps to All sources / Lifetime), sanitized warnings (never paths), the OpenCode combined total plus local vs homeserver sub-lines when both origins are present, best-month key, and last-updated line.
-- **Settings (gear popover):** the gear button in the dashboard header opens `SettingsView` with the launch-at-login toggle and the pricing section (rate-basis status line, user-initiated `Update pricing` catalog GET, cancellable, offline-safe, plus any refresh error). Both live only in Settings, never as an always-visible dashboard footer. Usage filters and details stay in the dashboard. Pricing refresh never blocks usage loading.
+- **Settings (gear popover):** the gear button in the dashboard header opens `SettingsView` with the launch-at-login toggle, the pricing section (rate-basis status line, user-initiated `Update pricing` catalog GET, cancellable, offline-safe, plus any refresh error), and the homeserver sync section (enable toggle, SSH host alias, remote snapshot path or exporter command, interval stepper, `Sync Now`, one-line status). All live only in Settings, never as an always-visible dashboard footer. Usage filters and details stay in the dashboard. Pricing refresh and sync never block usage loading.
 - **Startup cache (perceived startup only):** the app shows the last normalized report from `~/Library/Application Support/TokenBar/startup-report.json` immediately, marks it `Showing previous data - updating…` while the full history scan runs in the background, then atomically replaces it with fresh data. Cached values are previous normalized data until the background refresh finishes; the first-ever load with no cache still depends on source size and shows the loading state. Only token counts, model/source/origin labels, counters, and sanitized warnings are cached (no prompts, message bodies, tool I/O, file paths, or credentials).
 
 ## Testing
@@ -280,11 +313,15 @@ CI (`.github/workflows/ci.yml`, runs on `main` and PRs) mirrors this split:
 - Linux job: `PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify_logic.py`
   plus shell syntax checks (`bash -n` / `sh -n`) on `scripts/*.sh`.
 - Privacy gate: `URLSession` is confined to `Sources/TokenBarCore/PricingService.swift`
-  (the single opt-in catalog GET; every other hit fails the gate), catalog
-  URL hosts are allowlisted to `openrouter.ai`, and no `Cookie` /
-  `Authorization` header is ever set (the gate greps for those). The old
+  (the single opt-in catalog GET; every other hit fails the gate),
+  `Process(` subprocess use is confined to
+  `Sources/TokenBarCore/OpenCodeSync.swift` (the opt-in SSH pull, never a
+  shell; every other hit fails the gate), catalog URL hosts are
+  allowlisted to `openrouter.ai`, and no `Cookie` / `Authorization`
+  header is ever set (the gate greps for those). The old
   `No auth, no cookies, no network` comment in `Store.swift` still holds
-  for usage loading, which never touches the network.
+  for usage loading, which never touches the network (the sync pull runs
+  before the load, never inside it).
 
 Covers: Codex valid/alias/nested/type-gate/malformed/epoch/unknown-model,
 OpenCode column-form/legacy/JSON-blob/missing-timestamp/no-counts/fallback/
@@ -315,12 +352,15 @@ boundary of the catalog GET, malformed catalog rejection, fixtures under
   subscription-only ids keep static approximations (see `docs/PRICING.md`).
 - OpenCode schema drift is handled heuristically; exotic future schemas may
   skip rows (counted, visible).
-- Multi-machine merge is offline file copy only: no live sync, no network
-  fetch, no HTTP API, no assumed SSH hostname. Snapshot rollups rejoin the
-  global combine via the `#` ID heuristic; a message UUID containing `#`
-  (not observed) would misclassify. ID-less drift rows hash full column
-  content, so the same logical row in `message` vs `session_message` keeps
-  two IDs (real tables always carry IDs; drift-only edge).
+- Multi-machine merge: the manual path is offline file copy only (no HTTP
+  API); the auto-sync path is an opt-in SSH pull over your own SSH setup
+  (no guessed hosts, no stored credentials, `BatchMode=yes`). Both rejoin
+  the same combine/dedupe, so aggregation semantics never change. Snapshot
+  rollups rejoin the global combine via the `#` ID heuristic; a message
+  UUID containing `#` (not observed) would misclassify. ID-less drift rows
+  hash full column content, so the same logical row in `message` vs
+  `session_message` keeps two IDs (real tables always carry IDs;
+  drift-only edge).
 - Extra DB copies share the single `homeserver` origin label; per-host
   labels need separate snapshots with distinct `origin` values.
 - App target needs macOS 14+; Linux runs logic verification only.
@@ -343,7 +383,14 @@ boundary of the catalog GET, malformed catalog rejection, fixtures under
 - `OpenCode extra database not found (checked TOKENBAR_OPENCODE_DB_EXTRA)` /
   `OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON)`:
   an extra input path is missing. Warnings only; local data still loads.
-  Unset the var or fix the path, then re-copy the snapshot yourself.
+  Unset the var or fix the path, then re-copy the snapshot yourself (or
+  enable homeserver sync and let the app pull it).
+- `24h` / `7d` show zero but lifetime is nonzero: recent usage lives on
+  the homeserver. Enable homeserver sync in Settings (host alias + remote
+  snapshot path), press `Sync Now`, or keep using the manual copy. A
+  failed pull keeps the previous cache and reports one sanitized line
+  (`timed out` / `host unreachable` / `snapshot invalid`); usage loading
+  never breaks because sync failed.
 - `OpenCode snapshot contained extra non-token fields (ignored)`: the
   snapshot file held prompt/path/tool-like keys; they were ignored and only
   token counts loaded. Re-export with `scripts/export-opencode-usage.py`.

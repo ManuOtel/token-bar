@@ -1,6 +1,8 @@
 # macOS Packaging, Signing, Install, Launch at Login
 
-Local-only menu bar app. No network, no accounts, no updater. This doc is the
+Local-first menu bar app. No accounts, no updater; the only network uses
+are strictly opt-in (pricing catalog GET, homeserver SSH snapshot pull).
+This doc is the
 M5 release path: build a versioned `TokenBar.app`, optionally sign + notarize
 it on a Mac, package a zip/DMG with a checksum, install, uninstall, and use
 the launch-at-login toggle. Nothing here needs secrets to read; signing and

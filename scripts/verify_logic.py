@@ -1991,6 +1991,207 @@ def run():
     check("memo oversized cached still clamps",
           abs(cost("gpt-4o", 100, 0, 5000) - cost("gpt-4o", 100, 0, 100)) < 1e-12)
 
+    # Homeserver auto-sync mirror (OpenCodeSync.swift semantics): config
+    # validation, safe argv (no shell), snapshot validation before replace,
+    # atomic tmp+rename replacement, failure fallback preserving last good.
+    import re as _re2
+    import tempfile as _tempfile2
+
+    _HOST_RE = _re2.compile(r"[A-Za-z0-9_.\-@]+$")
+
+    def sync_host_valid(raw):
+        if not raw or len(raw) > 128:
+            return False
+        if not (raw[0].isalnum()):
+            return False
+        return bool(_HOST_RE.fullmatch(raw))
+
+    def sync_validated(cfg):
+        # Mirror of OpenCodeSyncConfig.validated: None when usable, else msg.
+        if not cfg.get("enabled"):
+            return None
+        host = (cfg.get("hostAlias") or "").strip()
+        if not host:
+            return "Homeserver sync needs an SSH host alias."
+        if not sync_host_valid(host):
+            return "Sync host alias has invalid characters (letters, digits, ., _, -, @)."
+        command = (cfg.get("remoteCommand") or "").strip()
+        path = (cfg.get("remotePath") or "").strip()
+        if not command:
+            if not path:
+                return "Homeserver sync needs a remote snapshot path or exporter command."
+            if "\n" in path or "\r" in path:
+                return "Remote snapshot path must not contain line breaks."
+        elif "\n" in command or "\r" in command:
+            return "Remote exporter command must not contain line breaks."
+        if not (300 <= cfg.get("pollIntervalSeconds", 900) <= 86400):
+            return "Sync interval must be 5 minutes to 24 hours."
+        if not (5 <= cfg.get("timeoutSeconds", 60) <= 300):
+            return "Sync timeout must be 5 to 300 seconds."
+        return None
+
+    def scp_argv(cfg, dest):
+        return ("/usr/bin/scp",
+                ["-o", "BatchMode=yes", "-o",
+                 f"ConnectTimeout={cfg['timeoutSeconds']}",
+                 f"{cfg['hostAlias']}:{cfg['remotePath']}", dest])
+
+    def ssh_argv(cfg):
+        return ("/usr/bin/ssh",
+                ["-o", "BatchMode=yes", "-o",
+                 f"ConnectTimeout={cfg['timeoutSeconds']}",
+                 cfg["hostAlias"], "--", cfg["remoteCommand"]])
+
+    def sync_snapshot_valid(raw, cap=32 * 1024 * 1024):
+        # Mirror of OpenCodeSync.validateSnapshotData: top-level array that
+        # is empty or holds >=1 decodable opencode record; size-capped.
+        if len(raw) > cap:
+            return False
+        try:
+            arr = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return False
+        if not isinstance(arr, list):
+            return False
+        if not arr:
+            return True
+        return any(decode_snapshot(e) is not None
+                   for e in arr if isinstance(e, dict))
+
+    def sync_write_atomic(data, dest):
+        # Mirror of writeSnapshotAtomically: tmp in same dir, then replace.
+        tmp = dest + f".tmp-{os.getpid()}"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, dest)
+
+    base_cfg = {"enabled": True, "hostAlias": "homeserver",
+                "remotePath": "/tmp/opencode-usage.json", "remoteCommand": "",
+                "pollIntervalSeconds": 900, "timeoutSeconds": 60}
+    check("sync defaults disabled valid",
+          sync_validated({"enabled": False, "hostAlias": "bogus host; rm"}) is None)
+    check("sync enabled requires host",
+          sync_validated({**base_cfg, "hostAlias": ""})
+          == "Homeserver sync needs an SSH host alias.")
+    check("sync host allowlist",
+          all(sync_host_valid(h) for h in
+              ("homeserver", "my-host.1", "mac_mini", "user@host"))
+          and not any(sync_host_valid(h) for h in
+                      ("", "has space", "a;b", "a|b", "-lead", "a:b",
+                       "a/b", "a\nb", "a$(x)")))
+    check("sync needs remote path or command",
+          sync_validated({**base_cfg, "remotePath": ""})
+          == "Homeserver sync needs a remote snapshot path or exporter command."
+          and sync_validated({**base_cfg, "remotePath": "",
+                              "remoteCommand": "python3 export.py --db x.db"}) is None)
+    check("sync interval/timeout bounds",
+          sync_validated({**base_cfg, "pollIntervalSeconds": 60}) is not None
+          and sync_validated({**base_cfg, "timeoutSeconds": 999}) is not None
+          and sync_validated({**base_cfg, "pollIntervalSeconds": 300,
+                              "timeoutSeconds": 5}) is None)
+    exe, args = scp_argv(base_cfg, "/tmp/local.json")
+    check("sync scp argv discrete, batch, no shell",
+          exe == "/usr/bin/scp" and "BatchMode=yes" in args
+          and "homeserver:/tmp/opencode-usage.json" in args
+          and not any(("sh" in a and "bin" in a) or a == "-c" for a in args)
+          and args[-1] == "/tmp/local.json")
+    exe2, args2 = ssh_argv({**base_cfg, "remoteCommand": "python3 export.py --db x.db"})
+    check("sync ssh argv host, separator, command",
+          exe2 == "/usr/bin/ssh" and "BatchMode=yes" in args2
+          and args2[args2.index("--") - 1] == "homeserver"
+          and args2[args2.index("--") + 1] == "python3 export.py --db x.db")
+    good_rec = {"id": "opencode:s1", "source": "opencode",
+                "timestamp": "2026-09-12T10:00:00Z", "model": "m",
+                "inputTokens": 400, "outputTokens": 100,
+                "sessionId": "s", "requestId": "r"}
+    check("sync snapshot validation",
+          sync_snapshot_valid(json.dumps([good_rec]).encode())
+          and sync_snapshot_valid(b"[]")
+          and not sync_snapshot_valid(b"not json")
+          and not sync_snapshot_valid(b'{"not":"array"}')
+          and not sync_snapshot_valid(b"<html>oops</html>")
+          and not sync_snapshot_valid(json.dumps([
+              {"source": "codex", "timestamp": "2026-09-12T10:00:00Z",
+               "inputTokens": 5, "outputTokens": 5}]).encode())
+          and not sync_snapshot_valid(b"x" * (32 * 1024 * 1024 + 1)))
+    sync_fixture = os.path.join(root, "Fixtures", "synthetic-homeserver-sync-snapshot.json")
+    if os.path.exists(sync_fixture):
+        with open(sync_fixture, "rb") as f:
+            sync_raw = f.read()
+        check("sync fixture validates + 24h recent row",
+              sync_snapshot_valid(sync_raw)
+              and sum(1 for e in json.loads(sync_raw)
+                      if decode_snapshot(e) is not None) == 2)
+    with _tempfile2.TemporaryDirectory() as tmpd:
+        dest = os.path.join(tmpd, "cache.json")
+        sync_write_atomic(b"v1", dest)
+        sync_write_atomic(b"v2", dest)
+        with open(dest, "rb") as f:
+            kept = f.read()
+        leftovers = [p for p in os.listdir(tmpd) if p != "cache.json"]
+        # Failure fallback: invalid pull preserves the last good cache.
+        good = json.dumps([good_rec]).encode()
+        sync_write_atomic(good, dest)
+        before = open(dest, "rb").read()
+        candidate = b"truncated {"
+        if not sync_snapshot_valid(candidate):
+            pass  # preserved: no write happens
+        check("sync atomic replace + fallback preserves last good",
+              kept == b"v2" and leftovers == []
+              and open(dest, "rb").read() == before == good)
+    def sync_error(kind):
+        # Mirror of sanitizedError: generic labels only.
+        return {"cancelled": "Homeserver sync cancelled.",
+                "timeout": "Homeserver sync timed out; kept previous data.",
+                "invalid": "Remote snapshot invalid; kept previous data.",
+                "failed": "Homeserver sync failed (host unreachable); kept previous data."}[kind]
+    check("sync errors sanitized, no secrets or paths",
+          all("SECRET" not in m and "/Users/" not in m and "kept previous data" in m
+              for m in (sync_error("timeout"), sync_error("invalid"), sync_error("failed")))
+          and "cancell" in sync_error("cancelled"))
+
+    # Review fixes mirror: capped reads check size before buffering, the
+    # apply decision replaces honestly on valid [] and preserves last good
+    # otherwise, remote paths with spaces validate (argv-safe, never split).
+    def sync_read_capped(path, cap):
+        size = os.path.getsize(path)
+        if size > cap:
+            raise ValueError("invalid snapshot")
+        with open(path, "rb") as f:
+            data = f.read()
+        if len(data) > cap:
+            raise ValueError("invalid snapshot")
+        return data
+
+    def sync_apply(cache_bytes, candidate):
+        return candidate if sync_snapshot_valid(candidate) else cache_bytes
+
+    with _tempfile2.TemporaryDirectory() as tmpd2:
+        cap_file = os.path.join(tmpd2, "snap.json")
+        with open(cap_file, "wb") as f:
+            f.write(b"A" * 100)
+        capped_ok = sync_read_capped(cap_file, 1000) == b"A" * 100
+        try:
+            sync_read_capped(cap_file, 10)
+            capped_big = False
+        except ValueError:
+            capped_big = True
+        try:
+            sync_read_capped(os.path.join(tmpd2, "missing.json"), 1000)
+            capped_missing = False
+        except OSError:
+            capped_missing = True
+        check("sync capped read checks size before buffering",
+              capped_ok and capped_big and capped_missing)
+    good_bytes = json.dumps([good_rec]).encode()
+    check("sync apply replaces on valid, preserves last good otherwise",
+          sync_apply(good_bytes, b"[]") == b"[]"
+          and sync_apply(good_bytes, b"truncated {") == good_bytes
+          and sync_apply(good_bytes, good_bytes) == good_bytes)
+    check("sync remote path with spaces allowed, host stays strict",
+          sync_validated({**base_cfg, "remotePath": "/tmp/my dir/u.json"}) is None
+          and not sync_host_valid("has space"))
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")

@@ -11,6 +11,9 @@ struct CLIOptions {
     /// Explicit opt-in network use. Without it the CLI never touches the
     /// network and prices purely from the deterministic static table.
     var refreshPricing: Bool = false
+    /// Explicit opt-in SSH pull. Without it the CLI reads the local sync
+    /// cache as-is (or nothing, when sync was never enabled).
+    var syncNow: Bool = false
 }
 
 enum CLIError: Error, CustomStringConvertible {
@@ -69,6 +72,9 @@ func parseArguments(_ args: [String]) throws -> (options: CLIOptions, showHelp: 
         } else if arg == "--refresh-pricing" {
             options.refreshPricing = true
             index += 1
+        } else if arg == "--sync-now" {
+            options.syncNow = true
+            index += 1
         } else if arg == "--preset" {
             guard index + 1 < args.count else { throw CLIError.missingValue("--preset") }
             options.preset = try parsePreset(args[index + 1])
@@ -92,7 +98,7 @@ func parseArguments(_ args: [String]) throws -> (options: CLIOptions, showHelp: 
 
 func usageText(executable: String = "token-bar") -> String {
     """
-    Usage: \(executable) [--preset <name>] [--source <name>] [--all-presets] [--json] [--refresh-pricing]
+    Usage: \(executable) [--preset <name>] [--source <name>] [--all-presets] [--json] [--refresh-pricing] [--sync-now]
 
       --preset <name>   today | 24h | 7d | 30d | best-month | lifetime (default: lifetime)
       --source <name>   all | codex | opencode | claude (default: all)
@@ -102,6 +108,9 @@ func usageText(executable: String = "token-bar") -> String {
       --refresh-pricing fetch the public model pricing catalog before reporting
                         (GET \(OpenRouterCatalog.defaultURLString); no usage data sent).
                         Without it the CLI is fully offline and uses the static table.
+      --sync-now        pull the homeserver snapshot over SSH before reporting
+                        (opt-in; needs Settings homeserver sync configured).
+                        Without it the CLI reads the local sync cache as-is.
       --help, -h        show this help
 
     Examples:
@@ -111,6 +120,7 @@ func usageText(executable: String = "token-bar") -> String {
       \(executable) --all-presets --source all
       \(executable) --preset lifetime --json
       \(executable) --preset lifetime --refresh-pricing
+      \(executable) --preset 24h --sync-now
     """
 }
 
@@ -136,7 +146,27 @@ do {
 }
 
 let now = Date()
-let report = TokenBarStore.load(now: now)
+
+// MARK: - Homeserver sync (explicit opt-in only)
+
+// Disabled by default: without --sync-now the CLI reads the local sync
+// cache as-is (or nothing, when sync was never enabled). With --sync-now
+// the configured SSH pull runs first (bounded, last-good-cache preserving);
+// sync failure never stops the local report, it only adds a sanitized line.
+let syncNote: String?
+if options.syncNow {
+    let result = await OpenCodeSyncService().sync(config: OpenCodeSync.loadConfig())
+    syncNote = result.didUpdateCache ? nil : result.message
+} else {
+    syncNote = nil
+}
+
+var report = TokenBarStore.load(now: now)
+if let syncNote {
+    // Sanitized by construction (see OpenCodeSyncService): generic labels
+    // only, never paths, usage, or remote output.
+    report.warnings.append(syncNote)
+}
 let calendar = Calendar.current
 
 // MARK: - Pricing (explicit opt-in only)

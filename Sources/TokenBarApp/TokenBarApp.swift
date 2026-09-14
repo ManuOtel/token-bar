@@ -28,6 +28,7 @@ struct TokenBarApp: App {
     @State private var refreshState = StartupRefreshState()
     @StateObject private var loginItem = LaunchAtLoginController()
     @StateObject private var pricing = PricingController()
+    @StateObject private var sync = OpenCodeSyncController()
 
     init() {
         let initial = StartupReportCache.initialState(cached: StartupReportCache.load())
@@ -69,7 +70,10 @@ struct TokenBarApp: App {
                 onRefresh: refresh,
                 onInitialAppear: ensureInitialLoad,
                 loginItem: loginItem,
-                pricing: pricing
+                pricing: pricing,
+                sync: sync,
+                onSyncNow: syncNow,
+                onPollTick: pollTick
             )
             .frame(width: 400, height: isExpanded ? 660 : nil)
         }
@@ -83,27 +87,67 @@ struct TokenBarApp: App {
         startLoad(generation: generation)
     }
 
+    /// Sync Now (Settings): pulls the homeserver snapshot first when sync is
+    /// enabled, then runs the normal usage reload. With sync disabled it is
+    /// just a refresh. Never blocks the popover: both steps run off-main.
+    private func syncNow() {
+        guard sync.config.enabled else {
+            refresh()
+            return
+        }
+        var state = refreshState
+        let generation = state.beginForced()
+        refreshState = state
+        startLoad(generation: generation, withSync: true)
+    }
+
+    /// Periodic tick: reloads usage after the controller's pull. Load-only
+    /// by design -- the pull already happened exactly once in the polling
+    /// tick, so this must not start another. Skips politely when a scan is
+    /// already in flight.
+    private func pollTick() {
+        var state = refreshState
+        guard let generation = state.beginManual() else { return }
+        refreshState = state
+        startLoad(generation: generation)
+    }
+
     /// First-appearance entry point: succeeds exactly once per process, even
     /// when cached records exist, so a cached menu still refreshes in the
     /// background. Menu opens never call this twice; the refresh button
-    /// stays on `refresh()`.
+    /// stays on `refresh()`. With sync enabled the first load pulls the
+    /// homeserver snapshot first, then scans; the periodic timer starts too.
     private func ensureInitialLoad() {
         var state = refreshState
         guard let generation = state.beginInitial() else { return }
         refreshState = state
-        startLoad(generation: generation)
+        if sync.config.enabled {
+            sync.startPolling(onTick: pollTick)
+            startLoad(generation: generation, withSync: true)
+        } else {
+            startLoad(generation: generation)
+        }
     }
 
     /// Off-main full scan with last-write-wins: only the latest generation
     /// may publish, so a stale/late completion is dropped instead of
     /// overwriting a newer report. Cache write failure is ignored so it
-    /// never breaks a successful fresh load.
-    private func startLoad(generation: Int) {
+    /// never breaks a successful fresh load. With `withSync`, the opt-in
+    /// homeserver pull runs first (bounded, cancellable, last-good-cache
+    /// preserving); usage loading never waits on pricing and never fails
+    /// because sync failed. Structured concurrency throughout: no semaphores,
+    /// no blocked threads; the heavy scan runs on a detached utility task.
+    private func startLoad(generation: Int, withSync: Bool = false) {
         isLoading = true
-        DispatchQueue.global(qos: .utility).async {
-            let loaded = TokenBarStore.load()
+        Task {
+            if withSync {
+                await sync.performSync()
+            }
+            let loaded = await Task.detached(priority: .utility) {
+                TokenBarStore.load()
+            }.value
             try? StartupReportCache.save(loaded)
-            DispatchQueue.main.async {
+            await MainActor.run {
                 var state = self.refreshState
                 guard state.finish(generation: generation) else { return }
                 self.refreshState = state
