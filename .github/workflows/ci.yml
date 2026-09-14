@@ -16,7 +16,7 @@ jobs:
     runs-on: macos-14
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
       - name: Swift build
         run: swift build
       - name: Swift test
@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
       - name: Mirror logic verification (no Swift required)
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify_logic.py
       - name: Versioning checks (no Swift required)
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
       - name: Public-repo privacy guard (tracked files only)
         run: ./scripts/check-privacy.sh
       - name: Confine network and subprocess use to the documented opt-ins
