@@ -106,9 +106,8 @@ struct DashboardView: View {
         }
         .onReceive(sync.$config.map(\.enabled).removeDuplicates()) { enabled in
             // View-level lifecycle hook (Scene has no onReceive): a Settings
-            // toggle takes effect without relaunch. The periodic tick is the
-            // polite pollTick (skips when a scan is in flight); the explicit
-            // Sync Now button stays forced via onSyncNow.
+            // toggle takes effect without relaunch. Each tick is one pull
+            // (in the controller) followed by one load-only pollTick here.
             if enabled {
                 sync.startPolling(onTick: onPollTick)
             } else {

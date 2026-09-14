@@ -2150,6 +2150,48 @@ def run():
               for m in (sync_error("timeout"), sync_error("invalid"), sync_error("failed")))
           and "cancell" in sync_error("cancelled"))
 
+    # Review fixes mirror: capped reads check size before buffering, the
+    # apply decision replaces honestly on valid [] and preserves last good
+    # otherwise, remote paths with spaces validate (argv-safe, never split).
+    def sync_read_capped(path, cap):
+        size = os.path.getsize(path)
+        if size > cap:
+            raise ValueError("invalid snapshot")
+        with open(path, "rb") as f:
+            data = f.read()
+        if len(data) > cap:
+            raise ValueError("invalid snapshot")
+        return data
+
+    def sync_apply(cache_bytes, candidate):
+        return candidate if sync_snapshot_valid(candidate) else cache_bytes
+
+    with _tempfile2.TemporaryDirectory() as tmpd2:
+        cap_file = os.path.join(tmpd2, "snap.json")
+        with open(cap_file, "wb") as f:
+            f.write(b"A" * 100)
+        capped_ok = sync_read_capped(cap_file, 1000) == b"A" * 100
+        try:
+            sync_read_capped(cap_file, 10)
+            capped_big = False
+        except ValueError:
+            capped_big = True
+        try:
+            sync_read_capped(os.path.join(tmpd2, "missing.json"), 1000)
+            capped_missing = False
+        except OSError:
+            capped_missing = True
+        check("sync capped read checks size before buffering",
+              capped_ok and capped_big and capped_missing)
+    good_bytes = json.dumps([good_rec]).encode()
+    check("sync apply replaces on valid, preserves last good otherwise",
+          sync_apply(good_bytes, b"[]") == b"[]"
+          and sync_apply(good_bytes, b"truncated {") == good_bytes
+          and sync_apply(good_bytes, good_bytes) == good_bytes)
+    check("sync remote path with spaces allowed, host stays strict",
+          sync_validated({**base_cfg, "remotePath": "/tmp/my dir/u.json"}) is None
+          and not sync_host_valid("has space"))
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")

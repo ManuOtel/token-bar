@@ -136,10 +136,16 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
 - **Sync pulls before the load, never inside it**: `OpenCodeSyncService`
   fetches, validates (`OpenCodeSync.validateSnapshotData`: JSON array with
   at least one decodable opencode record, or empty), and atomically
-  replaces the local cache (temp file + move; readers never see halves).
-  Any failure (invalid config, timeout, unreachable host, invalid payload,
+  replaces the local cache (temp file + `replaceItemAt` swap, no
+  remove-then-move gap; readers never see halves). A valid empty `[]`
+  honestly replaces the cache with zero rows (remote has no usage); only
+  malformed or all-skipped payloads preserve the last good cache. Any
+  failure (invalid config, timeout, unreachable host, invalid payload,
   cancellation) preserves the last good cache and surfaces one sanitized
-  generic message. `TokenBarStore.load` then reads that cache as one more
+  generic message. Trust split: the snapshot-path pull executes nothing
+  remote, while the exporter command runs through the remote sshd shell --
+  trusted user-supplied read-only invocation only; local argv safety does
+  not sanitize remote execution. `TokenBarStore.load` then reads that cache as one more
   snapshot input with the shared combine/dedupe, so synced rows land with
   `origin=homeserver`, `source=.opencode` and aggregation semantics are
   byte-identical to the manual-copy path.

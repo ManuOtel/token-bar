@@ -101,15 +101,15 @@ struct TokenBarApp: App {
         startLoad(generation: generation, withSync: true)
     }
 
-    /// Periodic tick: sync-then-load only when no scan is already in
-    /// flight. Unlike the explicit Sync Now button, this never supersedes
-    /// a manual refresh; it simply skips the round.
+    /// Periodic tick: reloads usage after the controller's pull. Load-only
+    /// by design -- the pull already happened exactly once in the polling
+    /// tick, so this must not start another. Skips politely when a scan is
+    /// already in flight.
     private func pollTick() {
-        guard sync.config.enabled else { return }
         var state = refreshState
         guard let generation = state.beginManual() else { return }
         refreshState = state
-        startLoad(generation: generation, withSync: true)
+        startLoad(generation: generation)
     }
 
     /// First-appearance entry point: succeeds exactly once per process, even

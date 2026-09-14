@@ -7,9 +7,11 @@ import TokenBarCore
 ///   (the default) this controller never spawns a subprocess.
 /// - Sync-then-load keeps the popover responsive: the pull runs off-main in
 ///   a cancellable `Task`, and the caller reloads usage after it finishes.
-///   A second Sync Now cancels the first; sync success, failure, or
-///   cancellation never blocks usage loading (the last good cache, or local
-///   data, still renders).
+///   Every pull (startup, manual, polling) is funneled through one tracked
+///   task (`owner`), so Settings Cancel and disabling sync cancel whatever
+///   is running; newest wins and only the current pull publishes. Sync
+///   success, failure, or cancellation never blocks usage loading (the last
+///   good cache, or local data, still renders).
 /// - Published state hops back to the main actor. Status strings are the
 ///   sanitized service messages (no paths, usage, or remote output).
 final class OpenCodeSyncController: ObservableObject {
@@ -20,6 +22,7 @@ final class OpenCodeSyncController: ObservableObject {
     @Published private(set) var lastDidUpdate = false
 
     private let service: OpenCodeSyncService
+    private let owner = OpenCodeSyncTaskOwner()
     private var syncTask: Task<Void, Never>?
     private var pollTimer: Timer?
 
@@ -29,7 +32,8 @@ final class OpenCodeSyncController: ObservableObject {
     }
 
     /// Persists the edited config (Settings fields). Disabling takes effect
-    /// immediately: any in-flight pull is cancelled and the timer stops.
+    /// immediately: the in-flight pull (if any) is cancelled and the timer
+    /// stops.
     func saveConfig() {
         trimFields()
         try? OpenCodeSync.saveConfig(config)
@@ -39,20 +43,25 @@ final class OpenCodeSyncController: ObservableObject {
         }
     }
 
-    /// The pull itself, safe from any thread. Publishes progress on the
-    /// main actor. Concurrent callers are serialized by the UI-level
-    /// `isSyncing` guard in `syncNow`; `forced` supersedes an in-flight
-    /// pull for startup/periodic edges.
+    /// The pull itself, safe from any thread. Tracks the pull in `owner` so
+    /// `cancel()` reaches startup/manual pulls too, not just polling ones.
+    /// Publishes progress on the main actor, and only when still current:
+    /// a superseded pull never overwrites newer UI state.
     func performSync() async {
         // Snapshot the config on the main actor: the Settings fields edit
         // it there, and this method may run from a background queue.
-        let config = await MainActor.run { self.config }
+        let task = Task<OpenCodeSyncResult, Never> { [service] in
+            let config = await MainActor.run { self.config }
+            return await service.sync(config: config)
+        }
         await MainActor.run {
+            owner.track(task)
             isSyncing = true
             lastError = nil
         }
-        let result = await service.sync(config: config)
+        let result = await task.value
         await MainActor.run {
+            guard owner.complete(task) else { return }
             status = service.loadStatus()
             lastError = result.error
             lastDidUpdate = result.didUpdateCache
@@ -75,15 +84,21 @@ final class OpenCodeSyncController: ObservableObject {
         }
     }
 
+    /// Cancels the in-flight pull, whether it came from startup, Sync Now,
+    /// or polling. The last good cache is preserved; the UI keeps showing
+    /// local data.
     func cancel() {
         syncTask?.cancel()
         syncTask = nil
+        owner.cancel()
         isSyncing = false
     }
 
-    /// Starts the periodic pull. Each tick runs sync-then-`onTick` only when
-    /// enabled and idle. Safe to call repeatedly: the previous timer is
-    /// replaced. Interval follows the saved config at each tick.
+    /// Starts the periodic pull. Each tick performs exactly ONE pull and
+    /// then calls `onTick` for the usage reload: `onTick` is load-only and
+    /// must not start another pull. Ticks run only when enabled and idle.
+    /// Safe to call repeatedly: the previous timer is replaced. Interval
+    /// follows the saved config at each tick.
     func startPolling(onTick: @escaping () -> Void) {
         stopPolling()
         pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in

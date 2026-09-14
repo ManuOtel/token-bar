@@ -139,6 +139,14 @@ atomic move) and keeps the last good cache on any failure (timeout,
 unreachable host, invalid payload, cancellation). Setup values you must
 enter yourself: the SSH host alias plus the remote snapshot path (or the
 remote exporter command). Nothing is guessed and sync ships disabled.
+Remote paths may contain spaces (they travel as one argument, never
+word-split); host aliases stay strict. A valid empty snapshot (`[]`)
+honestly replaces the cache with zero rows -- it means the remote host
+has no usage; only malformed or all-skipped payloads preserve the last
+good cache. Trust split: the snapshot-path pull never executes anything
+remote, but the exporter command runs through the remote sshd shell with
+your remote privileges, so enter only the read-only exporter invocation
+you wrote yourself.
 
 **B. Manual file copy (offline, no network).**
 `TOKENBAR_OPENCODE_DB_EXTRA` (comma- or newline-separated extra read-only DB

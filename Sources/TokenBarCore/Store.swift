@@ -182,9 +182,6 @@ public enum TokenBarStore {
             )
         }
 
-        if skippedOpenCode > 0 {
-            warnings.append("\(skippedOpenCode) OpenCode row(s) skipped as undecodable.")
-        }
         // Opt-in sync cache: loads exactly like a hand-copied snapshot when
         // present, stays silent when sync was never enabled. Shares the
         // global combine + dedupe below, so aggregation semantics are
@@ -201,6 +198,11 @@ public enum TokenBarStore {
             skippedOpenCode: &skippedOpenCode,
             warnings: &warnings
         )
+        // Counted after EVERY OpenCode input (local DBs, extras, hand-copied
+        // snapshots, sync cache) so skipped sync-cache rows are included.
+        if skippedOpenCode > 0 {
+            warnings.append("\(skippedOpenCode) OpenCode row(s) skipped as undecodable.")
+        }
         let openCodeRecords = OpenCodeStore.combineMessageAndRollup(messages: allMessages, rollups: allRollups)
 
         let claudeRoot = defaultClaudeRoot(fileManager: fileManager)

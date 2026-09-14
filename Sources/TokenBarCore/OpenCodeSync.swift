@@ -148,8 +148,9 @@ public enum OpenCodeSync {
 
     /// ssh mode: runs the read-only exporter on the remote host and captures
     /// its stdout. The command travels as discrete argv elements after `--`
-    /// (no local shell); it is executed by the remote sshd, which is the
-    /// point of ssh. Keep it to the documented exporter invocation.
+    /// (no local shell); it is executed by the remote sshd with the remote
+    /// user's privileges, so only a trusted user-supplied read-only exporter
+    /// invocation belongs here (see `remoteCommand`).
     public static func sshArguments(
         config: OpenCodeSyncConfig,
         sshExecutable: String = defaultSSHExecutable
@@ -176,6 +177,12 @@ public enum OpenCodeSync {
     /// a bad pull preserves the last good cache instead of zeroing it.
     /// Records with forbidden non-token keys are ignored by the loader, not
     /// rejected here. Size-capped before decode.
+    ///
+    /// Documented decision: a valid empty `[]` DOES replace the cache with
+    /// zero rows. It means the remote host genuinely has no usage (for
+    /// example a fresh install), and the global combine/dedupe renders that
+    /// honestly. Only malformed or all-skipped payloads preserve the last
+    /// good cache.
     public static func validateSnapshotData(_ data: Data) -> Bool {
         guard data.count <= maxSnapshotBytes else { return false }
         guard let json = try? JSONSerialization.jsonObject(with: data),
@@ -189,10 +196,12 @@ public enum OpenCodeSync {
 
     // MARK: - Atomic cache replacement
 
-    /// Writes validated snapshot bytes to a temp file in the same directory,
-    /// then moves it over the destination so readers never see a half-written
-    /// cache. Creates parent directories. Throws on failure; the previous
-    /// cache file is left untouched.
+    /// Replaces the cache atomically with no remove-then-move gap. When the
+    /// destination exists, the validated bytes land in a same-directory temp
+    /// file and `replaceItemAt` swaps them in one step (previous cache
+    /// preserved on any failure); otherwise a single `.atomic` write creates
+    /// it. Creates parent directories. Throws on failure with the previous
+    /// cache untouched and no temp files left behind.
     public static func writeSnapshotAtomically(
         _ data: Data,
         to url: URL,
@@ -200,14 +209,15 @@ public enum OpenCodeSync {
     ) throws {
         let directory = url.deletingLastPathComponent()
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard fileManager.fileExists(atPath: url.path) else {
+            try data.write(to: url, options: .atomic)
+            return
+        }
         let tmp = directory.appendingPathComponent(
             url.lastPathComponent + ".tmp-\(UUID().uuidString)")
         do {
             try data.write(to: tmp, options: .atomic)
-            if fileManager.fileExists(atPath: url.path) {
-                try fileManager.removeItem(at: url)
-            }
-            try fileManager.moveItem(at: tmp, to: url)
+            _ = try fileManager.replaceItemAt(url, withItemAt: tmp)
         } catch {
             try? fileManager.removeItem(at: tmp)
             throw error
@@ -218,13 +228,18 @@ public enum OpenCodeSync {
 
     /// Runs one argv vector with stdout captured and a hard timeout.
     /// No shell, no stdin, stderr discarded (never logged: it may echo
-    /// remote paths). Cancellation terminates the child. Errors are
-    /// sanitized: callers map them to generic labels, never raw output.
+    /// remote paths). Cancellation terminates the child. Stdout is drained
+    /// incrementally and rejected with `invalidSnapshot` past
+    /// `maxOutputBytes`, so oversized remote output is never fully buffered.
+    /// Errors are sanitized: callers map them to generic labels, never raw
+    /// output.
     public static func runProcess(
         executable: String,
         arguments: [String],
-        timeoutSeconds: Int
+        timeoutSeconds: Int,
+        maxOutputBytes: Int = maxSnapshotBytes
     ) async throws -> Data {
+        let cap = max(1, maxOutputBytes)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -233,6 +248,9 @@ public enum OpenCodeSync {
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
         try process.run()
+        let outHandle = stdout.fileHandleForReading
+        var output = Data()
+        output.reserveCapacity(min(cap, 1_048_576))
         let deadline = Date().addingTimeInterval(TimeInterval(max(1, timeoutSeconds)))
         while process.isRunning {
             if Task.isCancelled {
@@ -243,12 +261,48 @@ public enum OpenCodeSync {
                 process.terminate()
                 throw OpenCodeSyncError.timedOut
             }
+            // Non-blocking drain: `availableData` returns what the pipe
+            // holds without waiting, so a chatty child is cut off at the cap
+            // instead of filling memory before rejection.
+            let chunk = outHandle.availableData
+            if !chunk.isEmpty {
+                output.append(chunk)
+                if output.count > cap {
+                    process.terminate()
+                    throw OpenCodeSyncError.invalidSnapshot
+                }
+            }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
         guard process.terminationStatus == 0 else {
             throw OpenCodeSyncError.remoteFailed(process.terminationStatus)
         }
-        return stdout.fileHandleForReading.readDataToEndOfFile()
+        let tail = outHandle.readDataToEndOfFile()
+        guard output.count + tail.count <= cap else {
+            throw OpenCodeSyncError.invalidSnapshot
+        }
+        output.append(tail)
+        return output
+    }
+
+    /// Reads a freshly pulled file enforcing the snapshot size cap BEFORE
+    /// the bytes are buffered: the on-disk size is checked first, then the
+    /// read length is re-checked (TOCTOU-tolerant). Throws
+    /// `invalidSnapshot` (last good cache preserved downstream) or the
+    /// read error.
+    public static func readCappedFile(
+        at url: URL,
+        maxBytes: Int = maxSnapshotBytes,
+        fileManager: FileManager = .default
+    ) throws -> Data {
+        let cap = max(1, maxBytes)
+        if let size = (try? fileManager.attributesOfItem(atPath: url.path)[.size] as? NSNumber)?.intValue,
+           size > cap {
+            throw OpenCodeSyncError.invalidSnapshot
+        }
+        let data = try Data(contentsOf: url)
+        guard data.count <= cap else { throw OpenCodeSyncError.invalidSnapshot }
+        return data
     }
 
     // MARK: - Sanitized errors (never paths, usage, or remote output)
@@ -277,12 +331,19 @@ public struct OpenCodeSyncConfig: Codable, Hashable, Sendable {
     /// (for example `homeserver`). Never a password, key, or token.
     public var hostAlias: String
     /// Absolute (or `~/`-relative) path of the pre-generated sanitized
-    /// snapshot on the remote host. Used in scp mode.
+    /// snapshot on the remote host. Used in scp mode. Spaces are allowed:
+    /// the path travels as one argv element and is never word-split (only
+    /// line breaks are rejected by validation).
     public var remotePath: String
     /// Optional remote exporter invocation (for example
     /// `python3 ~/bin/export-opencode-usage.py --db ~/.local/share/opencode/opencode.db`).
     /// When non-empty, ssh mode runs it remotely and captures stdout instead
     /// of copying `remotePath`. Empty means scp mode.
+    ///
+    /// TRUST: the command executes through the REMOTE sshd shell with your
+    /// remote user privileges. Enter only the read-only exporter invocation
+    /// you wrote yourself. Local argv safety (no local shell, discrete
+    /// arguments) does not and cannot sanitize remote execution.
     public var remoteCommand: String
     /// Poll interval for background sync, seconds. Clamped to 5min-24h.
     public var pollIntervalSeconds: Int
@@ -395,10 +456,58 @@ public struct OpenCodeSyncResult: Sendable {
 
 /// Fetch seam: the live implementation shells out to the system ssh/scp;
 /// tests inject fakes. The fetcher returns raw snapshot bytes (scp mode
-/// reads the copied temp file itself); validation + atomic replacement
-/// always happen in `OpenCodeSyncService`, never in the fetcher.
+/// reads the copied temp file itself, size-capped); validation + atomic
+/// replacement always happen in `OpenCodeSyncService`, never in the fetcher.
 public protocol OpenCodeSnapshotFetching: Sendable {
     func fetchSnapshot(config: OpenCodeSyncConfig) async throws -> Data
+}
+
+/// Single cancellable owner for the in-flight pull.
+///
+/// The controller funnels every pull (startup, manual, polling) through one
+/// tracked task, so Settings Cancel and disabling sync cancel whatever is
+/// running -- not just polling pulls. Newest wins: tracking a task cancels
+/// the previous one, and only the still-current task may publish its
+/// outcome. Lock-guarded; safe from any thread.
+public final class OpenCodeSyncTaskOwner: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current: Task<OpenCodeSyncResult, Never>?
+
+    public init() {}
+
+    /// Tracks `task` as the in-flight pull, cancelling any previous one.
+    public func track(_ task: Task<OpenCodeSyncResult, Never>) {
+        lock.lock()
+        defer { lock.unlock() }
+        current?.cancel()
+        current = task
+    }
+
+    /// Clears `task` if it is still current. Returns true only then, so a
+    /// superseded pull never publishes stale UI state.
+    @discardableResult
+    public func complete(_ task: Task<OpenCodeSyncResult, Never>) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard current === task else { return false }
+        current = nil
+        return true
+    }
+
+    /// Cancels the in-flight pull, if any. Last-good cache is preserved by
+    /// the service; the UI keeps rendering local data.
+    public func cancel() {
+        lock.lock()
+        defer { lock.unlock() }
+        current?.cancel()
+        current = nil
+    }
+
+    public var isRunning: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return current != nil
+    }
 }
 
 /// Live fetcher over the system ssh/scp executables. No shell, BatchMode
@@ -426,7 +535,9 @@ public struct ProcessSnapshotFetcher: OpenCodeSnapshotFetching, @unchecked Senda
         if !command.isEmpty {
             let (exe, args) = OpenCodeSync.sshArguments(config: config, sshExecutable: sshExecutable)
             return try await OpenCodeSync.runProcess(
-                executable: exe, arguments: args, timeoutSeconds: config.timeoutSeconds)
+                executable: exe, arguments: args,
+                timeoutSeconds: config.timeoutSeconds,
+                maxOutputBytes: OpenCodeSync.maxSnapshotBytes)
         }
         let tmp = fileManager.temporaryDirectory
             .appendingPathComponent("tokenbar-sync-\(UUID().uuidString).json")
@@ -434,8 +545,12 @@ public struct ProcessSnapshotFetcher: OpenCodeSnapshotFetching, @unchecked Senda
         let (exe, args) = OpenCodeSync.scpArguments(
             config: config, destination: tmp.path, scpExecutable: scpExecutable)
         _ = try await OpenCodeSync.runProcess(
-            executable: exe, arguments: args, timeoutSeconds: config.timeoutSeconds)
-        return try Data(contentsOf: tmp)
+            executable: exe, arguments: args,
+            timeoutSeconds: config.timeoutSeconds,
+            maxOutputBytes: OpenCodeSync.maxSnapshotBytes)
+        // Size-capped BEFORE buffering: a huge remote file never lands fully
+        // in memory.
+        return try OpenCodeSync.readCappedFile(at: tmp, fileManager: fileManager)
     }
 }
 
@@ -524,20 +639,24 @@ public struct OpenCodeSyncService: @unchecked Sendable {
     }
 
     /// Bounds any fetcher (including injected fakes) with cancellation.
+    /// The loser is cancelled on EVERY exit (success, fast fetch error,
+    /// timeout, outer cancellation): without the `defer`, a fast fetch
+    /// error would leak the sleeper until it fires.
     private func withTimeout<T: Sendable>(
         seconds: Int,
         operation: @escaping @Sendable () async throws -> T
     ) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
+            defer { group.cancelAll() }
             group.addTask { try await operation() }
             group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(max(1, seconds)) * 1_000_000_000)
+                let clamped = min(max(1, seconds), 3_600)
+                try await Task.sleep(nanoseconds: UInt64(clamped) * 1_000_000_000)
                 throw OpenCodeSyncError.timedOut
             }
             guard let result = try await group.next() else {
                 throw CancellationError()
             }
-            group.cancelAll()
             return result
         }
     }

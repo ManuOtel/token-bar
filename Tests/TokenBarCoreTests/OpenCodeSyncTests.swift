@@ -330,6 +330,156 @@ final class OpenCodeSyncTests: XCTestCase {
         XCTAssertTrue(OpenCodeSync.sanitizedError(OpenCodeSyncError.configInvalid("Custom msg.")).contains("Custom msg."))
     }
 
+    // MARK: - Single cancellable owner (review: Cancel reaches every pull)
+
+    private func slowPullResult(_ note: String) -> Task<OpenCodeSyncResult, Never> {
+        Task {
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            return OpenCodeSyncResult(didUpdateCache: false, message: note)
+        }
+    }
+
+    func testTaskOwnerNewestWinsAndSupersededCannotPublish() async {
+        let owner = OpenCodeSyncTaskOwner()
+        XCTAssertFalse(owner.isRunning)
+        let first = slowPullResult("first")
+        owner.track(first)
+        XCTAssertTrue(owner.isRunning)
+        let second = slowPullResult("second")
+        owner.track(second)
+        // Tracking the second pull cancels the first.
+        XCTAssertTrue(first.isCancelled)
+        XCTAssertFalse(second.isCancelled)
+        // The superseded pull must not publish.
+        XCTAssertFalse(owner.complete(first))
+        XCTAssertTrue(owner.isRunning)
+        XCTAssertTrue(owner.complete(second))
+        XCTAssertFalse(owner.isRunning)
+        _ = await first.value
+        second.cancel()
+        _ = await second.value
+    }
+
+    func testTaskOwnerCancelReachesInFlightPull() async {
+        let owner = OpenCodeSyncTaskOwner()
+        let slow = slowPullResult("slow")
+        owner.track(slow)
+        owner.cancel()
+        XCTAssertTrue(slow.isCancelled)
+        XCTAssertFalse(owner.isRunning)
+        XCTAssertFalse(owner.complete(slow))
+        _ = await slow.value
+    }
+
+    // MARK: - Bounded capture and capped reads (review: size cap first)
+
+    func testReadCappedFile() throws {
+        let dir = tempDir()
+        let file = dir.appendingPathComponent("snap.json")
+        try Data(repeating: 0x41, count: 100).write(to: file)
+        XCTAssertEqual(try OpenCodeSync.readCappedFile(at: file, maxBytes: 1000).count, 100)
+        XCTAssertThrowsError(try OpenCodeSync.readCappedFile(at: file, maxBytes: 10)) { error in
+            guard let syncError = error as? OpenCodeSyncError,
+                  case .invalidSnapshot = syncError
+            else { return XCTFail("expected invalidSnapshot, got \(error)") }
+        }
+        XCTAssertThrowsError(
+            try OpenCodeSync.readCappedFile(
+                at: dir.appendingPathComponent("missing.json"), maxBytes: 1000))
+    }
+
+    private func requireBinary(_ path: String) throws {
+        try XCTSkipUnless(
+            FileManager.default.isExecutableFile(atPath: path), "missing \(path)")
+    }
+
+    func testRunProcessEcho() async throws {
+        try requireBinary("/bin/echo")
+        let out = try await OpenCodeSync.runProcess(
+            executable: "/bin/echo", arguments: ["hello-sync"], timeoutSeconds: 10)
+        XCTAssertEqual(out, Data("hello-sync\n".utf8))
+    }
+
+    func testRunProcessTinyCapRejectsOversizedOutput() async throws {
+        try requireBinary("/bin/echo")
+        do {
+            _ = try await OpenCodeSync.runProcess(
+                executable: "/bin/echo", arguments: ["hello-world-over-cap"],
+                timeoutSeconds: 10, maxOutputBytes: 5)
+            XCTFail("expected invalidSnapshot")
+        } catch let error as OpenCodeSyncError {
+            guard case .invalidSnapshot = error else {
+                return XCTFail("wrong error: \(error)")
+            }
+        }
+    }
+
+    func testRunProcessCancellationIsPrompt() async throws {
+        try requireBinary("/bin/sleep")
+        let task = Task {
+            try await OpenCodeSync.runProcess(
+                executable: "/bin/sleep", arguments: ["30"], timeoutSeconds: 60)
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("expected CancellationError")
+        } catch is CancellationError {
+            // Prompt exit: the 30s child never runs to completion.
+        }
+    }
+
+    // MARK: - Atomic replacement without remove-then-move (review)
+
+    func testReplaceFailurePreservesOriginalCache() throws {
+        let dir = tempDir()
+        let dest = dir.appendingPathComponent("cache.json")
+        try OpenCodeSync.writeSnapshotAtomically(Data("good".utf8), to: dest)
+        // Read-only directory: the swap cannot proceed, so it must throw
+        // with the previous cache byte-identical and no temp leftovers.
+        let roDir = dir.appendingPathComponent("ro", isDirectory: true)
+        try FileManager.default.createDirectory(at: roDir, withIntermediateDirectories: true)
+        let roDest = roDir.appendingPathComponent("cache.json")
+        try OpenCodeSync.writeSnapshotAtomically(Data("good".utf8), to: roDest)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o555], ofItemAtPath: roDir.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: roDir.path)
+        }
+        XCTAssertThrowsError(
+            try OpenCodeSync.writeSnapshotAtomically(Data("new".utf8), to: roDest))
+        XCTAssertEqual(try Data(contentsOf: roDest), Data("good".utf8))
+        XCTAssertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: roDir.path),
+            ["cache.json"])
+        XCTAssertEqual(try Data(contentsOf: dest), Data("good".utf8))
+    }
+
+    // MARK: - Documented decisions (review low-cost notes)
+
+    func testEmptySnapshotHonestlyReplacesCacheWithZeroRows() async throws {
+        // A valid [] means the remote genuinely has no usage, so it replaces
+        // the cache (only malformed/all-skipped payloads preserve it).
+        let dir = tempDir()
+        let cache = dir.appendingPathComponent("cache.json")
+        let status = dir.appendingPathComponent("status.json")
+        try OpenCodeSync.writeSnapshotAtomically(snapshotData(), to: cache)
+        let service = OpenCodeSyncService(fetcher: FakeFetcher(.success(Data("[]".utf8))))
+        let result = await service.sync(
+            config: enabledConfig(), now: now, cacheURL: cache, statusURL: status)
+        XCTAssertTrue(result.didUpdateCache)
+        let loaded = try OpenCodeStore.loadSnapshot(at: cache.path, originFallback: "homeserver")
+        XCTAssertTrue(loaded.records.isEmpty)
+    }
+
+    func testRemotePathWithSpacesIsAllowed() {
+        // Paths travel as one argv element (never word-split); only line
+        // breaks are rejected. Host aliases stay strict (see allowlist test).
+        XCTAssertNil(enabledConfig(path: "/tmp/my dir/opencode usage.json").validated())
+    }
+
     // MARK: - Refresh integration: synced rows join the load pass
 
     private func isolateLocalInputs() -> URL {
@@ -394,5 +544,34 @@ final class OpenCodeSyncTests: XCTestCase {
         let report = TokenBarStore.load()
         XCTAssertTrue(report.records.isEmpty)
         XCTAssertFalse(report.warnings.joined(separator: "\n").contains("sync"))
+    }
+
+    func testSyncCacheSkippedRowsAreCountedInWarning() throws {
+        // Review: the skipped-row warning fires after EVERY OpenCode input,
+        // so undecodable sync-cache rows are included, not dropped silently.
+        let temp = isolateLocalInputs()
+        defer {
+            unsetenv("TOKENBAR_CODEX_ROOT")
+            unsetenv("TOKENBAR_CLAUDE_ROOT")
+            unsetenv("TOKENBAR_OPENCODE_DB")
+            unsetenv("TOKENBAR_OPENCODE_DB_EXTRA")
+            unsetenv("TOKENBAR_OPENCODE_USAGE_JSON")
+            unsetenv("TOKENBAR_OPENCODE_SYNC_CACHE")
+        }
+        let cache = temp.appendingPathComponent("synced.json")
+        let payload = try JSONSerialization.data(withJSONObject: [
+            ["id": "opencode:ok-1", "source": "opencode",
+             "timestamp": "2026-09-12T10:00:00Z", "model": "m",
+             "inputTokens": 10, "outputTokens": 5,
+             "sessionId": "s", "requestId": "r-ok"],
+            ["inputTokens": 5], // no timestamp: undecodable, skipped + counted
+        ])
+        try OpenCodeSync.writeSnapshotAtomically(payload, to: cache)
+        setenv("TOKENBAR_OPENCODE_SYNC_CACHE", cache.path, 1)
+        let report = TokenBarStore.load()
+        XCTAssertEqual(report.records.count, 1)
+        XCTAssertTrue(report.warnings.contains(where: {
+            $0.contains("OpenCode row(s) skipped")
+        }), "warnings: \(report.warnings)")
     }
 }

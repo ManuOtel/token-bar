@@ -41,6 +41,9 @@ struct SettingsView: View {
         .padding(14)
         .frame(width: 300)
         .preferredColorScheme(.dark)
+        // Edited values save on submit, and once more on close: focus loss
+        // without Return must not silently drop the host alias or path.
+        .onDisappear { sync.saveConfig() }
     }
 
     // MARK: - Launch at login (behavior unchanged, moved only)
@@ -172,7 +175,7 @@ struct SettingsView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.caption)
                 .onSubmit { sync.saveConfig() }
-                .help("Runs the read-only exporter on the remote host and captures its output instead of copying the snapshot path.")
+                .help("Trusted read-only exporter command you wrote yourself. It runs through the remote sshd shell with your remote privileges; local argv safety does not sanitize remote execution. Leave empty to copy the snapshot path instead.")
                 .accessibilityLabel("Remote exporter command, optional")
                 Stepper(
                     "Every \(sync.config.pollIntervalSeconds / 60) min",
