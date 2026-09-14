@@ -6,6 +6,16 @@ Scope: execute `RELEASE_CHECKLIST.md` (M6 gate) using existing scripts/docs only
 No product behavior changes. No network integration. No provider credentials.
 Local-only app (file reads only, no accounts, no network, no auth).
 
+> Addendum note (2026-09-14): the header above, Tasks 1-9, and the dated
+> log below are the preserved historical execution record - do not edit
+> them. Current maintainer status lives in `Current status (post-0.3.0)`
+> at the end of this file. Two wordings above are historical only: the
+> `no network` line predates the strictly opt-in pricing catalog GET and
+> the opt-in remote snapshot pull, and the Task 9 privacy-grep expectation
+> predates the current network/subprocess confinement (see README,
+> ARCHITECTURE.md, and `RELEASE_CHECKLIST.md`). Base commit `323ee30`
+> stays a historical fact.
+
 ## Task 1 - Clean checkout at 323ee30
 
 Steps:
@@ -167,3 +177,30 @@ Base for this follow-up: `origin/main` at `7cb4c71` (merge of PR #10). Branch: `
 - Task 8 notarization check (Mac, presence/status only): PENDING external prerequisite.
   - Keychain profile `TOKENBAR-NOTARY` status 44 (not configured), so `notarytool` submit / `stapler` staple not performed. No credentials printed or committed.
 - Conclusion: unsigned versioned artifact verified end-to-end on a local Mac. Signed/notarized release remains pending Apple Developer certificate/profile.
+
+---
+
+## Current status (post-0.3.0) - addendum, 2026-09-14
+
+Historical record above preserved as-is; this section is the only
+maintainer-facing current state. Docs-only change: no source, behavior,
+`VERSION`, workflow, or asset changes.
+
+- `VERSION` file: `0.3.0`.
+- PR #30 merged into `main`: tag-driven public releases with versioned
+  plus `latest`-alias assets.
+- Public release tag `v0.3.0` published with versioned and `latest`-alias
+  zip plus checksum assets.
+- Stable downloads (public repository, same links as README):
+  - [Latest macOS app zip](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip)
+  - [Latest checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256)
+  - Each GitHub Release also keeps the versioned assets
+    (`TokenBar-<version>-macos.zip` plus its `.sha256`).
+- Release workflow (`.github/workflows/release.yml`, tag must match
+  `v<VERSION>`): macOS build plus test, app build and packaging via the
+  existing scripts, checksum verification before publish.
+- The app ships unsigned and not notarized, so Gatekeeper warns on first
+  launch (right-click Open once). Costs are estimates only, never a bill.
+- Maintainer pointers: `RELEASE_CHECKLIST.md` stays the release gate,
+  `docs/MACOS_PACKAGING.md` stays the build/package path,
+  `scripts/test-release.sh` pins the release contract in CI.
