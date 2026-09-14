@@ -10,8 +10,8 @@ notarization need a paid Apple Developer account and run only on a Mac.
 
 ## Download (latest public release)
 
-- Latest macOS zip: `https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip`
-- Latest checksum: `https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256`
+- [Latest macOS app zip](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip)
+- [Latest checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256)
 - Each GitHub Release also keeps the versioned assets
   (`TokenBar-<version>-macos.zip` plus its `.sha256`).
 
