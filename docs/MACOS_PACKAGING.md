@@ -8,6 +8,56 @@ it on a Mac, package a zip/DMG with a checksum, install, uninstall, and use
 the launch-at-login toggle. Nothing here needs secrets to read; signing and
 notarization need a paid Apple Developer account and run only on a Mac.
 
+## Download (latest public release)
+
+- [Latest macOS app zip](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip)
+- [Latest checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256)
+- Each GitHub Release also keeps the versioned assets
+  (`TokenBar-<version>-macos.zip` plus its `.sha256`).
+
+Verify the download before opening:
+
+```sh
+curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip
+curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256
+shasum -a 256 -c TokenBar-latest-macos.zip.sha256
+```
+
+Note: the app is unsigned and not notarized, so macOS Gatekeeper shows a
+warning on first launch. That is expected: right-click Open the app once,
+then launch normally.
+
+## Public release steps (tag-driven, maintainer)
+
+The `VERSION` file at the repo root is the single source of truth (SemVer
+`x.y.z`, never bumped for release infrastructure). To cut a public release,
+push a tag exactly matching it (`v$VERSION`):
+
+```sh
+VERSION="$(tr -d ' \t\r\n' < VERSION)"
+git tag "v$VERSION"
+git push origin "v$VERSION"
+```
+
+The tag-driven workflow (`.github/workflows/release.yml`, macOS) then:
+
+1. Validates the pushed tag is exactly `v<VERSION>` from the `VERSION`
+   file and fails otherwise.
+2. Runs `swift build` and `swift test`.
+3. Builds the app with the `VERSION` value and the monotonic workflow
+   build number (`GITHUB_RUN_NUMBER` as `CFBundleVersion`).
+4. Packages the zip and checksum with `scripts/package-release.sh` and
+   verifies with `shasum -a 256 -c`.
+5. Stages the stable `TokenBar-latest-macos.zip` alias (plus its checksum)
+   beside the versioned asset and creates the GitHub Release with all four
+   files. The `releases/latest/download/` URLs above always resolve to the
+   newest release.
+
+Workflow permissions are least privilege (`contents: read` by default, the
+release job alone widens to `contents: write` to publish the release). No
+provider credentials are used; the only auth is the automatic
+`GITHUB_TOKEN`. No usage data is embedded in the artifact.
+
 ## Build (unsigned, reproducible, no credentials)
 
 On a Mac with Xcode 15+ (macOS 14 SDK):

@@ -32,6 +32,8 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify_logic.py
       - name: Versioning checks (no Swift required)
         run: ./scripts/test-versioning.sh
+      - name: Release contract checks (no Swift required)
+        run: ./scripts/test-release.sh
       - name: Shell syntax check
         run: |
           set -eu
@@ -41,18 +43,21 @@ jobs:
           bash -n scripts/package-release.sh
           bash -n scripts/check-privacy.sh
           bash -n scripts/test-versioning.sh
+          bash -n scripts/test-release.sh
           sh -n scripts/show-usage.sh
           sh -n scripts/run-token-bar.sh
           sh -n scripts/build-app.sh
           sh -n scripts/package-release.sh
           sh -n scripts/check-privacy.sh
           sh -n scripts/test-versioning.sh
+          sh -n scripts/test-release.sh
           test -x scripts/show-usage.sh
           test -x scripts/run-token-bar.sh
           test -x scripts/build-app.sh
           test -x scripts/package-release.sh
           test -x scripts/check-privacy.sh
           test -x scripts/test-versioning.sh
+          test -x scripts/test-release.sh
 
   privacy:
     name: Privacy gate (bounded opt-in network/subprocess use + public-repo guard)

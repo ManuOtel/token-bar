@@ -10,6 +10,25 @@ data sent).
 No accounts, no provider APIs, no cookies. Costs are estimates only,
 never a bill.
 
+## Download (latest public release)
+
+- [Latest macOS app zip](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip)
+- [Latest checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256)
+- Each GitHub Release also keeps the versioned assets
+  (`TokenBar-<version>-macos.zip` plus its `.sha256`).
+
+Verify the download before opening:
+
+```sh
+curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip
+curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256
+shasum -a 256 -c TokenBar-latest-macos.zip.sha256
+```
+
+Note: the app is unsigned and not notarized, so macOS Gatekeeper shows a
+warning on first launch. That is expected: right-click Open the app once,
+then launch normally. Unzip, drag `TokenBar.app` to Applications, open.
+
 ## Requirements
 
 - Minimum macOS **14.0 (Sonoma)**, Xcode 15+ with Swift 5.9 SDK for the app.

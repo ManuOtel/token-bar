@@ -1,0 +1,107 @@
+name: Release
+
+# Tag-driven public release: push a tag exactly matching VERSION
+# (v<VERSION>) to build, test, package, and publish
+# versioned plus stable latest-alias assets. No signing, no credentials,
+# no usage data: the only auth is the automatic GITHUB_TOKEN used to
+# create the GitHub Release.
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+
+# Least privilege by default: jobs only read the repo unless a job
+# explicitly widens its own permissions below.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build, package, publish
+    runs-on: macos-14
+    # contents: write is required to create the GitHub Release and upload
+    # assets. Scoped to this job only; nothing else is widened.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate tag matches VERSION file
+        run: |
+          set -eu
+          VERSION="$(tr -d ' \t\r\n' < VERSION)"
+          TAG="${GITHUB_REF_NAME}"
+          echo "VERSION=$VERSION TAG=$TAG"
+          case "$VERSION" in
+            ""|*[!0-9.]*)
+              echo "Release failed: VERSION file is not SemVer x.y.z (got '$VERSION')."
+              exit 1 ;;
+          esac
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Release failed: VERSION file is not SemVer x.y.z (got '$VERSION')."
+            exit 1
+          fi
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "Release failed: tag '$TAG' does not match VERSION file (expected 'v$VERSION')."
+            exit 1
+          fi
+          echo "Tag matches VERSION: $TAG"
+
+      - name: Swift build
+        run: swift build
+
+      - name: Swift test
+        run: swift test
+
+      - name: Build app with VERSION and workflow build number
+        run: |
+          set -eu
+          VERSION="$(tr -d ' \t\r\n' < VERSION)"
+          echo "Building TokenBar $VERSION (build $GITHUB_RUN_NUMBER)"
+          ./scripts/build-app.sh --version "$VERSION" --build "$GITHUB_RUN_NUMBER"
+
+      - name: Package zip and checksum with existing script
+        run: |
+          set -eu
+          VERSION="$(tr -d ' \t\r\n' < VERSION)"
+          ./scripts/package-release.sh --version "$VERSION" --format zip
+          (cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.zip.sha256")
+
+      - name: Stage stable latest-release aliases
+        run: |
+          set -eu
+          VERSION="$(tr -d ' \t\r\n' < VERSION)"
+          (cd dist \
+            && cp "TokenBar-$VERSION-macos.zip" "TokenBar-latest-macos.zip" \
+            && shasum -a 256 "TokenBar-latest-macos.zip" > "TokenBar-latest-macos.zip.sha256" \
+            && shasum -a 256 -c "TokenBar-latest-macos.zip.sha256" \
+            && ls -l "TokenBar-$VERSION-macos.zip" "TokenBar-latest-macos.zip")
+
+      - name: Create GitHub Release with versioned and latest assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          VERSION="$(tr -d ' \t\r\n' < VERSION)"
+          TAG="v$VERSION"
+          NOTES="$(mktemp)"
+          cat > "$NOTES" <<EOF
+          TokenBar $VERSION for macOS 14+.
+
+          Download the versioned zip or the stable latest alias from this release.
+          Verify the checksum before opening (see README).
+
+          The app is unsigned and not notarized, so macOS Gatekeeper shows a
+          warning on first launch. That is expected: open with right-click Open.
+
+          Costs are estimates only, never a bill. Subscription use is not an API invoice.
+          EOF
+          gh release create "$TAG" \
+            --title "TokenBar $VERSION" \
+            --notes-file "$NOTES" \
+            "dist/TokenBar-$VERSION-macos.zip" \
+            "dist/TokenBar-$VERSION-macos.zip.sha256" \
+            "dist/TokenBar-latest-macos.zip" \
+            "dist/TokenBar-latest-macos.zip.sha256"
+          rm -f "$NOTES"
