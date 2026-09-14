@@ -20,17 +20,17 @@ Do not invent integrations, pricing sources, or product scope.
 
 ```
 Package.swift
-Sources/TokenBarCore/   # pure logic, Foundation only
+Sources/TokenBarCore/   # pure logic, Foundation only (key files, non-exhaustive)
   Models, CodexParser, ClaudeParser, OpenCodeStore, Aggregator,
   Pricing, PricingCatalog, PricingService, Store, StartupReportCache, Report
 Sources/TokenBarCLI/    # thin --preset/--source/--all-presets/--json/--refresh-pricing front end
-Sources/TokenBarApp/    # SwiftUI menu-bar shell (macOS 14+)
+Sources/TokenBarApp/    # SwiftUI menu-bar shell (macOS 14+, key files, non-exhaustive)
   TokenBarApp, DashboardView, SettingsView, PricingController, LaunchAtLoginController
-Tests/TokenBarCoreTests/  # parsers, aggregator, report, pricing catalog
+Tests/TokenBarCoreTests/  # key areas, non-exhaustive: parsers, aggregator, report, pricing catalog
 Fixtures/               # synthetic samples only
-scripts/                # show-usage, run-token-bar, build-app, package-release,
-                        # export-opencode-usage, verify_logic
-docs/                   # PRICING, MACOS_PACKAGING, PERFORMANCE
+scripts/                # key scripts, non-exhaustive: show-usage, run-token-bar, build-app,
+                        # package-release, export-opencode-usage, verify_logic
+docs/                   # key docs: PRICING, MACOS_PACKAGING, PERFORMANCE
 ```
 
 Rules: all semantics live in `TokenBarCore`. App and CLI are thin renderers. `PricingService.swift` is the only file allowed to touch the network. See ARCHITECTURE.md for the data flow.
@@ -75,7 +75,7 @@ swift run TokenBarApp
 ./scripts/run-token-bar.sh
 ```
 
-Linux (this worker host has no Swift toolchain):
+Linux hosts without a Swift toolchain:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify_logic.py
@@ -102,5 +102,5 @@ Sign, notarize, and staple before packaging. Full path: `docs/MACOS_PACKAGING.md
 1. Inspect current `origin/main` before starting (`git fetch origin`, `git log`, read the files you will touch). Use a separate branch and worktree, keep scope narrow.
 2. Do not rewrite PLAN.md history. Do not change source, tests, CI, pricing, or behavior on docs tasks. Do not add boilerplate or unsupported claims. Use clear technical language.
 3. Add synthetic fixtures only under `Fixtures/`. Update tests when touching `TokenBarCore` semantics. Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`).
-4. Never read, print, stage, commit, or expose local usage databases, session logs, snapshot files containing real user data, or credentials. Never touch `~/.config/tokenbar/opencode-homeserver.json` or any real usage snapshot. Keep examples synthetic.
+4. Never read, print, stage, commit, or expose local usage databases, session logs, snapshot files containing real user data, or credentials. Never touch `opencode-homeserver.json` or any real usage snapshot. Keep examples synthetic.
 5. Before merge: run the relevant tests plus the full docs-appropriate checks (`verify_logic.py`, `bash -n`/`sh -n`, `git diff --check`, privacy scan), self-review the final diff for stale wording, secrets, paths, and scope, require independent review, and require exact green CI.

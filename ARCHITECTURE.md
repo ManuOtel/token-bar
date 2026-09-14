@@ -102,7 +102,7 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   then cached catalog entry, then exact normalized `provider/model`, then
   family/substring, then fallback. Every rate carries a `PriceOrigin`
   (`dynamicCatalog | cachedCatalog | staticEstimate | fallback`) surfaced in
-  the app footer and CLI `Pricing:` line. Static estimate only, never a
+  the Settings pricing status line and CLI `Pricing:` line. Static estimate only, never a
   bill; subscription use is not an API invoice.
   Fallback rate keeps unknown models visible instead of zeroed.
 - **One bounded network call**: `PricingService` is the only type allowed to
