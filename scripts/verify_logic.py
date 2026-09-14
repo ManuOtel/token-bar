@@ -1574,6 +1574,96 @@ def run():
                    for e in c["entries"]))(
               json.loads(open(os.path.join(root, "Fixtures", "pricing-cache-sample.json")).read())))
 
+    # Startup report cache mirror (StartupReportCache.swift semantics).
+    def startup_encode(report, version=1):
+        return json.dumps({"version": version, "savedAt": "2026-09-10T12:00:00Z",
+                           "report": report}, sort_keys=True)
+
+    def startup_decode(payload):
+        try:
+            envelope = json.loads(payload)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(envelope, dict):
+            return None
+        if envelope.get("version") != 1:
+            return None
+        report = envelope.get("report")
+        if not isinstance(report, dict):
+            return None
+        if not isinstance(report.get("records"), list):
+            return None
+        return envelope
+
+    def startup_sanitize(w):
+        return sanitize(w)
+
+    fresh_report = {"records": [{"id": "a", "source": "opencode", "model": "m",
+                                 "inputTokens": 1000, "outputTokens": 250,
+                                 "totalTokens": 1250, "sessionId": "s",
+                                 "requestId": "r", "origin": "homeserver"}],
+                    "skippedCodexLines": 3, "skippedOpenCodeRows": 5,
+                    "skippedClaudeLines": 7,
+                    "warnings": ["OpenCode snapshot unreadable; others still load."]}
+    encoded = startup_encode(fresh_report)
+    check("startup cache round-trip preserves totals",
+          startup_decode(encoded)["report"]["records"][0]["totalTokens"] == 1250
+          and startup_decode(encoded)["report"]["skippedClaudeLines"] == 7)
+    check("startup cache wrong version rejected",
+          startup_decode(startup_encode(fresh_report, version=999)) is None)
+    check("startup cache corrupt rejected",
+          startup_decode("not json") is None
+          and startup_decode(encoded[: len(encoded) // 2]) is None)
+    dirty_warnings = ["Codex sessions not found at /Users/someone/.codex/sessions.",
+                      "OpenCode database not found at /tmp/secret-host/opencode.db."]
+    clean = [startup_sanitize(w) for w in dirty_warnings]
+    check("startup cache sanitizes raw paths",
+          all("/Users/someone" not in w and "/tmp/secret-host" not in w for w in clean)
+          and "TOKENBAR_CODEX_ROOT" in clean[0])
+    encoded_dirty = startup_encode(dict(fresh_report, warnings=clean))
+    check("startup cache encoded keeps no raw paths or prompt fields",
+          "/Users/someone" not in encoded_dirty
+          and "/tmp/secret-host" not in encoded_dirty
+          and '"prompt"' not in encoded_dirty.lower()
+          and '"content"' not in encoded_dirty.lower()
+          and '"tool_input"' not in encoded_dirty.lower())
+
+    # Refresh generation mirror (StartupRefreshState semantics).
+    gen, started, loading = 0, False, False
+
+    def begin_initial():
+        nonlocal gen, started, loading
+        if started:
+            return None
+        started = True
+        loading = True
+        gen += 1
+        return gen
+
+    def begin_manual():
+        nonlocal gen, loading
+        if loading:
+            return None
+        loading = True
+        gen += 1
+        return gen
+
+    def finish(f):
+        nonlocal loading
+        if f != gen:
+            return False
+        loading = False
+        return True
+
+    first = begin_initial()
+    check("startup initial refresh fires once even with cache",
+          first is not None and begin_initial() is None and begin_manual() is None)
+    stale, current = first, gen + 1
+    gen += 1
+    loading = True
+    check("startup stale generation dropped, latest wins",
+          finish(stale) is False and finish(current) is True and loading is False)
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")

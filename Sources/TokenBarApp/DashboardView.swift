@@ -32,12 +32,28 @@ struct DashboardView: View {
     var bestMonthKey: String?
     @Binding var isLoading: Bool
     @Binding var isExpanded: Bool
+    /// True while the on-screen report is previous cached data and the
+    /// fresh background scan is still running.
+    var isStaleCache: Bool
     var onRefresh: () -> Void
+    /// First-appearance hook, guarded once in `TokenBarApp`: fires even
+    /// when cached records exist, never on every menu open.
+    var onInitialAppear: () -> Void
     @ObservedObject var loginItem: LaunchAtLoginController
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            if isStaleCache {
+                HStack(spacing: 6) {
+                    ProgressView().scaleEffect(0.6)
+                    Text("Showing previous data - updating…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .accessibilityLabel("Showing previous data, updating")
+            }
             sourceSection
             rangeSection
             if report.records.isEmpty {
@@ -73,7 +89,7 @@ struct DashboardView: View {
         .frame(width: 400)
         .preferredColorScheme(.dark)
         .onAppear {
-            if report.records.isEmpty && !isLoading { onRefresh() }
+            onInitialAppear()
         }
     }
 
