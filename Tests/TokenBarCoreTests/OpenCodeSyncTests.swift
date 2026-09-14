@@ -492,6 +492,146 @@ final class OpenCodeSyncTests: XCTestCase {
         XCTAssertNil(enabledConfig(path: "/tmp/my dir/opencode usage.json").validated())
     }
 
+    // MARK: - Endpoint origin stamping (review: the label must take effect)
+
+    private func stampRecord(origin: String?, useHostKey: Bool = false, id: String) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": id, "source": "opencode",
+            "timestamp": "2026-09-12T10:00:00Z", "model": "opencode-go/m",
+            "inputTokens": 100, "outputTokens": 50, "totalTokens": 150,
+            "sessionId": "sync-ses", "requestId": id,
+        ]
+        if let origin {
+            dict[useHostKey ? "host" : "origin"] = origin
+        }
+        return dict
+    }
+
+    private func stampedOrigins(
+        _ records: [[String: Any]], label: String
+    ) throws -> [String: [String: Any]] {
+        let data = try JSONSerialization.data(withJSONObject: records)
+        let out = try OpenCodeSync.applyEffectiveOrigin(to: data, effectiveLabel: label)
+        let decoded = try JSONSerialization.jsonObject(with: out) as! [[String: Any]]
+        var byId: [String: [String: Any]] = [:]
+        for record in decoded {
+            byId[record["id"] as! String] = record
+        }
+        return byId
+    }
+
+    func testApplyEffectiveOriginStampsGenericKeepsExplicit() throws {
+        let byId = try stampedOrigins([
+            stampRecord(origin: nil, id: "opencode:missing"),
+            stampRecord(origin: "remote", id: "opencode:default"),
+            stampRecord(origin: "remote", useHostKey: true, id: "opencode:hostkey"),
+            stampRecord(origin: "office", id: "opencode:custom"),
+            stampRecord(origin: "local", id: "opencode:local"),
+            stampRecord(origin: "homeserver", id: "opencode:legacy"),
+            stampRecord(origin: "evil/x\ny", id: "opencode:hostile"),
+        ], label: "myserver")
+        XCTAssertEqual(byId["opencode:missing"]?["origin"] as? String, "myserver")
+        XCTAssertEqual(byId["opencode:default"]?["origin"] as? String, "myserver")
+        XCTAssertEqual(byId["opencode:hostkey"]?["origin"] as? String, "myserver")
+        // Explicitly distinct labels survive: custom, local, legacy.
+        XCTAssertEqual(byId["opencode:custom"]?["origin"] as? String, "office")
+        XCTAssertNotEqual(byId["opencode:custom"]?["origin"] as? String, "myserver")
+        XCTAssertEqual(byId["opencode:local"]?["origin"] as? String, "local")
+        XCTAssertEqual(byId["opencode:legacy"]?["origin"] as? String, "homeserver")
+        // Hostile labels never reach the cache verbatim.
+        XCTAssertEqual(byId["opencode:hostile"]?["origin"] as? String, "myserver")
+        // Non-token-adjacent content passes through untouched.
+        XCTAssertEqual(byId["opencode:missing"]?["inputTokens"] as? Int, 100)
+        XCTAssertEqual(byId["opencode:missing"]?["sessionId"] as? String, "sync-ses")
+        // Decoding agrees: stamped generics land on the endpoint label.
+        for id in ["opencode:missing", "opencode:default", "opencode:hostkey", "opencode:hostile"] {
+            XCTAssertEqual(OpenCodeStore.decodeSnapshotRecord(byId[id]!)?.origin, "myserver", id)
+        }
+        XCTAssertEqual(OpenCodeStore.decodeSnapshotRecord(byId["opencode:legacy"]!)?.origin, "homeserver")
+    }
+
+    func testApplyEffectiveOriginEmptyPassesThrough() throws {
+        let empty = Data("[]".utf8)
+        XCTAssertEqual(try OpenCodeSync.applyEffectiveOrigin(to: empty, effectiveLabel: "myserver"), empty)
+    }
+
+    func testApplyEffectiveOriginRejectsNonArray() {
+        for raw in ["not json", "{\"not\":\"an array\"}", "<html>oops</html>"] {
+            XCTAssertThrowsError(
+                try OpenCodeSync.applyEffectiveOrigin(
+                    to: Data(raw.utf8), effectiveLabel: "myserver")) { error in
+                guard let syncError = error as? OpenCodeSyncError,
+                      case .invalidSnapshot = syncError
+                else { return XCTFail("expected invalidSnapshot for \(raw)") }
+            }
+        }
+    }
+
+    func testApplyEffectiveOriginSanitizesHostileLabel() throws {
+        // A hostile configured label falls back to the generic default
+        // instead of reaching the cache.
+        let byId = try stampedOrigins(
+            [stampRecord(origin: nil, id: "opencode:u")], label: "evil/x\ny")
+        XCTAssertEqual(byId["opencode:u"]?["origin"] as? String, "remote")
+    }
+
+    func testSyncStampsEffectiveOriginIntoCache() async throws {
+        let dir = tempDir()
+        let cache = dir.appendingPathComponent("cache.json")
+        let status = dir.appendingPathComponent("status.json")
+        let payload = try JSONSerialization.data(withJSONObject: [
+            stampRecord(origin: nil, id: "opencode:u1"),
+            stampRecord(origin: "remote", id: "opencode:u2"),
+            stampRecord(origin: "office", id: "opencode:u3"),
+            stampRecord(origin: "homeserver", id: "opencode:u4"),
+        ])
+        let service = OpenCodeSyncService(fetcher: FakeFetcher(.success(payload)))
+        let result = await service.sync(
+            config: enabledConfig(host: "myserver"), now: now,
+            cacheURL: cache, statusURL: status)
+        XCTAssertTrue(result.didUpdateCache)
+        XCTAssertNil(result.error)
+        let loaded = try OpenCodeStore.loadSnapshot(at: cache.path)
+        XCTAssertEqual(loaded.records.count, 4)
+        let origins = Dictionary(grouping: loaded.records, by: \.origin)
+        XCTAssertEqual(Set(origins.keys), ["myserver", "office", "homeserver"])
+        XCTAssertEqual(origins["myserver"]?.count, 2)
+    }
+
+    func testSyncStampsCustomOriginLabel() async throws {
+        // An explicit originLabel wins over the alias-derived default.
+        let dir = tempDir()
+        let cache = dir.appendingPathComponent("cache.json")
+        let status = dir.appendingPathComponent("status.json")
+        let payload = try JSONSerialization.data(withJSONObject: [
+            stampRecord(origin: nil, id: "opencode:u1"),
+        ])
+        var config = enabledConfig(host: "myserver")
+        config.originLabel = "office"
+        let service = OpenCodeSyncService(fetcher: FakeFetcher(.success(payload)))
+        let result = await service.sync(
+            config: config, now: now, cacheURL: cache, statusURL: status)
+        XCTAssertTrue(result.didUpdateCache)
+        let loaded = try OpenCodeStore.loadSnapshot(at: cache.path)
+        XCTAssertEqual(loaded.records.first?.origin, "office")
+    }
+
+    func testSyncInvalidSnapshotStillPreservesLastGood() async throws {
+        // Stamping never rescues a malformed pull: the last good cache wins.
+        let dir = tempDir()
+        let cache = dir.appendingPathComponent("cache.json")
+        let status = dir.appendingPathComponent("status.json")
+        let good = snapshotData()
+        try OpenCodeSync.writeSnapshotAtomically(good, to: cache)
+        let service = OpenCodeSyncService(
+            fetcher: FakeFetcher(.success(Data("truncated {".utf8))))
+        let result = await service.sync(
+            config: enabledConfig(host: "myserver"), now: now,
+            cacheURL: cache, statusURL: status)
+        XCTAssertFalse(result.didUpdateCache)
+        XCTAssertEqual(try Data(contentsOf: cache), good)
+    }
+
     // MARK: - Refresh integration: synced rows join the load pass
 
     private func isolateLocalInputs() -> URL {

@@ -151,8 +151,10 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   trusted user-supplied read-only invocation only; local argv safety does
   not sanitize remote execution. `TokenBarStore.load` then reads that cache as one more
   snapshot input with the shared combine/dedupe, so synced rows land with
-  their embedded origin (`remote` when omitted; legacy `homeserver` still
-  loads), `source=.opencode` and aggregation semantics are
+  the endpoint label applied to generic origins (missing or default
+  `remote` become the effective configured label; explicitly distinct and
+  legacy `homeserver` labels are preserved), `source=.opencode` and
+  aggregation semantics are
   byte-identical to the manual-copy path. New caches are written to
   `opencode-remote.json`; the legacy `opencode-homeserver.json` file is
   read as a fallback when the new one is absent.

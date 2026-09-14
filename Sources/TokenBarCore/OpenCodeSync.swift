@@ -229,6 +229,61 @@ public enum OpenCodeSync {
         }
     }
 
+    // MARK: - Endpoint origin stamping (pure, unit-pinned)
+
+    /// Stamps a fetched snapshot with the endpoint's effective origin label
+    /// so the configured label (or alias-derived label) actually
+    /// distinguishes this endpoint in `byOrigin`.
+    ///
+    /// Rule (also stated in the Settings help + README):
+    /// - Records with a missing, empty, hostile, or default-`remote`
+    ///   embedded origin get `effectiveLabel`. The default exporter origin
+    ///   (`remote`) is not distinctive, so it is replaced; an empty snapshot
+    ///   (`[]`) passes through byte-identical.
+    /// - Records carrying an explicitly distinct allowlisted label (a custom
+    ///   per-host value, `local`, or legacy `homeserver`) keep it, so
+    ///   per-host snapshots stay distinguishable and pre-rename payloads
+    ///   keep loading unchanged.
+    /// - Only the `origin` key is ever set; every other key (token counts,
+    ///   timestamps, ids) passes through untouched, and no non-token content
+    ///   is read or written. The applied label is allowlisted, so hostile
+    ///   values can never reach the cache verbatim.
+    ///
+    /// Throws `invalidSnapshot` for non-array payloads, oversized output, or
+    /// re-encoding failure. Callers validate before AND after stamping; any
+    /// failure preserves the last good cache.
+    public static func applyEffectiveOrigin(
+        to data: Data,
+        effectiveLabel: String
+    ) throws -> Data {
+        let label = OpenCodeStore.sanitizeOriginLabel(
+            effectiveLabel, fallback: defaultOrigin)
+        guard let json = try? JSONSerialization.jsonObject(with: data),
+              let array = json as? [[String: Any]]
+        else { throw OpenCodeSyncError.invalidSnapshot }
+        if array.isEmpty { return data }
+        let stamped = array.map { record -> [String: Any] in
+            var record = record
+            var lowered: [String: Any] = [:]
+            lowered.reserveCapacity(record.count)
+            for (key, value) in record { lowered[key.lowercased()] = value }
+            let embedded = ["origin", "host", "hostname", "label", "machine"]
+                .lazy
+                .compactMap { lowered[$0] as? String }
+                .first(where: { !$0.isEmpty }) ?? ""
+            let kept = OpenCodeStore.sanitizeOriginLabel(embedded, fallback: "")
+            if kept.isEmpty || kept == defaultOrigin {
+                record["origin"] = label
+            }
+            return record
+        }
+        guard let output = try? JSONSerialization.data(
+            withJSONObject: stamped, options: []),
+              output.count <= maxSnapshotBytes
+        else { throw OpenCodeSyncError.invalidSnapshot }
+        return output
+    }
+
     // MARK: - Atomic cache replacement
 
     /// Replaces the cache atomically with no remove-then-move gap. When the
@@ -386,9 +441,12 @@ public struct OpenCodeSyncConfig: Codable, Hashable, Sendable {
     public var timeoutSeconds: Int
     /// Optional display/origin label for the remote host (for example
     /// `myserver`). Sanitized to the short `[A-Za-z0-9_.-]` form; blank
-    /// means derive from `hostAlias`, falling back to `remote`. Use it as
-    /// the `--origin` value when exporting, so per-host snapshots stay
-    /// distinguishable. Legacy `homeserver` labels keep loading unchanged.
+    /// means derive from `hostAlias`, falling back to `remote`. After a
+    /// successful pull, snapshots exported without a label (or with the
+    /// default `remote` label) are stored under the effective label, so
+    /// per-host snapshots stay distinguishable; explicitly distinct labels
+    /// (including legacy `homeserver`) are preserved. Use it as the
+    /// `--origin` value when exporting.
     public var originLabel: String
 
     public init(
@@ -701,7 +759,17 @@ public struct OpenCodeSyncService: @unchecked Sendable {
             guard OpenCodeSync.validateSnapshotData(data) else {
                 throw OpenCodeSyncError.invalidSnapshot
             }
-            try OpenCodeSync.writeSnapshotAtomically(data, to: destination, fileManager: fileManager)
+            // Stamp the endpoint label onto generic origins (missing or
+            // default `remote`) so the configured label takes effect;
+            // explicit distinct and legacy labels are preserved by the
+            // rule in `applyEffectiveOrigin`. Re-validated: any failure
+            // preserves the last good cache.
+            let stamped = try OpenCodeSync.applyEffectiveOrigin(
+                to: data, effectiveLabel: config.effectiveOriginLabel)
+            guard OpenCodeSync.validateSnapshotData(stamped) else {
+                throw OpenCodeSyncError.invalidSnapshot
+            }
+            try OpenCodeSync.writeSnapshotAtomically(stamped, to: destination, fileManager: fileManager)
             saveStatus(OpenCodeSyncStatus(
                 lastSuccessAt: now, lastAttemptAt: now, lastError: nil), to: statusDestination)
             return OpenCodeSyncResult(didUpdateCache: true, message: "Remote sync updated.")

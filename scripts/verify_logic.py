@@ -2113,6 +2113,84 @@ def run():
           and sync_effective_origin({"hostAlias": "myserver",
                                      "originLabel": "office-mac_2.0"}) == "office-mac_2.0"
           and sync_validated({**base_cfg, "originLabel": "bad/label"}) is not None)
+    def sync_apply_origin(raw, label, cap=32 * 1024 * 1024):
+        # Mirror of OpenCodeSync.applyEffectiveOrigin: stamp missing,
+        # hostile, and default-remote origins with the endpoint label;
+        # explicitly distinct and legacy labels are preserved. Only the
+        # origin key is ever set; all other keys pass through untouched.
+        eff = sanitize_origin_label(label, "remote")
+        try:
+            arr = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        if not isinstance(arr, list):
+            return None
+        if not arr:
+            return raw
+        out = []
+        for rec in arr:
+            if not isinstance(rec, dict):
+                out.append(rec)
+                continue
+            lowered = {str(k).lower(): v for k, v in rec.items()}
+            embedded = ""
+            for key in ("origin", "host", "hostname", "label", "machine"):
+                val = lowered.get(key)
+                if isinstance(val, str) and val:
+                    embedded = val
+                    break
+            kept = sanitize_origin_label(embedded, "")
+            stamped = dict(rec)
+            if not kept or kept == "remote":
+                stamped["origin"] = eff
+            out.append(stamped)
+        try:
+            encoded = json.dumps(out).encode()
+        except (TypeError, ValueError):
+            return None
+        if len(encoded) > cap:
+            return None
+        return encoded
+
+    def _stamp_rec(rid, **kw):
+        rec = {"id": rid, "source": "opencode",
+               "timestamp": "2026-09-12T10:00:00Z", "model": "m",
+               "inputTokens": 100, "outputTokens": 50,
+               "sessionId": "s", "requestId": rid}
+        rec.update(kw)
+        return rec
+
+    stamp_recs = [_stamp_rec("opencode:missing"),
+                  _stamp_rec("opencode:default", origin="remote"),
+                  _stamp_rec("opencode:hostkey", host="remote"),
+                  _stamp_rec("opencode:custom", origin="office"),
+                  _stamp_rec("opencode:local", origin="local"),
+                  _stamp_rec("opencode:legacy", origin="homeserver"),
+                  _stamp_rec("opencode:hostile", origin="evil/x\ny")]
+    stamped_raw = sync_apply_origin(json.dumps(stamp_recs).encode(), "myserver")
+    stamped = {e["id"]: e for e in json.loads(stamped_raw)}
+    check("sync stamping labels generic, keeps explicit + legacy",
+          stamped_raw is not None
+          and stamped["opencode:missing"]["origin"] == "myserver"
+          and stamped["opencode:default"]["origin"] == "myserver"
+          and stamped["opencode:hostkey"]["origin"] == "myserver"
+          and stamped["opencode:custom"]["origin"] == "office"
+          and stamped["opencode:local"]["origin"] == "local"
+          and stamped["opencode:legacy"]["origin"] == "homeserver"
+          and stamped["opencode:hostile"]["origin"] == "myserver"
+          and stamped["opencode:missing"]["inputTokens"] == 100
+          and stamped["opencode:missing"]["sessionId"] == "s"
+          and sync_snapshot_valid(stamped_raw)
+          and all(decode_snapshot(e) is not None
+                  for e in json.loads(stamped_raw))
+          and {decode_snapshot(e)["origin"] for e in json.loads(stamped_raw)}
+          == {"myserver", "office", "local", "homeserver"})
+    check("sync stamping empty passthrough, rejects non-array, sanitizes hostile label",
+          sync_apply_origin(b"[]", "myserver") == b"[]"
+          and sync_apply_origin(b"not json", "myserver") is None
+          and sync_apply_origin(b'{"not":"array"}', "myserver") is None
+          and json.loads(sync_apply_origin(
+              json.dumps(stamp_recs).encode(), "evil/x\ny").decode())[0]["origin"] == "remote")
     check("sync interval/timeout bounds",
           sync_validated({**base_cfg, "pollIntervalSeconds": 60}) is not None
           and sync_validated({**base_cfg, "timeoutSeconds": 999}) is not None
