@@ -93,6 +93,13 @@ struct DashboardView: View {
         .onAppear {
             onInitialAppear()
         }
+        .onDisappear {
+            // If the outer menu-bar window is dismissed while the nested
+            // settings popover is open, the presentation flag can stay true
+            // and restore settings unexpectedly on the next reopen. Reset it
+            // on teardown; normal popover open/close never triggers this.
+            showSettings = false
+        }
     }
 
     // MARK: - Header
