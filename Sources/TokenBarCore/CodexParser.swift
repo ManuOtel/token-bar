@@ -67,9 +67,11 @@ public enum CodexParser {
     }
 
     public static func parseFile(at url: URL) -> Result {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            return Result(records: [], skippedLines: 0)
-        }
+        // Bounded-memory stream: one 64 KiB chunk plus the longest line in
+        // flight, never the whole file plus a line array. Line-by-line
+        // semantics match the old String/components path for LF files;
+        // CRLF fallback ids are dense (see JSONLLineReader). Any unreadable
+        // or non-UTF-8 file keeps the old whole-file ([], 0) result.
         var records: [NormalizedUsage] = []
         var skipped = 0
         // Per-file attribution state: turn exact match first, thread fallback
@@ -78,14 +80,14 @@ public enum CodexParser {
         var turnModels: [String: String] = [:]
         var threadModels: [String: String] = [:]
         var ambiguousThreads = Set<String>()
-        for (index, rawLine) in text.components(separatedBy: .newlines).enumerated() {
+        let ok = JSONLLineReader.forEachLine(at: url) { rawLine, lineNumber in
             let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.isEmpty { continue }
+            if line.isEmpty { return }
             guard let data = line.data(using: .utf8),
                   let top = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else {
                 skipped += 1
-                continue
+                return
             }
             let payload = payloadDict(from: top)
             let typeValue = firstString(top, keys: ["type", "payload_type", "kind", "event", "name"])
@@ -105,17 +107,20 @@ public enum CodexParser {
                         ambiguousThreads: &ambiguousThreads)
                 }
                 skipped += 1
-                continue
+                return
             }
             let merged = payload.merging(top) { payloadValue, _ in payloadValue }
             let override = lookupModel(
                 merged: merged, turnModels: turnModels,
                 threadModels: threadModels, ambiguousThreads: ambiguousThreads)
-            if let record = parseTop(top, payload: payload, merged: merged, fileId: url.lastPathComponent, lineNumber: index + 1, modelOverride: override) {
+            if let record = parseTop(top, payload: payload, merged: merged, fileId: url.lastPathComponent, lineNumber: lineNumber, modelOverride: override) {
                 records.append(record)
             } else {
                 skipped += 1
             }
+        }
+        guard ok else {
+            return Result(records: [], skippedLines: 0)
         }
         return Result(records: records, skippedLines: skipped)
     }
