@@ -52,22 +52,18 @@ public enum CodexParser {
     ]
 
     public static func parseDirectory(root: URL, fileManager: FileManager = .default) -> Result {
-        var records: [NormalizedUsage] = []
-        var skipped = 0
-        guard let enumerator = fileManager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return Result(records: [], skippedLines: 0)
-        }
-        for case let url as URL in enumerator {
-            guard url.pathExtension.lowercased() == "jsonl" else { continue }
-            let file = parseFile(at: url)
-            records.append(contentsOf: file.records)
-            skipped += file.skippedLines
-        }
-        return Result(records: records, skippedLines: skipped)
+        // Bounded-parallel over independent files: enumerate once (sorted
+        // for determinism), parse each file sequentially on the pool, then
+        // merge in file order. Per-file turn/thread attribution,
+        // skipped-line counts, and parse semantics live in parseFile and
+        // are unchanged; lines within a file are never parallelized.
+        let files = ParallelFileParse.sortedJSONLFiles(root: root, fileManager: fileManager)
+        let perFile = ParallelFileParse.mapOrdered(files: files) { parseFile(at: $0) }
+        let merged = ParallelFileParse.mergeOrdered(
+            chunks: perFile.map(\.records),
+            skipped: perFile.map(\.skippedLines)
+        )
+        return Result(records: merged.records, skippedLines: merged.skippedLines)
     }
 
     public static func parseFile(at url: URL) -> Result {

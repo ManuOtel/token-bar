@@ -24,23 +24,21 @@ public enum ClaudeParser {
     }
 
     public static func parseDirectory(root: URL, fileManager: FileManager = .default) -> Result {
-        var records: [NormalizedUsage] = []
-        var skipped = 0
-        guard let enumerator = fileManager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else {
-            return Result(records: [], skippedLines: 0)
-        }
+        // Same bounded-parallel shape as Codex: sorted enumeration for
+        // deterministic order, sequential per-file parse on the pool,
+        // ordered merge. Root-relative fallback ids are derived per file
+        // (pure string op) so identical basenames in different
+        // subdirectories stay distinct without absolute paths leaking.
+        let files = ParallelFileParse.sortedJSONLFiles(root: root, fileManager: fileManager)
         let rootPath = root.standardizedFileURL.path
-        for case let url as URL in enumerator {
-            guard url.pathExtension.lowercased() == "jsonl" else { continue }
-            let file = parseFile(at: url, fileId: relativePath(of: url, to: rootPath))
-            records.append(contentsOf: file.records)
-            skipped += file.skippedLines
+        let perFile = ParallelFileParse.mapOrdered(files: files) { url in
+            parseFile(at: url, fileId: relativePath(of: url, to: rootPath))
         }
-        return Result(records: records, skippedLines: skipped)
+        let merged = ParallelFileParse.mergeOrdered(
+            chunks: perFile.map(\.records),
+            skipped: perFile.map(\.skippedLines)
+        )
+        return Result(records: merged.records, skippedLines: merged.skippedLines)
     }
 
     public static func parseFile(at url: URL, fileId: String? = nil) -> Result {
