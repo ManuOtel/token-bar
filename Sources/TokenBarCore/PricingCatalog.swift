@@ -67,6 +67,11 @@ public struct PricingCatalog: Codable, Hashable, Sendable {
         return map
     }
 
+    /// Immutable lookup for batch pricing (built once, reused per record).
+    public func makeLookup(isFresh: Bool) -> CatalogLookup {
+        CatalogLookup(catalog: self, isFresh: isFresh)
+    }
+
     /// Deterministic suffix fallback: a bare usage model like `gpt-4o`
     /// matches the lexically smallest catalog id whose `/`-suffix equals it
     /// (for example `openai/gpt-4o`). Full exact matches always win first;
@@ -96,6 +101,80 @@ public struct CatalogSnapshot: Hashable, Sendable {
     public init(catalog: PricingCatalog, isFresh: Bool) {
         self.catalog = catalog
         self.isFresh = isFresh
+    }
+
+    /// Immutable lookup built once per batch (see `CatalogLookup`).
+    public func makeLookup() -> CatalogLookup {
+        CatalogLookup(snapshot: self)
+    }
+}
+
+/// Immutable catalog lookup built once per `Aggregator.aggregate` call and
+/// reused for every record.
+///
+/// Before this type, `Pricing.resolve` rebuilt the exact-match dictionary
+/// (`PricingCatalog.index()`) and linearly scanned every entry for bare-model
+/// suffix matches on every record: O(records x entries). This struct builds
+/// both maps once (single O(entries) pass) and answers each lookup in O(1):
+/// exact normalized `provider/model` first, then the precomputed bare-model
+/// suffix entry (lexically smallest catalog id wins, same rule as
+/// `PricingCatalog.suffixMatch`), otherwise nil so callers fall through to
+/// the static exact/family tables and fallback. `Sendable` value type, no
+/// shared mutation.
+public struct CatalogLookup: Sendable {
+    private let exact: [String: CatalogEntry]
+    private let suffix: [String: CatalogEntry]
+    /// Whether the source snapshot was fetched live (`true` => resolved
+    /// hits label `.dynamicCatalog`, `false` => `.cachedCatalog`).
+    public let isFresh: Bool
+    /// Number of catalog entries the maps were built from.
+    public let entryCount: Int
+
+    public init(catalog: PricingCatalog, isFresh: Bool) {
+        var exactMap: [String: CatalogEntry] = [:]
+        exactMap.reserveCapacity(catalog.entries.count)
+        var suffixMap: [String: CatalogEntry] = [:]
+        suffixMap.reserveCapacity(catalog.entries.count)
+        var bestIds: [String: String] = [:]
+        bestIds.reserveCapacity(catalog.entries.count)
+        for entry in catalog.entries {
+            let normalized = Pricing.normalizedKey(forModel: entry.model)
+            // Last wins on duplicate normalized ids: same as `index()`.
+            exactMap[normalized] = entry
+            let suffixKey = normalized.split(separator: "/").last.map(String.init) ?? normalized
+            if let best = bestIds[suffixKey] {
+                // Lexically smallest normalized id wins: same as
+                // `suffixMatch(forKey:)` (first wins on exact tie).
+                if normalized < best {
+                    bestIds[suffixKey] = normalized
+                    suffixMap[suffixKey] = entry
+                }
+            } else {
+                bestIds[suffixKey] = normalized
+                suffixMap[suffixKey] = entry
+            }
+        }
+        self.exact = exactMap
+        self.suffix = suffixMap
+        self.isFresh = isFresh
+        self.entryCount = catalog.entries.count
+    }
+
+    public init(snapshot: CatalogSnapshot) {
+        self.init(catalog: snapshot.catalog, isFresh: snapshot.isFresh)
+    }
+
+    /// Exact hit first, then bare-model suffix (keys containing `/` never
+    /// use the suffix path). Nil means fall through to static tables.
+    public func match(forKey key: String) -> CatalogEntry? {
+        if let hit = exact[key] { return hit }
+        guard !key.contains("/") else { return nil }
+        return suffix[key]
+    }
+
+    /// Exact hit for a raw model string (normalized internally).
+    public func match(forModel model: String) -> CatalogEntry? {
+        match(forKey: Pricing.normalizedKey(forModel: model))
     }
 }
 
