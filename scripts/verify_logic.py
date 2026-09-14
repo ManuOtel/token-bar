@@ -1953,6 +1953,44 @@ def run():
     check("startup stale generation dropped, latest wins",
           finish(stale) is False and finish(current) is True and loading is False)
 
+    # Aggregate memoization mirror (Aggregator.swift slice 8 semantics):
+    # resolve is a pure function of the normalized key, so one resolve per
+    # unique key plus per-record token math matches per-record resolution.
+    # Deterministic counts only, no timing.
+    def memo_price(model):
+        return price_for(model)
+
+    memo_models = ["openai/gpt-4o", "OPENAI/GPT-4O", "  openai/gpt-4o  ",
+                   "gpt-5", "mystery-model-zzz"]
+    memo_keys = {normalize_key(m) for m in memo_models}
+    check("memo variants share normalized keys",
+          len(memo_keys) < len(memo_models)
+          and normalize_key("OPENAI/GPT-4O") == normalize_key("  openai/gpt-4o  "))
+    memo_records = [{"model": memo_models[i % len(memo_models)],
+                     "input": 1000 + (i % 5) * 100, "output": 500,
+                     "cached": 5000 if i % 7 == 0 else 200}
+                    for i in range(80)]
+    memo_unique = {normalize_key(r["model"]) for r in memo_records}
+    per_record_total = sum(cost(r["model"], r["input"], r["output"], r["cached"])
+                           for r in memo_records)
+    memo_cache = {}
+    memo_total = 0.0
+    for r in memo_records:
+        key = normalize_key(r["model"])
+        if key not in memo_cache:
+            memo_cache[key] = memo_price(r["model"])
+        inp, outp, cch = memo_cache[key]
+        cached = min(max(0, r["cached"]), max(0, r["input"]))
+        fresh = max(0, r["input"]) - cached
+        memo_total += (fresh / 1e6 * inp + cached / 1e6 * cch
+                       + max(0, r["output"]) / 1e6 * outp)
+    check("memo aggregate matches per-record math",
+          abs(memo_total - per_record_total) < 1e-9
+          and len(memo_cache) == len(memo_unique)
+          and len(memo_cache) < len(memo_records))
+    check("memo oversized cached still clamps",
+          abs(cost("gpt-4o", 100, 0, 5000) - cost("gpt-4o", 100, 0, 100)) < 1e-12)
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")

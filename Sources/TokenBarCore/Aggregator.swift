@@ -46,7 +46,11 @@ public enum Aggregator {
     ///
     /// Performance: the catalog index is built once into an immutable
     /// `PricingContext` and reused for every record (previously the index
-    /// was rebuilt per record). Results are identical to per-record
+    /// was rebuilt per record). Within one call, resolved
+    /// `(ModelPrice, PriceOrigin)` values are additionally memoized per
+    /// `Pricing.normalizedKey(forModel:)` so repeated models pay one
+    /// resolve (catalog hit + static-table scan) total, not one per
+    /// record. Results are identical to per-record
     /// `Pricing.resolve(forModel:snapshot:)`; only allocations change.
     public static func aggregate(
         _ records: [NormalizedUsage],
@@ -57,6 +61,15 @@ public enum Aggregator {
         // One immutable lookup per aggregate call: O(entries) once instead
         // of O(entries) per record. Nil keeps the offline static path.
         let pricing = PricingContext(snapshot: snapshot)
+        // Local memoization: resolve each unique normalized model key once
+        // per aggregate call, then reuse the exact (ModelPrice, PriceOrigin)
+        // for cost math. Pure local `Dictionary`, no shared mutable state;
+        // `PricingContext` stays a value type and thread safety is unchanged.
+        // The resolve result is a pure function of the normalized key
+        // (catalog exact/suffix, static exact/family, fallback all key on
+        // it), so mixed-case/whitespace variants safely share one entry.
+        var priceCache: [String: (price: ModelPrice, origin: PriceOrigin)] = [:]
+        priceCache.reserveCapacity(min(records.count, 1024))
         var total = 0, input = 0, output = 0, cached = 0, reasoning = 0
         var cost = 0.0
         var sessions = Set<String>()
@@ -75,7 +88,24 @@ public enum Aggregator {
             output += record.outputTokens
             cached += record.cachedTokens
             reasoning += record.reasoningTokens
-            let recordCost = pricing.cost(for: record)
+            // One resolve per unique normalized model key, then the shared
+            // non-resolving helper (`Pricing.cost(price:...)`), so there is
+            // exactly one cost-math implementation in the codebase.
+            let normalizedModel = Pricing.normalizedKey(forModel: record.model)
+            let resolved: (price: ModelPrice, origin: PriceOrigin)
+            if let hit = priceCache[normalizedModel] {
+                resolved = hit
+            } else {
+                let fresh = pricing.resolve(forModel: record.model)
+                priceCache[normalizedModel] = fresh
+                resolved = fresh
+            }
+            let recordCost = Pricing.cost(
+                price: resolved.price,
+                inputTokens: record.inputTokens,
+                outputTokens: record.outputTokens,
+                cachedTokens: record.cachedTokens
+            )
             cost += recordCost
             if !record.sessionId.isEmpty { sessions.insert(record.sessionId) }
             if lastUpdated == nil || record.timestamp > lastUpdated! {
