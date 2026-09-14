@@ -88,35 +88,36 @@ public enum Pricing {
     /// 2. exact normalized `provider/model` match, 3. family/substring
     /// match in table order, 4. fallback. Never zero, never a bill.
     /// Unknown models stay visible at the fallback rate.
+    ///
+    /// Single-record path. Batch callers (`Aggregator.aggregate`) build one
+    /// `PricingContext` and use the context overloads instead so the catalog
+    /// index is built once, not once per record.
     public static func resolve(
         forModel model: String,
         snapshot: CatalogSnapshot? = nil
     ) -> (price: ModelPrice, origin: PriceOrigin) {
-        if let snapshot {
-            let key = normalizedKey(forModel: model)
-            let index = snapshot.catalog.index()
-            if let hit = index[key] ?? snapshot.catalog.suffixMatch(forKey: key) {
-                let price = ModelPrice(
-                    inputPerMTok: hit.inputPerMTok,
-                    outputPerMTok: hit.outputPerMTok,
-                    cachedPerMTok: hit.cachedPerMTok)
-                return (price, snapshot.isFresh ? .dynamicCatalog : .cachedCatalog)
-            }
-        }
-        let key = normalizedKey(forModel: model)
-        if let hit = exact[key] {
-            return (hit, .staticEstimate)
-        }
-        for entry in table where key.contains(entry.match) {
-            return (entry.price, .staticEstimate)
-        }
-        return (fallback, .fallback)
+        PricingContext(snapshot: snapshot).resolve(forModel: model)
+    }
+
+    /// Context-based resolution. Identical precedence and `PriceOrigin`
+    /// labels to `resolve(forModel:snapshot:)`; the caller reuses one
+    /// prebuilt `PricingContext` across many records.
+    public static func resolve(
+        forModel model: String,
+        context: PricingContext
+    ) -> (price: ModelPrice, origin: PriceOrigin) {
+        context.resolve(forModel: model)
     }
 
     /// Static-table price (nil snapshot) or catalog-aware price.
     /// Nil keeps the deterministic offline path (CLI default, existing tests).
     public static func price(forModel model: String, snapshot: CatalogSnapshot? = nil) -> ModelPrice {
         resolve(forModel: model, snapshot: snapshot).price
+    }
+
+    /// Context-based price. Same result as the snapshot overload.
+    public static func price(forModel model: String, context: PricingContext) -> ModelPrice {
+        resolve(forModel: model, context: context).price
     }
 
     /// Estimated cost. cached tokens are a subset of input (billed at the
@@ -132,7 +133,25 @@ public enum Pricing {
         cachedTokens: Int,
         snapshot: CatalogSnapshot? = nil
     ) -> Double {
-        let price = price(forModel: model, snapshot: snapshot)
+        cost(
+            model: model,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            cachedTokens: cachedTokens,
+            context: PricingContext(snapshot: snapshot)
+        )
+    }
+
+    /// Context-based cost. Same math as the snapshot overload; batch callers
+    /// reuse one `PricingContext` so large catalogs are indexed once.
+    public static func cost(
+        model: String,
+        inputTokens: Int,
+        outputTokens: Int,
+        cachedTokens: Int,
+        context: PricingContext
+    ) -> Double {
+        let price = price(forModel: model, context: context)
         let input = max(0, inputTokens)
         let output = max(0, outputTokens)
         let cached = min(max(0, cachedTokens), input)
@@ -149,6 +168,91 @@ public enum Pricing {
             outputTokens: record.outputTokens,
             cachedTokens: record.cachedTokens,
             snapshot: snapshot
+        )
+    }
+
+    /// Context-based record cost. Same result as the snapshot overload.
+    public static func cost(for record: NormalizedUsage, context: PricingContext) -> Double {
+        cost(
+            model: record.model,
+            inputTokens: record.inputTokens,
+            outputTokens: record.outputTokens,
+            cachedTokens: record.cachedTokens,
+            context: context
+        )
+    }
+}
+
+/// Immutable batch-pricing context: one `CatalogLookup` built up front and
+/// reused for every record in an aggregation.
+///
+/// `PricingContext(snapshot: nil)` is the deterministic offline path (static
+/// exact/family/fallback only). A non-nil snapshot prices catalog entries
+/// first with the same precedence and `PriceOrigin` labels as
+/// `Pricing.resolve(forModel:snapshot:)`. Value type, `Sendable`, no shared
+/// mutation: safe to build once per `Aggregator.aggregate` call and reuse.
+public struct PricingContext: Sendable {
+    private let lookup: CatalogLookup?
+
+    public init(snapshot: CatalogSnapshot?) {
+        if let snapshot {
+            self.lookup = CatalogLookup(snapshot: snapshot)
+        } else {
+            self.lookup = nil
+        }
+    }
+
+    /// Direct lookup reuse (already-built index). Nil keeps the offline path.
+    public init(lookup: CatalogLookup?) {
+        self.lookup = lookup
+    }
+
+    /// True when a catalog index is present (snapshot was supplied).
+    public var hasCatalog: Bool { lookup != nil }
+
+    public func resolve(forModel model: String) -> (price: ModelPrice, origin: PriceOrigin) {
+        let key = Pricing.normalizedKey(forModel: model)
+        if let lookup, let hit = lookup.match(forKey: key) {
+            let price = ModelPrice(
+                inputPerMTok: hit.inputPerMTok,
+                outputPerMTok: hit.outputPerMTok,
+                cachedPerMTok: hit.cachedPerMTok)
+            return (price, lookup.isFresh ? .dynamicCatalog : .cachedCatalog)
+        }
+        if let hit = Pricing.exact[key] {
+            return (hit, .staticEstimate)
+        }
+        for entry in Pricing.table where key.contains(entry.match) {
+            return (entry.price, .staticEstimate)
+        }
+        return (Pricing.fallback, .fallback)
+    }
+
+    public func price(forModel model: String) -> ModelPrice {
+        resolve(forModel: model).price
+    }
+
+    public func cost(
+        model: String,
+        inputTokens: Int,
+        outputTokens: Int,
+        cachedTokens: Int
+    ) -> Double {
+        Pricing.cost(
+            model: model,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens,
+            cachedTokens: cachedTokens,
+            context: self
+        )
+    }
+
+    public func cost(for record: NormalizedUsage) -> Double {
+        cost(
+            model: record.model,
+            inputTokens: record.inputTokens,
+            outputTokens: record.outputTokens,
+            cachedTokens: record.cachedTokens
         )
     }
 }

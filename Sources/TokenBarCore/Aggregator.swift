@@ -43,19 +43,31 @@ public enum Aggregator {
     /// offline static path (CLI default). A supplied snapshot prices every
     /// record via `Pricing.resolve`, so dynamic/cached catalog entries win
     /// over the static table while unknown models still fall back visibly.
+    ///
+    /// Performance: the catalog index is built once into an immutable
+    /// `PricingContext` and reused for every record (previously the index
+    /// was rebuilt per record). Results are identical to per-record
+    /// `Pricing.resolve(forModel:snapshot:)`; only allocations change.
     public static func aggregate(
         _ records: [NormalizedUsage],
         snapshot: CatalogSnapshot?,
         calendar: Calendar = .current
     ) -> AggregatedStats {
         guard !records.isEmpty else { return .empty }
+        // One immutable lookup per aggregate call: O(entries) once instead
+        // of O(entries) per record. Nil keeps the offline static path.
+        let pricing = PricingContext(snapshot: snapshot)
         var total = 0, input = 0, output = 0, cached = 0, reasoning = 0
         var cost = 0.0
         var sessions = Set<String>()
+        sessions.reserveCapacity(min(records.count, 4096))
         var lastUpdated: Date?
         var modelGroups: [String: (tokens: Int, requests: Int, cost: Double)] = [:]
+        modelGroups.reserveCapacity(min(records.count, 1024))
         var sourceGroups: [String: (tokens: Int, requests: Int, cost: Double)] = [:]
+        sourceGroups.reserveCapacity(4)
         var originGroups: [String: (tokens: Int, requests: Int, cost: Double)] = [:]
+        originGroups.reserveCapacity(8)
 
         for record in records {
             total += record.totalTokens
@@ -63,7 +75,7 @@ public enum Aggregator {
             output += record.outputTokens
             cached += record.cachedTokens
             reasoning += record.reasoningTokens
-            let recordCost = Pricing.cost(for: record, snapshot: snapshot)
+            let recordCost = pricing.cost(for: record)
             cost += recordCost
             if !record.sessionId.isEmpty { sessions.insert(record.sessionId) }
             if lastUpdated == nil || record.timestamp > lastUpdated! {
@@ -80,8 +92,9 @@ public enum Aggregator {
             group.requests += 1
             group.cost += recordCost
             sourceGroups[sourceKey] = group
-            let originLabel = record.origin.trimmingCharacters(in: .whitespacesAndNewlines)
-            let originKey = "\(record.source.rawValue)/\(originLabel.isEmpty ? "local" : originLabel)"
+            // `NormalizedUsage.init` already trims `origin` and defaults
+            // blanks to "local", so reuse it directly (no per-record trim).
+            let originKey = "\(record.source.rawValue)/\(record.origin.isEmpty ? "local" : record.origin)"
             var originGroup = originGroups[originKey] ?? (0, 0, 0)
             originGroup.tokens += record.totalTokens
             originGroup.requests += 1
