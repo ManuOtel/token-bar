@@ -20,32 +20,33 @@ struct TokenBarApp: App {
     @StateObject private var loginItem = LaunchAtLoginController()
     @StateObject private var pricing = PricingController()
 
-    private static let sourceOrder: [SourceFilter] = [.all, .codex, .opencode, .claude]
-
     var body: some Scene {
-        MenuBarExtra("Tokens \(menuTitle)", systemImage: "chart.bar") {
-            // One clock per render so filter + stats + chips agree.
-            let now = Date()
-            let snapshot = pricing.snapshot
-            let scoped = Aggregator.filter(report.records, source: source, preset: preset, now: now)
-            let stats = Self.stats(records: report.records, source: source, preset: preset, now: now, snapshot: snapshot)
-            let bestKey = Self.bestMonthKey(records: report.records, source: source, preset: preset, now: now)
+        // One explicit clock per render: the snapshot reuses it for the
+        // selected stats, chip totals, best-month key, and menu title, so
+        // one render costs one sorted scope + one aggregate + one unsorted
+        // chip pass instead of ~8 filter sorts + a second Date() for stale
+        // menu titles. Pure value, no cache: report/source/preset/pricing
+        // changes are inputs, so nothing can go stale.
+        let now = Date()
+        let dash = DashboardSnapshot.make(
+            records: report.records, source: source, preset: preset,
+            now: now, snapshot: pricing.snapshot)
+        return MenuBarExtra("Tokens \(DashboardSnapshot.menuTitle(forTotal: dash.menuTotalTokens))", systemImage: "chart.bar") {
             VStack(alignment: .leading, spacing: 0) {
                 DashboardView(
                     report: $report,
                     source: $source,
                     preset: $preset,
-                    stats: stats,
-                    scopedCount: scoped.count,
-                    sourceTotals: Self.sourceOrder.map { filter in
-                        let rows = Aggregator.filter(report.records, source: filter, preset: preset, now: now)
-                        return SourceChipData(
-                            filter: filter,
-                            tokens: rows.reduce(0) { $0 + $1.totalTokens },
-                            requests: rows.count
+                    stats: dash.stats,
+                    scopedCount: dash.scopedCount,
+                    sourceTotals: dash.sourceTotals.map { entry in
+                        SourceChipData(
+                            filter: entry.filter,
+                            tokens: entry.tokens,
+                            requests: entry.requests
                         )
                     },
-                    bestMonthKey: bestKey,
+                    bestMonthKey: dash.bestMonthKey,
                     isLoading: $isLoading,
                     isExpanded: $isExpanded,
                     onRefresh: refresh,
@@ -99,44 +100,6 @@ struct TokenBarApp: App {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-    }
-
-    private var menuTitle: String {
-        let now = Date()
-        let scoped = Aggregator.filter(report.records, source: source, preset: preset, now: now)
-        let total = scoped.reduce(0) { $0 + $1.totalTokens }
-        if total >= 1_000_000 {
-            return String(format: "%.2fM", Double(total) / 1_000_000.0)
-        } else if total >= 1_000 {
-            return String(format: "%.1fk", Double(total) / 1_000.0)
-        }
-        return "\(total)"
-    }
-
-    private static func stats(
-        records: [NormalizedUsage],
-        source: SourceFilter,
-        preset: DatePreset,
-        now: Date,
-        snapshot: CatalogSnapshot? = nil
-    ) -> AggregatedStats {
-        if preset == .bestMonth {
-            let lifetime = Aggregator.filter(records, source: source, preset: .lifetime, now: now)
-            return Aggregator.bestMonth(lifetime, snapshot: snapshot)?.stats ?? .empty
-        }
-        let scoped = Aggregator.filter(records, source: source, preset: preset, now: now)
-        return Aggregator.aggregate(scoped, snapshot: snapshot)
-    }
-
-    private static func bestMonthKey(
-        records: [NormalizedUsage],
-        source: SourceFilter,
-        preset: DatePreset,
-        now: Date
-    ) -> String? {
-        guard preset == .bestMonth else { return nil }
-        let lifetime = Aggregator.filter(records, source: source, preset: .lifetime, now: now)
-        return Aggregator.bestMonth(lifetime)?.monthKey
     }
 
     private func refresh() {
