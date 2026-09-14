@@ -1592,6 +1592,7 @@ def run():
         return fallback
 
     def decode_snapshot(d, fallback="remote"):
+        fallback = sanitize_origin_label(fallback, "remote")
         src = d.get("source")
         if src and str(src).lower() != "opencode":
             return None
@@ -1633,6 +1634,13 @@ def run():
     check("snapshot schema origin fallback remote",
           snap is not None and snap["origin"] == "remote"
           and snap["total"] == 150)
+    check("snapshot hostile fallback sanitized like Swift",
+          decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
+                           "inputTokens": 1, "outputTokens": 1},
+                          fallback="evil/x\ny")["origin"] == "remote"
+          and decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
+                               "inputTokens": 1, "outputTokens": 1},
+                              fallback="homeserver")["origin"] == "homeserver")
     check("snapshot legacy homeserver label still loads",
           decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
                            "inputTokens": 1, "outputTokens": 1,
@@ -2077,8 +2085,11 @@ def run():
             return False
         if not arr:
             return True
-        return any(decode_snapshot(e) is not None
-                   for e in arr if isinstance(e, dict))
+        # Swift casts the whole payload to [[String: Any]]: any non-dict
+        # element rejects the pull, so mixed arrays never replace the cache.
+        if not all(isinstance(e, dict) for e in arr):
+            return False
+        return any(decode_snapshot(e) is not None for e in arr)
 
     def sync_write_atomic(data, dest):
         # Mirror of writeSnapshotAtomically: tmp in same dir, then replace.
@@ -2114,10 +2125,18 @@ def run():
                                      "originLabel": "office-mac_2.0"}) == "office-mac_2.0"
           and sync_validated({**base_cfg, "originLabel": "bad/label"}) is not None)
     def sync_apply_origin(raw, label, cap=32 * 1024 * 1024):
-        # Mirror of OpenCodeSync.applyEffectiveOrigin: stamp missing,
-        # hostile, and default-remote origins with the endpoint label;
-        # explicitly distinct and legacy labels are preserved. Only the
-        # origin key is ever set; all other keys pass through untouched.
+        # Mirror of OpenCodeSync.applyEffectiveOrigin: every origin-ish
+        # field is scanned in decode precedence; the first explicitly
+        # distinct label wins and is canonicalized into `origin`. Missing,
+        # hostile, and default-remote (any case) origins take the endpoint
+        # label; the legacy label counts as distinct. Only `origin` is set.
+        def is_distinct(kept):
+            if not kept:
+                return False
+            if kept == "homeserver":
+                return True
+            return kept.lower() != "remote"
+
         eff = sanitize_origin_label(label, "remote")
         try:
             arr = json.loads(raw)
@@ -2125,24 +2144,23 @@ def run():
             return None
         if not isinstance(arr, list):
             return None
+        if any(not isinstance(e, dict) for e in arr):
+            return None
         if not arr:
             return raw
         out = []
         for rec in arr:
-            if not isinstance(rec, dict):
-                out.append(rec)
-                continue
             lowered = {str(k).lower(): v for k, v in rec.items()}
-            embedded = ""
+            distinct = ""
             for key in ("origin", "host", "hostname", "label", "machine"):
                 val = lowered.get(key)
                 if isinstance(val, str) and val:
-                    embedded = val
-                    break
-            kept = sanitize_origin_label(embedded, "")
+                    kept = sanitize_origin_label(val, "")
+                    if is_distinct(kept):
+                        distinct = kept
+                        break
             stamped = dict(rec)
-            if not kept or kept == "remote":
-                stamped["origin"] = eff
+            stamped["origin"] = distinct if distinct else eff
             out.append(stamped)
         try:
             encoded = json.dumps(out).encode()
@@ -2189,8 +2207,32 @@ def run():
           sync_apply_origin(b"[]", "myserver") == b"[]"
           and sync_apply_origin(b"not json", "myserver") is None
           and sync_apply_origin(b'{"not":"array"}', "myserver") is None
+          and sync_apply_origin(b'[1, 2]', "myserver") is None
           and json.loads(sync_apply_origin(
               json.dumps(stamp_recs).encode(), "evil/x\ny").decode())[0]["origin"] == "remote")
+    multi_recs = [_stamp_rec("opencode:host-wins", origin="remote", host="office"),
+                  _stamp_rec("opencode:upper-remote", origin="REMOTE"),
+                  _stamp_rec("opencode:host-only", **{"host": "office"}),
+                  _stamp_rec("opencode:origin-precedence", origin="office", host="remote"),
+                  _stamp_rec("opencode:hostile-origin", origin="evil/x", host="office"),
+                  _stamp_rec("opencode:legacy-precedence", origin="homeserver", host="office")]
+    # NOTE: _stamp_rec takes **kw, so `host` passes through as an extra key.
+    multi_raw = sync_apply_origin(json.dumps(multi_recs).encode(), "myserver")
+    multi = {e["id"]: e for e in json.loads(multi_raw)}
+    check("sync stamping scans all fields, remote matches any case",
+          multi_raw is not None
+          and multi["opencode:host-wins"]["origin"] == "office"
+          and multi["opencode:upper-remote"]["origin"] == "myserver"
+          and multi["opencode:host-only"]["origin"] == "office"
+          and multi["opencode:origin-precedence"]["origin"] == "office"
+          and multi["opencode:hostile-origin"]["origin"] == "office"
+          and multi["opencode:legacy-precedence"]["origin"] == "homeserver")
+    check("sync rejects mixed-type top-level arrays like Swift",
+          not sync_snapshot_valid(json.dumps([
+              {"id": "opencode:s1", "source": "opencode",
+               "timestamp": "2026-09-12T10:00:00Z", "model": "m",
+               "inputTokens": 400, "outputTokens": 100,
+               "sessionId": "s", "requestId": "r"}, 42]).encode()))
     check("sync interval/timeout bounds",
           sync_validated({**base_cfg, "pollIntervalSeconds": 60}) is not None
           and sync_validated({**base_cfg, "timeoutSeconds": 999}) is not None

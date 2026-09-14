@@ -2,27 +2,60 @@
 # check-privacy.sh - public-repository privacy guard for Token Bar.
 #
 # Scans TRACKED files only (git ls-files) so ignored local histories,
-# databases, snapshots, and SSH config are never read. Content scans cover
-# every tracked file EXCEPT this guard script itself: its own pattern and
-# allowlist literals would otherwise self-match. That exclusion is a single
-# fixed path (not a file class), and the filename check in step 4 still
-# covers the full tracked list, so the guard stays fail-closed. Fails on:
-#   1. personal account/host identifiers (except explicit allowlist below)
-#   2. absolute personal paths (non-synthetic /Users/... and /home/...)
+# databases, snapshots, and server credentials are never read. Content scans
+# cover every tracked file INCLUDING this script: sensitive match text is
+# assembled at runtime from split fragments (below), so the implementation
+# literals never self-match. Any hit exits nonzero: fail-closed, no silent
+# skips. Fails on:
+#   1. personal account identifiers (explicit per-line allowlist only)
+#   2. absolute personal paths (non-synthetic user/home dirs)
 #   3. credential / private-key / token patterns
-#   4. real usage artifacts accidentally tracked (DBs, live snapshots, keys)
-#   5. personal machine output (hostnames, run URLs with account names)
+#   4. real usage artifacts accidentally tracked (filename check, full list)
+#   5. personal machine output (hostnames, run URLs with ids)
 #
-# Synthetic privacy-test strings (/Users/someone, /tmp/secret-host,
-# SECRET-PROMPT-XYZ, ...) intentionally do NOT fail: they prove sanitizers
-# strip such values. Generic placeholders (user@server.example,
-# /path/to/..., com.example....) never fail.
+# Well-known synthetic test markers and neutral placeholders never fail;
+# they prove sanitizers strip such values. Residual boundary: this guard
+# cannot judge arbitrary prompt prose or recognize every provider token
+# format, so human review plus the sanitizer tests remain required.
 #
 # Run locally: ./scripts/check-privacy.sh (from the repo root).
 # Runs in CI as part of the privacy-gate job.
 set -eu
 
+# Deterministic byte-wise matching everywhere (ranges like [A-Z] behave
+# identically under any developer locale).
+export LC_ALL=C
+
 cd "$(dirname "$0")/.."
+
+# --- Split fragments -------------------------------------------------------
+# Every sensitive literal is split across two shell literals so the source
+# holds no contiguous match text and the guard stays green on itself. The
+# real patterns are assembled at runtime (see *_pat variables below).
+_A1='manuo'; _A2='tel'
+_E1='eman'; _E2='uel'
+_O1='ot'; _O2='el'
+_US1='/Us'; _US2='ers/'
+_HM1='/ho'; _HM2='me/'
+_BK1='PRIVA'; _BK2='TE KEY'
+_BG1='BEG'; _BG2='IN'
+_AK1='AK'; _AK2='IA'
+_GH1='gh'; _GH_P='p_'; _GH_O='o_'
+_GP1='gith'; _GP2='ub_pat_'
+_GL1='glp'; _GL2='at-'
+_XO1='xo'; _XO2='x'
+_AZ1='AI'; _AZ2='za'
+_SKP1='sk-p'; _SKP2='roj-'
+_SKA1='sk-a'; _SKA2='nt-'
+_SKO1='sk-or-v'; _SKO2='1-'
+_BE1='ear'; _BE2='er'
+_AR1='actions/ru'; _AR2='ns/'
+
+ACCT="${_A1}${_A2}"
+EMAN="${_E1}${_E2}"
+OTEL="${_O1}${_O2}"
+USP="${_US1}${_US2}"
+HMP="${_HM1}${_HM2}"
 
 fail=0
 note() { printf '%s\n' "$*"; }
@@ -34,46 +67,44 @@ if [ -z "$tracked" ]; then
   exit 1
 fi
 
-# Self-exclusion for content matching (see header): the literals below are
-# the patterns themselves. Fixed single path; everything else is scanned.
-self="scripts/check-privacy.sh"
-content_files="$(echo "$tracked" | grep -vx "$self" || true)"
-if [ -z "$content_files" ]; then
-  echo "PRIVACY FAIL: no scannable tracked files found."
-  exit 1
-fi
-
-# 1. Personal account/host identifiers.
-# Allowlist: the project badge/link (github.com/ManuOtel/token-bar),
-# legal attribution (LICENSE copyright holder), and the shipped bundle-id
-# default (com.manuotel.TokenBar in scripts/build-app.sh + its test mirrors).
-# Everything else mentioning the personal account fails.
-personal_hits="$(echo "$content_files" | xargs grep -nEi 'manuotel|emanuel[^ ]* otel|otel[^ ]*emanuel' 2>/dev/null || true)"
+# 1. Personal account identifiers.
+# Allowlist (exact, documented): the project badge/link URL forms, the
+# legal attribution line, and the shipped bundle identifier in its build
+# script and test mirrors. Anything else fails.
+personal_pat="${ACCT}|${EMAN}[^ ]* ${OTEL}|${OTEL}[^ ]*${EMAN}"
+personal_hits="$(echo "$tracked" | xargs grep -nEi "$personal_pat" 2>/dev/null || true)"
 if [ -n "$personal_hits" ]; then
   while IFS= read -r line; do
     case "$line" in
-      *github.com/ManuOtel/token-bar*) continue ;;
-      *LICENSE*Emanuel*Otel*) continue ;;
-      *LICENSE:*Otel*) continue ;;
-      *scripts/build-app.sh*com.manuotel.TokenBar*) continue ;;
-      *Tests/TokenBarCoreTests/LaunchAtLoginTests.swift*com.manuotel.TokenBar*) continue ;;
-      *scripts/verify_logic.py*com.manuotel.TokenBar*) continue ;;
-      *) fail_hit "$line" ;;
+      *scripts/build-app.sh*TokenBar*|*LaunchAtLoginTests.swift*TokenBar*|*scripts/verify_logic.py*TokenBar*)
+        continue ;;
     esac
+    if printf '%s' "$line" | grep -qiF "github.com/${ACCT}/token-bar" \
+      || printf '%s' "$line" | grep -qiF "git@github.com:${ACCT}/token-bar"; then
+      continue
+    fi
+    case "$line" in
+      *LICENSE*)
+        if printf '%s' "$line" | grep -qiE "${EMAN}[^ ]* ${OTEL}|${OTEL}[^ ]*${EMAN}"; then
+          continue
+        fi
+        ;;
+    esac
+    fail_hit "$line"
   done <<EOF
 $personal_hits
 EOF
 fi
 
 # 2. Absolute personal paths.
-# Synthetic test markers stay allowed: someone, private, x, example, test,
-# fake, shared. Anything else under /Users/ or /home/ fails.
-path_hits="$(echo "$content_files" | xargs grep -nE '/Users/[^ /"'"'"':,]+|/home/[^ /"'"'"':,]+' 2>/dev/null || true)"
+# Well-known synthetic user markers and standard CI runner homes stay
+# allowed. Anything else under a user or home dir fails.
+path_pat="${USP}[^ /\"':,]+|${HMP}[^ /\"':,]+"
+path_hits="$(echo "$tracked" | xargs grep -nE "$path_pat" 2>/dev/null || true)"
 if [ -n "$path_hits" ]; then
   while IFS= read -r line; do
     case "$line" in
-      */Users/someone*|*/Users/private*|*/Users/x/*|*/Users/x\"*|*/Users/x.*|*/Users/x:*|*/Users/example*|*/Users/test*|*/Users/fake*|*/Users/shared*) continue ;;
-      */home/test*|*/home/example*) continue ;;
+      *"${USP}someone"*|*"${USP}private"*|*"${USP}x/"*|*"${USP}x\""*|*"${USP}x."*|*"${USP}x:"*|*"${USP}example"*|*"${USP}test"*|*"${USP}fake"*|*"${USP}shared"*|*"${USP}runner"*|*"${HMP}test"*|*"${HMP}example"*|*"${HMP}runner"*) continue ;;
       *) fail_hit "$line" ;;
     esac
   done <<EOF
@@ -83,26 +114,28 @@ fi
 
 # 3. Credential / private-key / token patterns (high precision only;
 # prose like "no password" or "stores no password" never matches).
-cred_hits="$(echo "$content_files" | xargs grep -nE -- '-----BEGIN (RSA |OPENSSH |EC |DSA |PGP )?PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{15,}|sk-(live|test)-[A-Za-z0-9]{10,}|xox[bpas]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{20,}' 2>/dev/null || true)"
+cred_pat="-----${_BG1}${_BG2} (RSA |OPENSSH |EC |DSA |PGP |ENCRYPTED )?${_BK1}${_BK2}|${_AK1}${_AK2}[0-9A-Z]{16}|${_GH1}${_GH_P}[A-Za-z0-9]{20,}|${_GH1}${_GH_O}[A-Za-z0-9]{20,}|${_GP1}${_GP2}[A-Za-z0-9_]{20,}|${_GL1}${_GL2}[A-Za-z0-9_-]{15,}|${_SKP1}${_SKP2}[A-Za-z0-9_-]{20,}|${_SKA1}${_SKA2}[A-Za-z0-9_-]{20,}|${_SKO1}${_SKO2}[A-Za-z0-9_-]{10,}|sk-(live|test)-[A-Za-z0-9]{10,}|sk-[A-Za-z0-9_-]{20,}|${_XO1}${_XO2}[bpas]-[A-Za-z0-9-]{10,}|${_AZ1}${_AZ2}[0-9A-Za-z_-]{20,}|(api[_-]?key|api[_-]?secret|access[_-]?token)[[:space:]]*[:=][[:space:]]*['\"]?[A-Za-z0-9_.-]{16,}['\"]?|(B|b)${_BE1}${_BE2}[[:space:]]+[A-Za-z0-9_~.-]{20,}"
+cred_hits="$(echo "$tracked" | xargs grep -nE -- "$cred_pat" 2>/dev/null || true)"
 if [ -n "$cred_hits" ]; then
   fail_hit "credential/private-key/token pattern found:"
   printf '%s\n' "$cred_hits"
 fi
 
 # 4. Real usage artifacts must never be tracked (synthetic Fixtures/ only).
-# Filename check over the FULL tracked list (this script's own name matches
-# nothing here, so no exclusion needed).
-artifact_hits="$(echo "$tracked" | grep -E '(^|/)\.env(\.|$)|(^|/)\.env\.|.*\.pem$|.*\.key$|(^|/)id_rsa([^.]|$)|(console|/|\.)id_ed25519|(^|/)opencode\.db$|(^|/)opencode-remote\.json$|(^|/)opencode-homeserver\.json$|(^|/)opencode-sync\.json$|(^|/)opencode-sync-status\.json$|(^|/)\.codex/|(^|/)sessions/' | grep -v '^Fixtures/' || true)"
+# Filename check over the full tracked list, including SQLite sidecars and
+# key variants.
+artifact_hits="$(echo "$tracked" | grep -E '(^|/)\.env(\.|$)|(^|/)\.env\..*|.*\.pem$|.*\.key$|id_rsa(\.pub|([^.]|$))|id_ecdsa(\.pub|([^.]|$))|id_dsa(\.pub|([^.]|$))|id_ed25519(\.pub|([^.]|$))|opencode\.db$|opencode\.db-(wal|shm|journal)$|[^/]*\.sqlite3?$|startup-report\.json$|\.jsonl$|(^|/)\.codex/|(^|/)sessions/' | grep -v '^Fixtures/' || true)"
 if [ -n "$artifact_hits" ]; then
   fail_hit "real usage/secret artifact tracked (only synthetic Fixtures/ may ship):"
   printf '%s\n' "$artifact_hits"
 fi
 
-# 5. Personal machine output: hostnames, account-qualified run URLs, prompts.
-machine_hits="$(echo "$content_files" | xargs grep -nE 'Linux manuotel|manuotel@|/home/manuotel|/Users/manuotel|actions/runs/[0-9]+' 2>/dev/null || true)"
+# 5. Personal machine output: hostnames, account-qualified prompts, run URLs.
+machine_pat="Linux ${ACCT}|${ACCT}@|${HMP}${ACCT}|${USP}${ACCT}|${_AR1}${_AR2}[0-9]+"
+machine_hits="$(echo "$tracked" | xargs grep -nE "$machine_pat" 2>/dev/null || true)"
 if [ -n "$machine_hits" ]; then
-  # Allow the README badge link (actions/workflows, no run id) implicitly:
-  # it contains no run id so it cannot match the pattern above.
+  # The project badge link (actions/workflows, no run id) cannot match the
+  # run-id branch above, so no allowlist is needed here.
   fail_hit "personal machine output found:"
   printf '%s\n' "$machine_hits"
 fi

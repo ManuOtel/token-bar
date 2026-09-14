@@ -151,9 +151,11 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   trusted user-supplied read-only invocation only; local argv safety does
   not sanitize remote execution. `TokenBarStore.load` then reads that cache as one more
   snapshot input with the shared combine/dedupe, so synced rows land with
-  the endpoint label applied to generic origins (missing or default
-  `remote` become the effective configured label; explicitly distinct and
-  legacy `homeserver` labels are preserved), `source=.opencode` and
+  the endpoint label applied per the stamping rule (every
+  origin/host/hostname/label/machine field scanned in decode precedence;
+  first explicit distinct label canonicalized into `origin`; missing,
+  hostile, or default-`remote` in any case become the effective configured
+  label; legacy `homeserver` preserved), `source=.opencode` and
   aggregation semantics are
   byte-identical to the manual-copy path. New caches are written to
   `opencode-remote.json`; the legacy `opencode-homeserver.json` file is
@@ -170,9 +172,14 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   `TOKENBAR_OPENCODE_SYNC_CACHE` (the auto-synced cache; default
   `Application Support/TokenBar/opencode-remote.json` with legacy
   `opencode-homeserver.json` read as a fallback, silent when
-  absent); sync config/status file locations redirect via
+  absent; an explicit override path is read exactly as set, bypassing the
+  fallback); sync config/status file locations redirect via
   `TOKENBAR_OPENCODE_SYNC_CONFIG` / `TOKENBAR_OPENCODE_SYNC_STATUS`.
   Empty entries are ignored and missing extras warn only.
+  Endpoint labels derive from the sanitized custom `originLabel`, else the
+  sanitized host alias, else `remote` (note: `user@host` aliases are valid
+  for SSH but are not origin-label characters, so they fall back to
+  `remote` unless overridden).
 - **SQLite optional**: the live DB loader compiles only under
   `#if canImport(SQLite3)`; `decodeRow` stays pure and fully tested on hosts
   without SQLite (like this Linux worker).

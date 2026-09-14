@@ -552,8 +552,7 @@ final class OpenCodeSyncTests: XCTestCase {
         XCTAssertEqual(OpenCodeStore.decodeSnapshotRecord(byId["opencode:legacy"]!)?.origin, "homeserver")
     }
 
-    func testApplyEffectiveOriginEmptyPassesThrough() throws {
-        let empty = Data("[]".utf8)
+    func testApplyEffectiveOriginEmptyPassesThrough() throws {        let empty = Data("[]".utf8)
         XCTAssertEqual(try OpenCodeSync.applyEffectiveOrigin(to: empty, effectiveLabel: "myserver"), empty)
     }
 
@@ -575,6 +574,64 @@ final class OpenCodeSyncTests: XCTestCase {
         let byId = try stampedOrigins(
             [stampRecord(origin: nil, id: "opencode:u")], label: "evil/x\ny")
         XCTAssertEqual(byId["opencode:u"]?["origin"] as? String, "remote")
+    }
+
+    func testApplyEffectiveOriginScansAllFields() throws {
+        // All origin-ish fields are scanned in decode precedence: an
+        // explicit label in any field beats a generic `origin`, and the
+        // generic default counts case-insensitively.
+        func multi(_ fields: [String: String], id: String) -> [String: Any] {
+            var dict: [String: Any] = [
+                "id": id, "source": "opencode",
+                "timestamp": "2026-09-12T10:00:00Z", "model": "m",
+                "inputTokens": 100, "outputTokens": 50,
+                "sessionId": "s", "requestId": id,
+            ]
+            for (key, value) in fields { dict[key] = value }
+            return dict
+        }
+        let byId = try stampedOrigins([
+            multi(["origin": "remote", "host": "office"], id: "opencode:host-wins"),
+            multi(["origin": "REMOTE"], id: "opencode:upper-remote"),
+            multi(["host": "office"], id: "opencode:host-only"),
+            multi(["origin": "office", "host": "remote"], id: "opencode:origin-precedence"),
+            multi(["origin": "evil/x", "host": "office"], id: "opencode:hostile-origin"),
+            multi(["origin": "homeserver", "host": "office"], id: "opencode:legacy-precedence"),
+        ], label: "myserver")
+        XCTAssertEqual(byId["opencode:host-wins"]?["origin"] as? String, "office")
+        XCTAssertEqual(byId["opencode:upper-remote"]?["origin"] as? String, "myserver")
+        XCTAssertEqual(byId["opencode:host-only"]?["origin"] as? String, "office")
+        XCTAssertEqual(byId["opencode:origin-precedence"]?["origin"] as? String, "office")
+        XCTAssertEqual(byId["opencode:hostile-origin"]?["origin"] as? String, "office")
+        XCTAssertEqual(byId["opencode:legacy-precedence"]?["origin"] as? String, "homeserver")
+        // Canonicalization agrees with decode: the stored `origin` key wins.
+        XCTAssertEqual(
+            OpenCodeStore.decodeSnapshotRecord(byId["opencode:host-wins"]!)?.origin, "office")
+    }
+
+    func testCacheURLToLoadBranches() throws {
+        // Isolated support directory: never touches real user paths.
+        let dir = tempDir()
+        let support = dir.appendingPathComponent("Support", isDirectory: true)
+        try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        let generic = support.appendingPathComponent(OpenCodeSync.cacheFileName)
+        let legacy = support.appendingPathComponent(OpenCodeSync.legacyCacheFileName)
+        // Neither exists: the generic destination (missing stays silent).
+        XCTAssertEqual(OpenCodeSync.cacheURLToLoad(supportDirectory: support), generic)
+        // Only legacy: upgrades keep their last good pull.
+        try Data("old".utf8).write(to: legacy)
+        XCTAssertEqual(OpenCodeSync.cacheURLToLoad(supportDirectory: support), legacy)
+        // Both exist: the generic cache wins.
+        try Data("new".utf8).write(to: generic)
+        XCTAssertEqual(OpenCodeSync.cacheURLToLoad(supportDirectory: support), generic)
+    }
+
+    func testCacheURLToLoadOverrideBypassesFallback() {
+        // An explicit override is read exactly as set: no fallback lookup.
+        let custom = tempDir().appendingPathComponent("custom.json")
+        setenv("TOKENBAR_OPENCODE_SYNC_CACHE", custom.path, 1)
+        defer { unsetenv("TOKENBAR_OPENCODE_SYNC_CACHE") }
+        XCTAssertEqual(OpenCodeSync.cacheURLToLoad().path, custom.path)
     }
 
     func testSyncStampsEffectiveOriginIntoCache() async throws {

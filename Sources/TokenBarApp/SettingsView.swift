@@ -185,7 +185,7 @@ struct SettingsView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.caption)
                 .onSubmit { sync.saveConfig() }
-                .help("Label for rows from this host (letters, digits, ., _, -; max 64). Snapshots exported without a label, or with the default remote label, are stored under it; rows with an explicit distinct label keep it, including legacy homeserver. Blank derives it from the SSH host alias, else remote.")
+                .help("Label for rows from this host (letters, digits, ., _, -; max 64). Every origin/host/hostname/label/machine field is scanned: the first explicit distinct label wins (an explicit host beats a default origin); records with no explicit label, or the default remote label in any case, are stored under this label. Legacy homeserver labels are preserved. Blank derives it from the SSH host alias, else remote (note: user@host aliases are valid for SSH but fall back to remote as a label; set an explicit label to keep that name).")
                 .accessibilityLabel("Origin label, optional")
                 Stepper(
                     "Every \(sync.config.pollIntervalSeconds / 60) min",

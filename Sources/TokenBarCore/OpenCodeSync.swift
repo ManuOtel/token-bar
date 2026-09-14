@@ -115,9 +115,24 @@ public enum OpenCodeSync {
         if let override = cachePathOverride, !override.isEmpty {
             return URL(fileURLWithPath: override)
         }
-        let current = defaultCacheURL(fileManager: fileManager)
+        return cacheURLToLoad(
+            supportDirectory: supportDirectory(fileManager: fileManager),
+            fileManager: fileManager)
+    }
+
+    /// Isolated resolution behind `cacheURLToLoad`: the generic cache wins
+    /// when present, else the legacy pre-rename file, else the generic
+    /// destination. Takes the support directory explicitly so tests can use
+    /// temporary directories instead of real user paths. An explicit
+    /// `TOKENBAR_OPENCODE_SYNC_CACHE` override bypasses this fallback
+    /// entirely (handled above: the override path is read exactly as set).
+    public static func cacheURLToLoad(
+        supportDirectory: URL,
+        fileManager: FileManager = .default
+    ) -> URL {
+        let current = supportDirectory.appendingPathComponent(cacheFileName)
         if fileManager.fileExists(atPath: current.path) { return current }
-        let legacy = legacyCacheURL(fileManager: fileManager)
+        let legacy = supportDirectory.appendingPathComponent(legacyCacheFileName)
         if fileManager.fileExists(atPath: legacy.path) { return legacy }
         return current
     }
@@ -236,14 +251,18 @@ public enum OpenCodeSync {
     /// distinguishes this endpoint in `byOrigin`.
     ///
     /// Rule (also stated in the Settings help + README):
-    /// - Records with a missing, empty, hostile, or default-`remote`
-    ///   embedded origin get `effectiveLabel`. The default exporter origin
-    ///   (`remote`) is not distinctive, so it is replaced; an empty snapshot
-    ///   (`[]`) passes through byte-identical.
-    /// - Records carrying an explicitly distinct allowlisted label (a custom
-    ///   per-host value, `local`, or legacy `homeserver`) keep it, so
-    ///   per-host snapshots stay distinguishable and pre-rename payloads
-    ///   keep loading unchanged.
+    /// - Every `origin`/`host`/`hostname`/`label`/`machine` field is scanned
+    ///   in decode precedence; the first explicitly distinct allowlisted
+    ///   label wins and is canonicalized into the `origin` key. So when
+    ///   `origin` is the default `remote` (any case) but `host` names an
+    ///   explicit endpoint, that explicit label is stored.
+    /// - Records with no explicit label anywhere (missing, empty, hostile,
+    ///   or default-`remote` in every field) get `effectiveLabel`. An empty
+    ///   snapshot (`[]`) passes through byte-identical.
+    /// - Explicitly distinct labels (custom per-host values, `local`, and
+    ///   the legacy pre-rename label) are preserved, so per-host snapshots
+    ///   stay distinguishable and pre-rename payloads keep loading
+    ///   unchanged.
     /// - Only the `origin` key is ever set; every other key (token counts,
     ///   timestamps, ids) passes through untouched, and no non-token content
     ///   is read or written. The applied label is allowlisted, so hostile
@@ -267,14 +286,16 @@ public enum OpenCodeSync {
             var lowered: [String: Any] = [:]
             lowered.reserveCapacity(record.count)
             for (key, value) in record { lowered[key.lowercased()] = value }
-            let embedded = ["origin", "host", "hostname", "label", "machine"]
+            // First explicitly distinct label in decode precedence; the
+            // generic default (any case) and hostile values do not count.
+            let distinct = ["origin", "host", "hostname", "label", "machine"]
                 .lazy
                 .compactMap { lowered[$0] as? String }
-                .first(where: { !$0.isEmpty }) ?? ""
-            let kept = OpenCodeStore.sanitizeOriginLabel(embedded, fallback: "")
-            if kept.isEmpty || kept == defaultOrigin {
-                record["origin"] = label
-            }
+                .map { OpenCodeStore.sanitizeOriginLabel($0, fallback: "") }
+                .first(where: OpenCodeSync.isDistinctLabel)
+            // Explicit endpoints canonicalize into `origin` (which decode
+            // reads first); generic records take the endpoint label.
+            record["origin"] = distinct ?? label
             return record
         }
         guard let output = try? JSONSerialization.data(
@@ -282,6 +303,16 @@ public enum OpenCodeSync {
               output.count <= maxSnapshotBytes
         else { throw OpenCodeSyncError.invalidSnapshot }
         return output
+    }
+
+    /// An explicitly distinct endpoint label: allowlisted and non-empty, and
+    /// not the generic default (compared case-insensitively, so `REMOTE`
+    /// counts as generic). The legacy pre-rename label always counts as
+    /// distinct, keeping pre-rename payloads on their original attribution.
+    static func isDistinctLabel(_ kept: String) -> Bool {
+        guard !kept.isEmpty else { return false }
+        if kept == legacyOrigin { return true }
+        return kept.lowercased() != defaultOrigin.lowercased()
     }
 
     // MARK: - Atomic cache replacement
@@ -759,11 +790,10 @@ public struct OpenCodeSyncService: @unchecked Sendable {
             guard OpenCodeSync.validateSnapshotData(data) else {
                 throw OpenCodeSyncError.invalidSnapshot
             }
-            // Stamp the endpoint label onto generic origins (missing or
-            // default `remote`) so the configured label takes effect;
-            // explicit distinct and legacy labels are preserved by the
-            // rule in `applyEffectiveOrigin`. Re-validated: any failure
-            // preserves the last good cache.
+            // Stamp the endpoint label per `applyEffectiveOrigin` (every
+            // origin-ish field scanned; explicit distinct and legacy labels
+            // preserved, generic records take the configured label).
+            // Re-validated: any failure preserves the last good cache.
             let stamped = try OpenCodeSync.applyEffectiveOrigin(
                 to: data, effectiveLabel: config.effectiveOriginLabel)
             guard OpenCodeSync.validateSnapshotData(stamped) else {

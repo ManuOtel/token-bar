@@ -130,10 +130,15 @@ Overrides for testing: `TOKENBAR_CODEX_ROOT`, `TOKENBAR_OPENCODE_DB`,
 host alias (from your existing `~/.ssh/config`, for example `myserver`)
 plus either the remote snapshot path or a remote exporter command, plus an
 optional origin label (for example `myserver`; blank derives it from the
-host alias, else `remote`). After a successful pull, rows exported without
-a label (or with the default `remote` label) are stored under the effective
-label, so the endpoint stays distinguishable; rows with an explicitly
-distinct label keep it, including legacy `homeserver`. The app
+host alias, else `remote`). After a successful pull, every
+`origin`/`host`/`hostname`/`label`/`machine` field is scanned in decode
+precedence: the first explicitly distinct label wins and is stored as the
+row's origin (so an explicit `host` beats a default `origin`); rows with
+no explicit label, or the default `remote` label in any case, are stored
+under the effective label, so the endpoint stays distinguishable. Legacy
+`homeserver` labels are preserved. Note: `user@host` aliases are valid
+for SSH but fall back to `remote` as a label; set an explicit label to
+keep that name. The app
 pulls at startup, on `Sync Now`, and on a background interval (default 15
 min, 5 min to 24 h), then reloads usage. The CLI equivalent is
 `--sync-now`. Auth comes from your own SSH setup (keys/agent); the config
@@ -335,7 +340,9 @@ CI (`.github/workflows/ci.yml`, runs on `main` and PRs) mirrors this split:
   `./scripts/check-privacy.sh`, which scans tracked files only for
   personal paths, account/host identifiers, credential patterns, real
   usage artifacts, and machine output (synthetic `/Users/someone`-style
-  test strings stay allowed).
+  test strings stay allowed). Residual boundary: the guard cannot judge
+  arbitrary prompt prose or recognize every provider token format, so
+  human review plus the sanitizer tests remain required.
 
 Covers: Codex valid/alias/nested/type-gate/malformed/epoch/unknown-model,
 OpenCode column-form/legacy/JSON-blob/missing-timestamp/no-counts/fallback/
