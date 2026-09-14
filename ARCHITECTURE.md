@@ -24,6 +24,9 @@ Sources/TokenBarCore/   # pure logic, Foundation only (no network, no auth)
                         # cancellable, user-initiated catalog GET + disk cache
   Aggregator.swift      # filter / aggregate / bestMonth / dailyTrend (pure, clock-injected)
   Store.swift           # orchestrates adapters, env overrides, deterministic dedupe
+  StartupReportCache.swift # privacy-safe startup envelope (versioned LoadReport
+                         # + sanitized warnings, atomic Application Support
+                         # write) + StartupRefreshState generation guard
   Report.swift          # privacy-safe CLI sections: sanitize, human + JSON render (pure)
 Sources/TokenBarCLI/    # thin terminal front-end (Foundation only)
   main.swift            # --preset/--source/--all-presets/--json/--refresh-pricing

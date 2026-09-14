@@ -263,6 +263,7 @@ Dark usage cockpit in the macOS menu bar popover (400pt, macOS 14 SwiftUI, no ex
 - Charts are custom SwiftUI (`DashboardCharts.swift`: ring, stacked bar, model bars, daily bars) fed by `DashboardInsights` shares in `TokenBarCore`. Cached and reasoning tokens never render as extra ring slices.
 - Preserved in both modes: source/range filtering, refresh button + loading state, empty-range states (with one-tap jumps to All sources / Lifetime), sanitized warnings (never paths), the OpenCode combined total plus local vs homeserver sub-lines when both origins are present, best-month key, last-updated line, and launch-at-login (`SMAppService.mainApp`; disabled dev-run copy under `swift run`).
 - Below the dashboard, a pricing footer shows the rate basis (`Pricing: ...` line) with an `Update pricing` button (user-initiated catalog GET, cancellable, offline-safe) and any refresh error. It never blocks usage loading.
+- **Startup cache (perceived startup only):** the app shows the last normalized report from `~/Library/Application Support/TokenBar/startup-report.json` immediately, marks it `Showing previous data - updating…` while the full history scan runs in the background, then atomically replaces it with fresh data. Cached values are previous normalized data until the background refresh finishes; the first-ever load with no cache still depends on source size and shows the loading state. Only token counts, model/source/origin labels, counters, and sanitized warnings are cached (no prompts, message bodies, tool I/O, file paths, or credentials).
 
 ## Testing
 
@@ -305,6 +306,7 @@ boundary of the catalog GET, malformed catalog rejection, fixtures under
 
 ## Limitations
 
+- Startup cache is perceived startup only: cached values are previous normalized data until the background refresh finishes. First-ever load with no cache still depends on source size (large Codex trees dominate).
 - Estimates only: the static table drifts from provider lists; the opt-in
   catalog refresh (`Update pricing` / `--refresh-pricing`, OpenRouter
   metadata) narrows the drift for listed models but stays an estimate, and

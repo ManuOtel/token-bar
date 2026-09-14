@@ -189,6 +189,45 @@ Method, split strictly:
   `loadSnapshot` wall time before/after on the same snapshot file; do not
   claim numbers without rerunning there.
 
+## Attempted improvement (slice 5, this branch, perceived startup only)
+
+`TokenBarApp` started empty and blocked the menu on the full history scan
+(about 14s on a large host after the parser slices). Every refresh repeated
+the scan.
+
+Change (`perf/startup-report-cache`):
+
+- New `StartupReportCache` (`Sources/TokenBarCore/StartupReportCache.swift`):
+  versioned `{version,savedAt,report}` envelope in
+  `Application Support/TokenBar/startup-report.json` (override
+  `TOKENBAR_STARTUP_REPORT_CACHE` in tests), atomic write with parent-dir
+  creation. Only the normalized `LoadReport` plus sanitized warnings is
+  stored; corrupt or version-mismatched files are ignored and write
+  failures never break a fresh load.
+- `TokenBarApp` shows the cached report immediately, marks it
+  `Showing previous data - updating…` while the existing
+  `TokenBarStore.load` runs off-main, then publishes the fresh report with
+  a generation guard (last-write-wins) and refreshes the cache. First
+  appearance triggers exactly one background refresh even with cached
+  records; menu opens never refresh; the refresh button stays manual and
+  disabled while loading. First run with no cache keeps empty + loading.
+- No token-total, source/origin/model, pricing-precedence, or dashboard
+  semantics change: costs still derive per render from the live pricing
+  snapshot.
+
+Tests (`Tests/TokenBarCoreTests/StartupReportCacheTests.swift`, hermetic,
+no network, no timing): round-trip totals/labels plus aggregate parity,
+missing/wrong-version/corrupt/truncated rejection, no raw-path or
+prompt-shaped field retention in the encoded file, and
+`StartupRefreshState` once-only initial plus stale-generation drop.
+`scripts/verify_logic.py` mirrors the envelope and generation checks.
+
+Method: perceived-startup improvement only. Cached values are previous
+normalized data until the background refresh finishes. First-ever load
+still depends on source size. No wall-clock is claimed here: measure on
+Mac by comparing time-to-first-paint before/after on the same large tree;
+do not claim numbers without rerunning there.
+
 ## Next safe slices (pure core, behavior-preserving)
 
 1. Per-model price memoization inside aggregate: cache resolved
