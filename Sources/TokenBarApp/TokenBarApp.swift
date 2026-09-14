@@ -49,76 +49,31 @@ struct TokenBarApp: App {
             records: report.records, source: source, preset: preset,
             now: now, snapshot: pricing.snapshot)
         return MenuBarExtra("Tokens \(DashboardSnapshot.menuTitle(forTotal: dash.menuTotalTokens))", systemImage: "chart.bar") {
-            VStack(alignment: .leading, spacing: 0) {
-                DashboardView(
-                    report: $report,
-                    source: $source,
-                    preset: $preset,
-                    stats: dash.stats,
-                    scopedCount: dash.scopedCount,
-                    sourceTotals: dash.sourceTotals.map { entry in
-                        SourceChipData(
-                            filter: entry.filter,
-                            tokens: entry.tokens,
-                            requests: entry.requests
-                        )
-                    },
-                    bestMonthKey: dash.bestMonthKey,
-                    isLoading: $isLoading,
-                    isExpanded: $isExpanded,
-                    isStaleCache: isShowingStaleCache && isLoading && !report.records.isEmpty,
-                    onRefresh: refresh,
-                    onInitialAppear: ensureInitialLoad,
-                    loginItem: loginItem
-                )
-                pricingFooter
-            }
+            DashboardView(
+                report: $report,
+                source: $source,
+                preset: $preset,
+                stats: dash.stats,
+                scopedCount: dash.scopedCount,
+                sourceTotals: dash.sourceTotals.map { entry in
+                    SourceChipData(
+                        filter: entry.filter,
+                        tokens: entry.tokens,
+                        requests: entry.requests
+                    )
+                },
+                bestMonthKey: dash.bestMonthKey,
+                isLoading: $isLoading,
+                isExpanded: $isExpanded,
+                isStaleCache: isShowingStaleCache && isLoading && !report.records.isEmpty,
+                onRefresh: refresh,
+                onInitialAppear: ensureInitialLoad,
+                loginItem: loginItem,
+                pricing: pricing
+            )
             .frame(width: 400, height: isExpanded ? 660 : nil)
         }
         .menuBarExtraStyle(.window)
-    }
-
-    /// Pricing footer: user-initiated refresh only, last-update/source line,
-    /// and an offline/error line. Never blocks usage loading: the refresh
-    /// button only drives `PricingController`, and failures keep the
-    /// previous snapshot (or static estimates) for the cost basis.
-    private var pricingFooter: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Divider()
-            HStack(spacing: 8) {
-                if pricing.isRefreshing {
-                    ProgressView().scaleEffect(0.7)
-                    Text("Updating pricing…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Button("Cancel", action: pricing.cancel)
-                        .buttonStyle(.bordered)
-                        .help("Cancel the in-flight pricing refresh")
-                } else {
-                    Button("Update pricing", action: pricing.refresh)
-                        .buttonStyle(.bordered)
-                        .help("Fetch the public model pricing catalog now (GET only, no usage data sent)")
-                }
-                Spacer()
-            }
-            Text(pricing.statusLine)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            if let error = pricing.lastError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            Text("Costs are estimates, not a bill.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
     private func refresh() {
