@@ -4,16 +4,16 @@
 # Asserts (no Swift toolchain, no network):
 #   - VERSION is SemVer x.y.z (single source of truth, never bumped here)
 #   - .github/workflows/release.yml exists, parses as YAML when PyYAML is
-#     available, triggers on version tags, keeps least-privilege permissions
-#     (top-level read, job-scoped write for the release only)
+#     available, triggers exactly on the version-tag shape, keeps exactly
+#     one read default plus one job-scoped write widening
 #   - the workflow validates the pushed tag against VERSION, runs swift build
 #     plus swift test, builds with VERSION plus the monotonic workflow build
 #     number, packages with the existing scripts, verifies the checksum,
-#     stages stable latest aliases, and publishes versioned plus latest
-#     assets with no extra secrets and no shell/credential use
-#   - README.md and docs/MACOS_PACKAGING.md expose the stable latest
-#     download URL, checksum verification, release tag steps, and the
-#     unsigned/not-notarized Gatekeeper note
+#     stages stable latest aliases, and uploads all four versioned plus
+#     latest assets with no extra secrets and no shell/credential use
+#   - README.md and docs/MACOS_PACKAGING.md expose both stable latest
+#     downloads as Markdown links, checksum verification, release tag
+#     steps, and the unsigned/not-notarized Gatekeeper note
 #
 # Run: ./scripts/test-release.sh (from the repo root).
 set -eu
@@ -64,26 +64,28 @@ else
   fi
 fi
 
-# --- 4. Tag trigger, permissions, platform ---
-if grep -Eq 'tags:' "$WF" && grep -Eq 'v\[0-9\]|v\*|v0|\"v' "$WF"; then
-  ok "release workflow triggers on version tags"
+# --- 4. Exact trigger shape, exact permission arrangement, platform ---
+if grep -Fq -e '- "v[0-9]*.[0-9]*.[0-9]*"' "$WF" \
+  && [ "$(grep -c -e 'tags:' "$WF" || true)" -eq 1 ] \
+  && [ "$(grep -c -e 'v\[0-9\]' "$WF" || true)" -eq 1 ]; then
+  ok "release workflow triggers exactly on the version-tag shape"
 else
-  bad "release workflow triggers on version tags" "missing tags: v pattern"
+  bad "release workflow triggers exactly on the version-tag shape" "expected a single tags entry: - \"v[0-9]*.[0-9]*.[0-9]*\""
 fi
 if grep -Eq 'runs-on:.*macos-14' "$WF"; then
   ok "release workflow runs on macOS"
 else
   bad "release workflow runs on macOS" "missing runs-on: macos-14"
 fi
-if grep -Eq '^[[:space:]]*permissions:[[:space:]]*$' "$WF" && grep -Eq 'contents:[[:space:]]*read' "$WF"; then
-  ok "release workflow defaults to least-privilege read"
+# Count effective (non-comment) config lines so prose comments can never
+# satisfy the arrangement check.
+WF_CODE="$(grep -v -e '^[[:space:]]*#' "$WF")"
+if [ "$(printf '%s\n' "$WF_CODE" | grep -c -e '^ *permissions: *$' || true)" -eq 2 ] \
+  && [ "$(printf '%s\n' "$WF_CODE" | grep -c -e 'contents: *read' || true)" -eq 1 ] \
+  && [ "$(printf '%s\n' "$WF_CODE" | grep -c -e 'contents: *write' || true)" -eq 1 ]; then
+  ok "release workflow has one read default plus one write widening"
 else
-  bad "release workflow defaults to least-privilege read" "missing top-level contents: read"
-fi
-if grep -Eq 'contents:[[:space:]]*write' "$WF"; then
-  ok "release job widens to contents write for the release"
-else
-  bad "release job widens to contents write for the release" "missing job contents: write"
+  bad "release workflow has one read default plus one write widening" "expected 2 permissions blocks with 1 contents: read and 1 contents: write"
 fi
 if grep -Eq 'contents:[[:space:]]*write-all|permissions:[[:space:]]*write-all|admin' "$WF"; then
   bad "release workflow avoids over-broad permissions" "found write-all/admin"
@@ -146,6 +148,18 @@ if grep -Eq 'gh release create' "$WF"; then
 else
   bad "release workflow creates the GitHub Release" "missing gh release create"
 fi
+# All four files must ride on the gh release create invocation itself, not
+# merely appear somewhere in the workflow.
+RELEASE_BLOCK="$(sed -n '/gh release create/,/TokenBar-latest-macos\.zip\.sha256/p' "$WF")"
+if [ -n "$RELEASE_BLOCK" ] \
+  && printf '%s\n' "$RELEASE_BLOCK" | grep -Fq -e 'TokenBar-$VERSION-macos.zip"' \
+  && printf '%s\n' "$RELEASE_BLOCK" | grep -Fq -e 'TokenBar-$VERSION-macos.zip.sha256"' \
+  && printf '%s\n' "$RELEASE_BLOCK" | grep -Fq -e 'TokenBar-latest-macos.zip"' \
+  && printf '%s\n' "$RELEASE_BLOCK" | grep -Fq -e 'TokenBar-latest-macos.zip.sha256"'; then
+  ok "release upload carries all four versioned plus latest assets"
+else
+  bad "release upload carries all four versioned plus latest assets" "gh release create block must list both zips plus both checksums"
+fi
 if grep -Eq '0\.3\.0|0\.2\.0|0\.1\.0' "$WF"; then
   bad "release workflow consumes VERSION instead of hardcoding" "found hardcoded release number"
 else
@@ -170,12 +184,17 @@ else
   ok "release workflow stays offline-safe"
 fi
 
-# --- 9. Public docs: download link, checksum, Gatekeeper note, release steps ---
+# --- 9. Public docs: Markdown download links, checksum, Gatekeeper note, release steps ---
 for doc in "$README" "$PACKAGING"; do
-  if grep -Eq 'releases/latest/download/TokenBar-latest-macos\.zip' "$doc"; then
-    ok "$doc links the stable latest download"
+  if grep -Eq '\]\(https?://[^)]*releases/latest/download/TokenBar-latest-macos\.zip\)' "$doc"; then
+    ok "$doc links the stable latest zip as Markdown"
   else
-    bad "$doc links the stable latest download" "missing releases/latest/download URL"
+    bad "$doc links the stable latest zip as Markdown" "missing [label](...TokenBar-latest-macos.zip) link"
+  fi
+  if grep -Eq '\]\(https?://[^)]*releases/latest/download/TokenBar-latest-macos\.zip\.sha256\)' "$doc"; then
+    ok "$doc links the stable latest checksum as Markdown"
+  else
+    bad "$doc links the stable latest checksum as Markdown" "missing [label](...TokenBar-latest-macos.zip.sha256) link"
   fi
   if grep -Eq 'shasum -a 256 -c' "$doc"; then
     ok "$doc documents checksum verification"
