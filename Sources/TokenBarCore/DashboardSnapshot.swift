@@ -102,15 +102,12 @@ public struct DashboardSnapshot: Hashable, Sendable {
             menuTotalTokens: stats.totalTokens, sourceTotals: chips, bestMonthKey: nil)
     }
 
-    /// Menu-bar title formatting, extracted unchanged from `TokenBarApp`:
-    /// `%.2fM` over 1M, `%.1fk` over 1k, else the raw count.
+    /// Menu-bar title formatting. Delegates to the shared
+    /// `TokenCountFormat.compact` so the menu title, source chips/rows, ring
+    /// legends, model bars, and every other compact count share one unit
+    /// contract (raw, k, M, B, T with rounding promotion at each boundary).
     public static func menuTitle(forTotal total: Int) -> String {
-        if total >= 1_000_000 {
-            return String(format: "%.2fM", Double(total) / 1_000_000.0)
-        } else if total >= 1_000 {
-            return String(format: "%.1fk", Double(total) / 1_000.0)
-        }
-        return "\(total)"
+        TokenCountFormat.compact(total)
     }
 
     /// Single unsorted pass for the four chip totals. Uses the same date
