@@ -67,11 +67,12 @@ public enum CodexParser {
     }
 
     public static func parseFile(at url: URL) -> Result {
-        // Bounded-memory stream: one 64 KiB chunk plus the longest line in
-        // flight, never the whole file plus a line array. Line-by-line
-        // semantics match the old String/components path for LF files;
-        // CRLF fallback ids are dense (see JSONLLineReader). Any unreadable
-        // or non-UTF-8 file keeps the old whole-file ([], 0) result.
+        // Bounded-memory stream: two fixed 64 KiB buffers plus the longest
+        // line in flight, never the whole file plus a line array. Splitting
+        // and numbering match the old String/components path exactly
+        // (including CRLF phantom components), so fallback ids are
+        // unchanged. Any unreadable or non-UTF-8 file keeps the old
+        // whole-file ([], 0) result.
         var records: [NormalizedUsage] = []
         var skipped = 0
         // Per-file attribution state: turn exact match first, thread fallback

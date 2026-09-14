@@ -4,10 +4,11 @@
 Compares input materialization of the old parse path
 (`String(contentsOf:)` + `components(separatedBy: .newlines)`: one
 whole-file String plus an array holding every line) against the new
-`JSONLLineReader` path (one fixed 64 KiB chunk plus the longest single
-line in flight). No wall-clock is measured, so this is CI-safe and
-timing-flake free. Parsed records are identical work on both paths and
-are excluded from the comparison.
+`JSONLLineReader` path (two fixed 64 KiB buffers plus the longest single
+line in flight, with splitting/numbering identical to the old path).
+No wall-clock is measured, so this is CI-safe and timing-flake free.
+Parsed records are identical work on both paths and are excluded from
+the comparison.
 
 Synthetic data only; nothing is read from real session roots.
 """
@@ -43,9 +44,10 @@ def main():
     old_peak = file_bytes + sum(len(line.encode("utf-8")) for line in lines)
     old_line_objects = n_lines + 1  # components array incl. trailing empty
 
-    # New path input peak: fixed chunk + longest line buffer. At most one
-    # line String is live at a time; records output is identical both paths.
-    new_peak = CHUNK_SIZE + max_line
+    # New path input peak: two fixed buffers + longest line buffer. At most
+    # one line String is live at a time; records output is identical both
+    # paths.
+    new_peak = 2 * CHUNK_SIZE + max_line
     new_line_objects = 1
 
     saved = old_peak - new_peak
@@ -55,7 +57,7 @@ def main():
     print(f"file bytes: {file_bytes}")
     print(f"max line bytes: {max_line}")
     print(f"old input peak bytes (file + all lines): {old_peak}")
-    print(f"new input peak bytes (64 KiB chunk + longest line): {new_peak}")
+    print(f"new input peak bytes (2 x 64 KiB buffers + longest line): {new_peak}")
     print(f"saved bytes: {saved} ({pct:.1f}%)")
     print(f"old live line objects: {old_line_objects} vs new: {new_line_objects} "
           f"({old_line_objects - new_line_objects} avoided)")

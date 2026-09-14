@@ -42,10 +42,10 @@ public enum ClaudeParser {
     }
 
     public static func parseFile(at url: URL, fileId: String? = nil) -> Result {
-        // Same bounded-memory stream as Codex: fixed chunk plus longest
-        // line, never the whole file plus a line array. LF numbering is
-        // identical to the old path; CRLF ids are dense (see
-        // JSONLLineReader). Unreadable or non-UTF-8 files keep ([], 0).
+        // Same bounded-memory stream as Codex: fixed buffers plus longest
+        // line, never the whole file plus a line array. Splitting and
+        // numbering match the old path exactly (see JSONLLineReader).
+        // Unreadable or non-UTF-8 files keep ([], 0).
         let label = fileId ?? url.lastPathComponent
         var records: [NormalizedUsage] = []
         var skipped = 0

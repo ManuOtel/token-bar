@@ -35,10 +35,10 @@ final class JSONLStreamingTests: XCTestCase {
 
     // MARK: - Codex CRLF + unterminated + skipped counts
 
-    func testCodexCRLFParsesWithDenseLineNumbers() throws {
-        // Two CRLF-terminated records without request ids: fallback ids
-        // must be dense (:1, :2). The old components(.newlines) path
-        // consumed a phantom empty element per CRLF break (:1, :3).
+    func testCodexCRLFPreservesPhantomLineNumbers() throws {
+        // Exact components(.newlines) parity: each CRLF break yields a
+        // phantom empty component that consumes a line number, so the
+        // second record keeps the old :3 fallback id (not a dense :2).
         let bytes = (codexUsageLine(requestId: nil, input: 10) + "\r\n"
             + codexUsageLine(requestId: nil, input: 20) + "\r\n").data(using: .utf8)!
         let url = try writeTempFile(named: "s.jsonl", bytes: bytes)
@@ -46,7 +46,7 @@ final class JSONLStreamingTests: XCTestCase {
         let result = CodexParser.parseFile(at: url)
         XCTAssertEqual(result.records.count, 2)
         XCTAssertEqual(result.skippedLines, 0)
-        XCTAssertEqual(result.records.map(\.id), ["codex:s.jsonl:1", "codex:s.jsonl:2"])
+        XCTAssertEqual(result.records.map(\.id), ["codex:s.jsonl:1", "codex:s.jsonl:3"])
         XCTAssertEqual(result.records.map(\.inputTokens), [10, 20])
     }
 
@@ -103,9 +103,12 @@ final class JSONLStreamingTests: XCTestCase {
         XCTAssertEqual(backwardResult.skippedLines, 1)
     }
 
-    func testCodexLFAndCRLFParity() throws {
+    func testCodexLFAndCRLFRecordsParitySeparatelyFromIDs() throws {
         // Same logical lines with LF vs CRLF endings decode to identical
-        // records (ids included, since numbering is dense in both now).
+        // records (request ids, models, totals) with identical skipped
+        // counts. Fallback ids for id-less records intentionally differ by
+        // the old CRLF phantom gap (:3 LF vs :5 CRLF); that gap IS the
+        // preserved behavior, pinned here rather than erased.
         let logical = [
             #"{"type":"turn_context","timestamp":"2026-09-10T08:14:00Z","payload":{"turn_id":"t","thread_id":"th","model":"synth-model-parity"}}"#,
             codexUsageLine(requestId: "r-par", input: 11),
@@ -117,17 +120,58 @@ final class JSONLStreamingTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: crlf.deletingLastPathComponent()) }
         let lfResult = CodexParser.parseFile(at: lf)
         let crlfResult = CodexParser.parseFile(at: crlf)
-        XCTAssertEqual(lfResult.records.map(\.id), crlfResult.records.map(\.id))
+        // Records parity: request ids, models, and token math agree.
+        XCTAssertEqual(lfResult.records.map(\.requestId), crlfResult.records.map(\.requestId))
         XCTAssertEqual(lfResult.records.map(\.model), crlfResult.records.map(\.model))
         XCTAssertEqual(lfResult.records.map(\.totalTokens), crlfResult.records.map(\.totalTokens))
         XCTAssertEqual(lfResult.skippedLines, crlfResult.skippedLines)
+        // Fallback-id gap parity: the id-less record sits on component 3
+        // under LF and component 5 under CRLF (phantom empties at 2 and 4).
+        XCTAssertEqual(lfResult.records.map(\.id), ["codex:r-par", "codex:s.jsonl:3"])
+        XCTAssertEqual(crlfResult.records.map(\.id), ["codex:r-par", "codex:s.jsonl:5"])
+    }
+
+    func testLoneCRSeparatorsSplitLikeComponents() throws {
+        // Lone CR (no LF) is a separator under .newlines, not content: if
+        // it were kept inside the line, the whole blob would be one
+        // malformed line and zero records would survive.
+        let bytes = (codexUsageLine(requestId: "r-a", input: 1) + "\r"
+            + "not json" + "\r"
+            + codexUsageLine(requestId: "r-b", input: 2) + "\r").data(using: .utf8)!
+        let url = try writeTempFile(named: "s.jsonl", bytes: bytes)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let result = CodexParser.parseFile(at: url)
+        XCTAssertEqual(result.records.map(\.requestId), ["r-a", "r-b"])
+        XCTAssertEqual(result.skippedLines, 1) // "not json"
+    }
+
+    func testUnicodeNewlineSeparatorsSplit() throws {
+        // VT, FF, NEL, LS, and PS all split under .newlines. Five records
+        // joined only by these separators must decode as five lines, and
+        // the id-less record keeps its exact component fallback id.
+        let nel = "\u{85}"
+        let ls = "\u{2028}"
+        let ps = "\u{2029}"
+        let bytes = (codexUsageLine(requestId: "r-u1", input: 1) + ls
+            + "not json" + nel
+            + codexUsageLine(requestId: nil, input: 3) + ps
+            + codexUsageLine(requestId: "r-u4", input: 4) + "\u{0B}"
+            + codexUsageLine(requestId: "r-u5", input: 5) + "\u{0C}").data(using: .utf8)!
+        let url = try writeTempFile(named: "s.jsonl", bytes: bytes)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let result = CodexParser.parseFile(at: url)
+        XCTAssertEqual(result.records.map(\.id),
+                       ["codex:r-u1", "codex:s.jsonl:3", "codex:r-u4", "codex:r-u5"])
+        XCTAssertEqual(result.skippedLines, 1) // "not json"
     }
 
     // MARK: - Claude streaming parity
 
     func testClaudeCRLFAndUnterminatedParity() throws {
-        // CRLF pair plus an unterminated final line: all three decode, the
-        // id-less fallback stays dense, the user line counts one skip.
+        // CRLF pair plus an unterminated final line: all three logical
+        // lines decode, the user line counts one skip, and the id-less
+        // fallback keeps the exact old component number (:5, with phantom
+        // empties at 2 and 4), not a dense :3.
         let bytes = (claudeLine(id: "msg-a") + "\r\n"
             + #"{"type":"user","timestamp":"2026-09-10T09:00:00Z","message":{}}"# + "\r\n"
             + claudeLine(id: nil, input: 3, output: 2)).data(using: .utf8)! // no trailing newline
@@ -136,7 +180,7 @@ final class JSONLStreamingTests: XCTestCase {
         let result = ClaudeParser.parseFile(at: url, fileId: "c.jsonl")
         XCTAssertEqual(result.records.count, 2)
         XCTAssertEqual(result.skippedLines, 1)
-        XCTAssertEqual(result.records.map(\.id), ["claude:msg-a", "claude:c.jsonl:3"])
+        XCTAssertEqual(result.records.map(\.id), ["claude:msg-a", "claude:c.jsonl:5"])
     }
 
     func testClaudeBlankMalformedSkippedCounts() throws {
@@ -217,8 +261,23 @@ final class JSONLStreamingTests: XCTestCase {
         XCTAssertEqual(result.records.map(\.id), ["codex:s.jsonl:1", "codex:r-tail"])
     }
 
-    func testReaderMissingFileKeepsEmptyResult() {
-        let missing = FileManager.default.temporaryDirectory
+    func testSeparatorSplitAcrossChunkBoundary() throws {
+        // The 3-byte U+2028 separator starts on the last byte of the first
+        // 64 KiB chunk: the reader must hold it via the carry and still
+        // split there. A broken carry would glue the bytes onto the first
+        // line, fail strict UTF-8, and drop the whole file to ([], 0).
+        let filler = String(repeating: "x", count: JSONLLineReader.chunkSize - 1)
+        XCTAssertEqual(filler.data(using: .utf8)!.count, JSONLLineReader.chunkSize - 1)
+        let bytes = (filler + "\u{2028}"
+            + codexUsageLine(requestId: "r-tail", input: 2) + "\n").data(using: .utf8)!
+        let url = try writeTempFile(named: "s.jsonl", bytes: bytes)
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let result = CodexParser.parseFile(at: url)
+        XCTAssertEqual(result.records.map(\.requestId), ["r-tail"])
+        XCTAssertEqual(result.skippedLines, 1) // the filler line is non-JSON
+    }
+
+    func testReaderMissingFileKeepsEmptyResult() {        let missing = FileManager.default.temporaryDirectory
             .appendingPathComponent("tokenbar-missing-\(UUID().uuidString).jsonl")
         XCTAssertEqual(CodexParser.parseFile(at: missing).records.count, 0)
         XCTAssertEqual(CodexParser.parseFile(at: missing).skippedLines, 0)
