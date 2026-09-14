@@ -5,7 +5,7 @@ import TokenBarCore
 ///
 /// Holds the controls that used to sit at the bottom of the main
 /// dashboard: Launch at login, the pricing refresh, and the opt-in
-/// homeserver sync. The main popover stays a compact usage dashboard; this
+/// remote sync. The main popover stays a compact usage dashboard; this
 /// view opens from the gear button in the dashboard header. Sized
 /// deliberately small (~300pt) so it reads as a secondary surface, not a
 /// second dashboard.
@@ -127,11 +127,11 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Homeserver sync (opt-in SSH pull, off by default)
+    // MARK: - Remote sync (opt-in SSH pull, off by default)
 
     private var syncGroup: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("HOMESERVER SYNC")
+            Text("REMOTE SYNC")
                 .font(.caption)
                 .fontWeight(.semibold)
                 .tracking(1.2)
@@ -139,18 +139,18 @@ struct SettingsView: View {
                 .lineLimit(1)
                 .accessibilityHidden(true)
             Toggle(
-                "Homeserver sync",
+                "Remote sync",
                 isOn: Binding(
                     get: { sync.config.enabled },
                     set: { sync.config.enabled = $0; sync.saveConfig() }
                 )
             )
-            .accessibilityLabel("Homeserver sync")
+            .accessibilityLabel("Remote sync")
             if sync.config.enabled {
                 TextField(
                     "SSH host alias",
                     text: textBinding(\.hostAlias),
-                    prompt: Text("SSH host alias (e.g. homeserver)")
+                    prompt: Text("SSH host alias (e.g. myserver)")
                 )
                 .textFieldStyle(.roundedBorder)
                 .font(.caption)
@@ -177,6 +177,16 @@ struct SettingsView: View {
                 .onSubmit { sync.saveConfig() }
                 .help("Trusted read-only exporter command you wrote yourself. It runs through the remote sshd shell with your remote privileges; local argv safety does not sanitize remote execution. Leave empty to copy the snapshot path instead.")
                 .accessibilityLabel("Remote exporter command, optional")
+                TextField(
+                    "Origin label (optional)",
+                    text: textBinding(\.originLabel),
+                    prompt: Text("Origin label (optional, e.g. myserver)")
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.caption)
+                .onSubmit { sync.saveConfig() }
+                .help("Label stored for rows from this host (letters, digits, ., _, -; max 64). Blank derives it from the SSH host alias, else remote. Legacy homeserver labels keep loading.")
+                .accessibilityLabel("Origin label, optional")
                 Stepper(
                     "Every \(sync.config.pollIntervalSeconds / 60) min",
                     value: intervalMinutes, in: 5...1440, step: 5
@@ -200,7 +210,7 @@ struct SettingsView: View {
                             onSyncNow()
                         }
                         .buttonStyle(.bordered)
-                        .help("Pull the homeserver snapshot now over SSH, then reload usage")
+                        .help("Pull the remote snapshot now over SSH, then reload usage")
                     }
                     Spacer()
                 }

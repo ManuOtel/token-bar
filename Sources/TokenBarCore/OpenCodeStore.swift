@@ -426,7 +426,7 @@ public enum OpenCodeStore {
     /// Loads all decodable rows from the SQLite file. Throws
     /// `StoreError.sqliteUnavailable` on platforms without the SQLite3 module.
     /// `origin` labels every returned record (default `"local"`; extra
-    /// homeserver copies use `"homeserver"`).
+    /// remote copies use `"remote"`, legacy `"homeserver"` still loads).
     public static func loadDatabase(at path: String, origin: String = "local") throws -> (records: [NormalizedUsage], skipped: Int) {
 #if canImport(SQLite3)
         return try sqliteLoad(path: path, origin: origin)
@@ -471,7 +471,7 @@ public enum OpenCodeStore {
         "cookie", "cookies", // privacy-denylist
     ]
 
-    /// Loads a sanitized homeserver snapshot: a JSON array of normalized
+    /// Loads a sanitized remote snapshot: a JSON array of normalized
     /// token-only records as written by `scripts/export-opencode-usage.py`.
     /// Accepted per-record keys (camelCase or snake_case): `id`,
     /// `timestamp` (ISO8601 or epoch seconds/millis), `model` (or
@@ -479,15 +479,16 @@ public enum OpenCodeStore {
     /// etc., plus `cached`/`reasoning`/`total`), `sessionId`/`session_id`,
     /// `requestId`/`request_id`/`messageId`, `origin`/`host`/`label`.
     /// `source`, when present, must be `opencode` (other values skip + count).
-    /// Missing `origin` falls back to `originFallback` (`"homeserver"` from
-    /// the Store); embedded labels are allowlisted (see
+    /// Missing `origin` falls back to `originFallback` (`"remote"` from
+    /// the Store; legacy `"homeserver"` labels still load); embedded labels
+    /// are allowlisted (see
     /// `sanitizeOriginLabel`). Counts are taken as normalized (the exporter
     /// pre-folds cache into input); only the cached read/write aliases sum,
     /// mirroring the SQLite path. Returns records plus skipped count plus
     /// whether any forbidden non-token keys were seen and ignored.
     public static func loadSnapshot(
         at path: String,
-        originFallback: String = "homeserver"
+        originFallback: String = "remote"
     ) throws -> (records: [NormalizedUsage], skipped: Int, sawExtraFields: Bool) {
         let url = URL(fileURLWithPath: path)
         let data = try Data(contentsOf: url)
@@ -516,10 +517,10 @@ public enum OpenCodeStore {
     /// Sanitizes an untrusted origin/host label from snapshot data. Only a
     /// short `[A-Za-z0-9_.-]` form (max 64 chars) is kept; anything else
     /// (slashes, newlines, spaces, shell metacharacters, empty) falls back.
-    /// `local` and `homeserver` pass through unchanged. Snapshot labels never
-    /// reach a shell, but the allowlist keeps them out of CLI/dashboard text
-    /// verbatim-safe by construction.
-    public static func sanitizeOriginLabel(_ raw: String?, fallback: String = "homeserver") -> String {
+    /// `local`, `remote`, and legacy `homeserver` pass through unchanged.
+    /// Snapshot labels never reach a shell, but the allowlist keeps them out
+    /// of CLI/dashboard text verbatim-safe by construction.
+    public static func sanitizeOriginLabel(_ raw: String?, fallback: String = "remote") -> String {
         guard let raw else { return fallback }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= 64 else { return fallback }
@@ -533,7 +534,7 @@ public enum OpenCodeStore {
     /// and for all-zero rows (empty messages carry no usage).
     public static func decodeSnapshotRecord(
         _ dict: [String: Any],
-        originFallback: String = "homeserver"
+        originFallback: String = "remote"
     ) -> NormalizedUsage? {
         // Lazy case-insensitive fallback: exact keys take the old O(1)
         // dictionary path with no extra allocation. Records where every
@@ -660,7 +661,7 @@ public enum OpenCodeStore {
         let requestId = text("requestId", "request_id", "requestid", "request", "messageId", "message_id", "messageid", "id_message", "message") ?? ""
         let origin = sanitizeOriginLabel(
             text("origin", "host", "hostname", "label", "machine"),
-            fallback: sanitizeOriginLabel(originFallback, fallback: "homeserver"))
+            fallback: sanitizeOriginLabel(originFallback, fallback: "remote"))
         var id = text("id") ?? ""
         if id.isEmpty {
             let epoch = Int(timestamp.timeIntervalSince1970)

@@ -30,9 +30,11 @@ Sources/TokenBarCore/   # pure logic, Foundation only (no auth; network
                          # last-good-cache fallback (pure + tested)
    Aggregator.swift      # filter / aggregate / bestMonth / dailyTrend (pure, clock-injected)
    Store.swift           # orchestrates adapters, env overrides, deterministic dedupe
-                         # (file reads only; the sync pull runs before load,
-                         # never inside it; sync cache loads as one more
-                         # snapshot, same combine/dedupe, origin homeserver)
+                          # (file reads only; the sync pull runs before load,
+                          # never inside it; sync cache loads as one more
+                          # snapshot, same combine/dedupe, origin remote
+                          # by default, custom per-host labels preserved,
+                          # legacy homeserver still loads)
   StartupReportCache.swift # privacy-safe startup envelope (versioned LoadReport
                          # + sanitized warnings, atomic Application Support
                          # write) + StartupRefreshState generation guard
@@ -43,9 +45,9 @@ Sources/TokenBarCLI/    # thin terminal front-end (Foundation only)
                         # --sync-now pulls first, failures only add a warning)
 Sources/TokenBarApp/    # SwiftUI + AppKit menu bar shell (macOS 14+)
   TokenBarApp.swift     # @main App, MenuBarExtra, accessory AppDelegate, refresh
-                        # + settings surface (header gear opens SettingsView;
-                        # launch-at-login + pricing + homeserver sync live
-                        # there, never in the dashboard footer); startup,
+                         # + settings surface (header gear opens SettingsView;
+                         # launch-at-login + pricing + remote sync live
+                         # there, never in the dashboard footer); startup,
                         # periodic, and Sync Now run sync-then-load off-main
   OpenCodeSyncController.swift # @MainActor-publishing ObservableObject over
                         # OpenCodeSyncService: config edit/save, cancellable
@@ -61,12 +63,13 @@ Sources/TokenBarApp/    # SwiftUI + AppKit menu bar shell (macOS 14+)
                         # empty/notice states (display only); Settings gear
                         # opens the SettingsView popover
   SettingsView.swift    # secondary settings surface (~300pt popover):
-                        # launch-at-login toggle + pricing refresh group
-                        # (status line, user-initiated refresh, error) +
-                        # homeserver sync group (enable toggle, host alias,
-                        # remote path/command, interval stepper, Sync Now,
-                        # status line, error); usage filters/details stay
-                        # in DashboardView
+                         # launch-at-login toggle + pricing refresh group
+                         # (status line, user-initiated refresh, error) +
+                         # remote sync group (enable toggle, host alias,
+                         # remote path/command, optional origin label,
+                         # interval stepper, Sync Now,
+                         # status line, error); usage filters/details stay
+                         # in DashboardView
   LaunchAtLoginController.swift # SMAppService.mainApp wrapper, unbundled fallback
 Sources/TokenBarCore/LaunchAtLogin.swift # pure bundled/status policy (tested)
 Tests/TokenBarCoreTests/
@@ -79,7 +82,7 @@ Fixtures/               # synthetic samples only, safe to commit
   pricing-cache-sample.json      # persisted cache v1 (2 entries)
   pricing-malformed-sample.json  # wrong version + negative rate (rejected)
 scripts/verify_logic.py # host-side mirror of core semantics (no Swift here)
-scripts/export-opencode-usage.py # read-only homeserver exporter: SQLite
+scripts/export-opencode-usage.py # read-only remote exporter: SQLite
                         # mode=ro to sanitized token-only JSON (user copies
                         # the file; no network, no HTTP API)
 scripts/show-usage.sh   # one-command CLI wrapper: swift run TokenBarCLI "$@"
@@ -102,8 +105,9 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   collapses them.
 - **Normalized records**: every event becomes one `NormalizedUsage` with
   clamped non-negative counts and `total` derived deterministically, plus an
-  `origin` host label (`local` default; `homeserver` for extra DB copies and
-  snapshots missing the key). `source` stays `.opencode` on every host; only
+  `origin` host label (`local` default; `remote` for extra DB copies and
+  snapshots missing the key, custom per-host labels preserved, legacy
+  `homeserver` still loads). `source` stays `.opencode` on every host; only
   `byOrigin` (`source/origin` pairs) splits the combined total.
   Codex resolves models per file (line-local `model|model_name` wins, else
   latest `turn_context` for the same `turn_id`, else a single-model
@@ -127,7 +131,7 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
 - **Two bounded opt-in network uses, nothing else**: `PricingService` owns
   the one catalog GET (public model/pricing metadata, default OpenRouter
   `/api/v1/models`, 15s timeout, 5MB cap, cancellable `Task`, user-initiated
-  only); `OpenCodeSync` owns the homeserver snapshot pull (system
+  only); `OpenCodeSync` owns the remote snapshot pull (system
   `ssh`/`scp` via `Process` argv arrays, never a shell, `BatchMode=yes` so
   no password prompt, per-attempt timeout default 60s, 32MB snapshot cap,
   cancellable `Task`, disabled by default). Neither sends prompts, token
@@ -147,8 +151,11 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   trusted user-supplied read-only invocation only; local argv safety does
   not sanitize remote execution. `TokenBarStore.load` then reads that cache as one more
   snapshot input with the shared combine/dedupe, so synced rows land with
-  `origin=homeserver`, `source=.opencode` and aggregation semantics are
-  byte-identical to the manual-copy path.
+  their embedded origin (`remote` when omitted; legacy `homeserver` still
+  loads), `source=.opencode` and aggregation semantics are
+  byte-identical to the manual-copy path. New caches are written to
+  `opencode-remote.json`; the legacy `opencode-homeserver.json` file is
+  read as a fallback when the new one is absent.
 - **File reads only**: adapters use `FileManager` / read-only `sqlite3_open_v2`.
   No keychain, no cookies anywhere. `URLSession` appears only in
   `PricingService.swift` (confined, CI-pinned); `Process(` appears only in
@@ -156,10 +163,11 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
 - **Test roots overrideable**: `TOKENBAR_CODEX_ROOT` / `TOKENBAR_OPENCODE_DB`
   / `TOKENBAR_CLAUDE_ROOT` env vars redirect all adapters; tests use temp
   dirs + inline rows. Merge adds `TOKENBAR_OPENCODE_DB_EXTRA`
-  (extra read-only DBs, origin `homeserver`),
+  (extra read-only DBs, origin `remote`),
   `TOKENBAR_OPENCODE_USAGE_JSON` (sanitized snapshots), and
   `TOKENBAR_OPENCODE_SYNC_CACHE` (the auto-synced cache; default
-  `Application Support/TokenBar/opencode-homeserver.json`, silent when
+  `Application Support/TokenBar/opencode-remote.json` with legacy
+  `opencode-homeserver.json` read as a fallback, silent when
   absent); sync config/status file locations redirect via
   `TOKENBAR_OPENCODE_SYNC_CONFIG` / `TOKENBAR_OPENCODE_SYNC_STATUS`.
   Empty entries are ignored and missing extras warn only.
@@ -172,7 +180,7 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   split the same way: pure `LaunchAtLoginPolicy` in Core, thin
   `SMAppService.mainApp` controller in the App target (no entitlements).
   Settings surface: the dashboard header gear opens `SettingsView` (launch
-  at login + pricing refresh + homeserver sync); usage filters and details stay in
+  at login + pricing refresh + remote sync); usage filters and details stay in
   `DashboardView`, so the main popover never carries a pricing footer.
 - **CLI is thin**: `TokenBarCLI/main.swift` only parses
   `--preset/--source/--all-presets/--json`, calls `TokenBarStore.load`, then
@@ -192,15 +200,16 @@ files/db/snapshots --CodexParser/ClaudeParser/OpenCodeStore--> [NormalizedUsage]
   --TokenBarStore.dedupe (max-total wins, earliest tiebreak, id-less by id)
   --> LoadReport --Aggregator.filter--> scoped
   --Aggregator.aggregate / .bestMonth--> AggregatedStats (+ byOrigin)
-  --> DashboardView (combined OpenCode row + local/homeserver sub-lines)
+  --> DashboardView (combined OpenCode row + local/remote sub-lines)
   --ReportFormatter.section/render--> TokenBarCLI terminal report
     (+ By origin when >1 origin; JSON carries byOrigin)
   catalog GET --PricingService.refresh (user-initiated only)--> cache file
     --snapshot--> Aggregator/Report cost basis (offline static when absent)
-  homeserver db --export-opencode-usage.py (read-only)--> snapshot JSON
+  remote db --export-opencode-usage.py (read-only)--> snapshot JSON
     --manual copy--> TOKENBAR_OPENCODE_USAGE_JSON (no network), or
     --OpenCodeSyncService (opt-in ssh/scp pull, validated, atomic)-->
-      opencode-homeserver.json sync cache (last-good preserved on failure)
+      opencode-remote.json sync cache (last-good preserved on failure;
+      legacy opencode-homeserver.json read as fallback)
     --TokenBarStore.load (file reads only)--> same combine/dedupe as manual
 ```
 

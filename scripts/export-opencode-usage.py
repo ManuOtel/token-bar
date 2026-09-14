@@ -11,7 +11,7 @@ network) and emits a JSON array of normalized token records only:
 Never emits prompts, tool calls, file paths, credentials, or message text.
 Only token counts, timestamps, model labels, and session/message IDs leave
 the host. Copy the resulting file to the Mac yourself (for example with a
-USB stick or any file copy you operate); or enable homeserver sync in the
+USB stick or any file copy you operate); or enable remote sync in the
 Mac app Settings and let it pull this file over your own SSH setup
 (TokenBar ships with sync disabled and never guesses a host).
 
@@ -30,7 +30,7 @@ Semantics mirror `OpenCodeStore` in Swift exactly:
 
 Usage:
   python3 scripts/export-opencode-usage.py --db ~/.local/share/opencode/opencode.db \\
-      --out /tmp/opencode-usage.json --origin homeserver
+      --out /tmp/opencode-usage.json --origin myserver
   # On the Mac:
   TOKENBAR_OPENCODE_USAGE_JSON=/tmp/opencode-usage.json ./scripts/show-usage.sh --preset 7d
 """
@@ -43,6 +43,24 @@ from datetime import datetime, timezone
 
 MESSAGE_TABLES = ("message", "session_message")
 ROLLUP_TABLES = ("session_v2", "session")
+
+
+def sanitize_origin(label, fallback="remote"):
+    """Allowlist an origin label to the short [A-Za-z0-9_.-] form (max 64).
+
+    Mirrors OpenCodeStore.sanitizeOriginLabel: hostile labels (slashes,
+    newlines, spaces, shell metacharacters, empty) fall back so generated
+    snapshots stay verbatim-safe in CLI/dashboard text. Legacy
+    "homeserver" passes through unchanged.
+    """
+    if label is None:
+        return fallback
+    text = str(label).strip()
+    if not text or len(text) > 64:
+        return fallback
+    if all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-" for c in text):
+        return text
+    return fallback
 
 
 def parse_ts(raw):
@@ -386,6 +404,7 @@ def read_table(conn, table):
 
 
 def export_db(db_path, origin):
+    origin = sanitize_origin(origin, "remote")
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         messages, rollups, skipped = [], [], 0
@@ -435,9 +454,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Export sanitized OpenCode token snapshot (read-only).")
     parser.add_argument("--db", required=True, help="OpenCode SQLite path (opened read-only).")
     parser.add_argument("--out", required=True, help="Output JSON path for the sanitized snapshot.")
-    parser.add_argument("--origin", default="homeserver", help="Origin label for exported rows.")
+    parser.add_argument("--origin", default="remote", help="Origin label for exported rows (e.g. myserver; legacy homeserver still loads).")
     args = parser.parse_args(argv)
-    origin = args.origin.strip() or "homeserver"
+    origin = sanitize_origin(args.origin.strip() if args.origin else "", "remote")
     records, skipped = export_db(args.db, origin)
     payload = [to_snapshot(r) for r in records]
     with open(args.out, "w", encoding="utf-8") as f:

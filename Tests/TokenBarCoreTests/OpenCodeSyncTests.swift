@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import TokenBarCore
 
-/// Homeserver auto-sync: config validation, safe argv, cache validation and
+/// Remote auto-sync: config validation, safe argv, cache validation and
 /// atomic replacement, failure fallback, and Store refresh integration.
 /// Synthetic data only. No subprocess is ever spawned: fetches use injected
 /// fakes, and argv builders are asserted pure (never a shell).
@@ -19,7 +19,7 @@ final class OpenCodeSyncTests: XCTestCase {
     }
 
     private func enabledConfig(
-        host: String = "homeserver",
+        host: String = "myserver",
         path: String = "/tmp/opencode-usage.json",
         command: String = "",
         poll: Int = 900,
@@ -37,7 +37,7 @@ final class OpenCodeSyncTests: XCTestCase {
             "timestamp": "2026-09-12T10:00:00Z", "model": "opencode-go/m",
             "inputTokens": 400, "outputTokens": 100, "totalTokens": 500,
             "sessionId": "sync-ses-1", "requestId": "sync-msg-1",
-            "origin": "homeserver",
+            "origin": "remote",
         ]] : records
         return try! JSONSerialization.data(withJSONObject: records)
     }
@@ -60,11 +60,11 @@ final class OpenCodeSyncTests: XCTestCase {
     func testEnabledRequiresHostAlias() {
         XCTAssertEqual(
             enabledConfig(host: "").validated(),
-            "Homeserver sync needs an SSH host alias.")
+            "Remote sync needs an SSH host alias.")
     }
 
     func testHostAliasAllowlist() {
-        for good in ["homeserver", "my-host.1", "mac_mini", "user@host", "H0ST-2.x_y"] {
+        for good in ["myserver", "my-host.1", "mac_mini", "user@host", "H0ST-2.x_y"] {
             XCTAssertTrue(OpenCodeSyncConfig.isValidHostAlias(good), good)
             XCTAssertNil(enabledConfig(host: good).validated(), good)
         }
@@ -79,7 +79,7 @@ final class OpenCodeSyncTests: XCTestCase {
     func testEnabledRequiresRemotePathOrCommand() {
         XCTAssertEqual(
             enabledConfig(path: "").validated(),
-            "Homeserver sync needs a remote snapshot path or exporter command.")
+            "Remote sync needs a remote snapshot path or exporter command.")
         // Remote-command mode does not need a path.
         XCTAssertNil(enabledConfig(
             path: "",
@@ -144,10 +144,10 @@ final class OpenCodeSyncTests: XCTestCase {
             config: enabledConfig(command: "python3 export.py --db x.db"))
         XCTAssertEqual(exe, "/usr/bin/ssh")
         XCTAssertTrue(args.contains("BatchMode=yes"))
-        XCTAssertTrue(args.contains("homeserver"))
+        XCTAssertTrue(args.contains("myserver"))
         // Discrete elements: host, "--", then the remote command verbatim.
         let sep = args.firstIndex(of: "--")!
-        XCTAssertEqual(args[sep - 1], "homeserver")
+        XCTAssertEqual(args[sep - 1], "myserver")
         XCTAssertEqual(args[sep + 1], "python3 export.py --db x.db")
         XCTAssertFalse(args.contains { $0.contains("/bin/sh") })
     }
@@ -157,10 +157,10 @@ final class OpenCodeSyncTests: XCTestCase {
         // rejects it, and construction never splits or shells it.
         var hostile = enabledConfig(host: "h;touch evil")
         XCTAssertNotNil(hostile.validated())
-        hostile.hostAlias = "homeserver"
+        hostile.hostAlias = "myserver"
         let (_, args) = OpenCodeSync.scpArguments(
             config: hostile, destination: "/tmp/l.json")
-        XCTAssertEqual(args.filter { $0.hasPrefix("homeserver:") }.count, 1)
+        XCTAssertEqual(args.filter { $0.hasPrefix("myserver:") }.count, 1)
     }
 
     // MARK: - Cache validation
@@ -188,6 +188,15 @@ final class OpenCodeSyncTests: XCTestCase {
     }
 
     func testValidateSnapshotMatchesFixture() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let data = try Data(contentsOf: root.appendingPathComponent(
+            "Fixtures/synthetic-remote-sync-snapshot.json"))
+        XCTAssertTrue(OpenCodeSync.validateSnapshotData(data))
+    }
+
+    func testValidateSnapshotMatchesLegacyFixture() throws {
+        // Pre-rename `homeserver` labels still validate (backward compat).
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let data = try Data(contentsOf: root.appendingPathComponent(
@@ -237,9 +246,9 @@ final class OpenCodeSyncTests: XCTestCase {
             config: enabledConfig(), now: now, cacheURL: cache, statusURL: status)
         XCTAssertTrue(result.didUpdateCache)
         XCTAssertNil(result.error)
-        let loaded = try OpenCodeStore.loadSnapshot(at: cache.path, originFallback: "homeserver")
+        let loaded = try OpenCodeStore.loadSnapshot(at: cache.path)
         XCTAssertEqual(loaded.records.count, 1)
-        XCTAssertEqual(loaded.records.first?.origin, "homeserver")
+        XCTAssertEqual(loaded.records.first?.origin, "remote")
         XCTAssertEqual(loaded.records.first?.source, .opencode)
         let persisted = service.loadStatus(from: status)
         XCTAssertNotNil(persisted.lastSuccessAt)
@@ -473,7 +482,7 @@ final class OpenCodeSyncTests: XCTestCase {
         let result = await service.sync(
             config: enabledConfig(), now: now, cacheURL: cache, statusURL: status)
         XCTAssertTrue(result.didUpdateCache)
-        let loaded = try OpenCodeStore.loadSnapshot(at: cache.path, originFallback: "homeserver")
+        let loaded = try OpenCodeStore.loadSnapshot(at: cache.path)
         XCTAssertTrue(loaded.records.isEmpty)
     }
 
@@ -495,7 +504,45 @@ final class OpenCodeSyncTests: XCTestCase {
         return temp
     }
 
-    func testStoreLoadsSyncCacheAsHomeserverOpencode() throws {
+    func testStoreLoadsSyncCacheAsRemoteOpencode() throws {
+        let temp = isolateLocalInputs()
+        defer {
+            unsetenv("TOKENBAR_CODEX_ROOT")
+            unsetenv("TOKENBAR_CLAUDE_ROOT")
+            unsetenv("TOKENBAR_OPENCODE_DB")
+            unsetenv("TOKENBAR_OPENCODE_DB_EXTRA")
+            unsetenv("TOKENBAR_OPENCODE_USAGE_JSON")
+            unsetenv("TOKENBAR_OPENCODE_SYNC_CACHE")
+        }
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let fixture = try Data(contentsOf: root.appendingPathComponent(
+            "Fixtures/synthetic-remote-sync-snapshot.json"))
+        let cache = temp.appendingPathComponent("synced.json")
+        try OpenCodeSync.writeSnapshotAtomically(fixture, to: cache)
+        setenv("TOKENBAR_OPENCODE_SYNC_CACHE", cache.path, 1)
+
+        let report = TokenBarStore.load()
+        let synced = report.records.filter { $0.origin == "remote" || $0.origin == "myserver" }
+        XCTAssertEqual(synced.count, 2)
+        XCTAssertTrue(synced.allSatisfy { $0.source == .opencode })
+
+        // Recent synced rows land in the 24h scope: the reported gap.
+        let scoped = Aggregator.filter(
+            report.records, source: .opencode, preset: .last24Hours,
+            now: now, calendar: {
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+                return calendar
+            }())
+        XCTAssertEqual(scoped.count, 1)
+        XCTAssertEqual(scoped.first?.requestId, "sync-msg-1")
+        let stats = Aggregator.aggregate(scoped)
+        XCTAssertEqual(stats.totalTokens, 540)
+    }
+
+    func testStoreLoadsLegacyHomeserverSnapshot() throws {
+        // Backward compatibility: pre-rename `homeserver` snapshots load.
         let temp = isolateLocalInputs()
         defer {
             unsetenv("TOKENBAR_CODEX_ROOT")
@@ -514,22 +561,49 @@ final class OpenCodeSyncTests: XCTestCase {
         setenv("TOKENBAR_OPENCODE_SYNC_CACHE", cache.path, 1)
 
         let report = TokenBarStore.load()
-        let synced = report.records.filter { $0.origin == "homeserver" }
-        XCTAssertEqual(synced.count, 2)
-        XCTAssertTrue(synced.allSatisfy { $0.source == .opencode })
+        XCTAssertEqual(report.records.filter { $0.origin == "homeserver" }.count, 2)
+    }
 
-        // Recent synced rows land in the 24h scope: the reported gap.
-        let scoped = Aggregator.filter(
-            report.records, source: .opencode, preset: .last24Hours,
-            now: now, calendar: {
-                var calendar = Calendar(identifier: .gregorian)
-                calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-                return calendar
-            }())
-        XCTAssertEqual(scoped.count, 1)
-        XCTAssertEqual(scoped.first?.requestId, "sync-msg-1")
-        let stats = Aggregator.aggregate(scoped)
-        XCTAssertEqual(stats.totalTokens, 540)
+    func testGenericDefaultsAndLegacyNames() {
+        // New public defaults are generic; legacy names stay readable.
+        XCTAssertEqual(OpenCodeSync.cacheFileName, "opencode-remote.json")
+        XCTAssertEqual(OpenCodeSync.legacyCacheFileName, "opencode-homeserver.json")
+        XCTAssertEqual(OpenCodeSync.defaultOrigin, "remote")
+        XCTAssertEqual(OpenCodeSync.legacyOrigin, "homeserver")
+        XCTAssertTrue(OpenCodeSync.defaultCacheURL().lastPathComponent == "opencode-remote.json")
+    }
+
+    func testEffectiveOriginLabelDerivesFromAliasSafely() {
+        // Blank config falls back to the generic default.
+        XCTAssertEqual(OpenCodeSyncConfig().effectiveOriginLabel, "remote")
+        // A plain alias derives verbatim (sanitized).
+        XCTAssertEqual(enabledConfig(host: "myserver").effectiveOriginLabel, "myserver")
+        // An explicit custom label wins when valid.
+        var custom = enabledConfig(host: "myserver")
+        custom.originLabel = "office-mac_2.0"
+        XCTAssertEqual(custom.effectiveOriginLabel, "office-mac_2.0")
+        // Hostile labels fall back instead of leaking verbatim.
+        var hostile = enabledConfig(host: "myserver")
+        hostile.originLabel = "evil/x\ny"
+        XCTAssertEqual(hostile.effectiveOriginLabel, "myserver")
+        // user@host aliases are valid for SSH but not for origin labels:
+        // they fall back to the generic default unless overridden.
+        XCTAssertEqual(enabledConfig(host: "user@host").effectiveOriginLabel, "remote")
+        var override = enabledConfig(host: "user@host")
+        override.originLabel = "office"
+        XCTAssertEqual(override.effectiveOriginLabel, "office")
+        // Validation rejects hostile custom labels with a short message.
+        var invalid = enabledConfig(host: "myserver")
+        invalid.originLabel = "bad/label"
+        XCTAssertNotNil(invalid.validated())
+        // Old config files without the new key decode as blank (compat).
+        let oldJSON = """
+        {"enabled":true,"hostAlias":"myserver","remotePath":"/remote/u.json",\
+        "remoteCommand":"","pollIntervalSeconds":900,"timeoutSeconds":60}
+        """.data(using: .utf8)!
+        let decoded = try! JSONDecoder().decode(OpenCodeSyncConfig.self, from: oldJSON)
+        XCTAssertEqual(decoded.originLabel, "")
+        XCTAssertEqual(decoded.effectiveOriginLabel, "myserver")
     }
 
     func testMissingSyncCacheIsSilent() {

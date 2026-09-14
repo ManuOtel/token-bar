@@ -107,7 +107,7 @@ final class OpenCodeSnapshotDecodeTests: XCTestCase {
         var hostile = base
         hostile["origin"] = "evil/x\ny"
         XCTAssertEqual(
-            OpenCodeStore.decodeSnapshotRecord(hostile)?.origin, "homeserver")
+            OpenCodeStore.decodeSnapshotRecord(hostile)?.origin, "remote")
         var labelled = base
         labelled["HOST"] = "my-mac_2.0"
         XCTAssertEqual(
@@ -115,6 +115,11 @@ final class OpenCodeSnapshotDecodeTests: XCTestCase {
         XCTAssertEqual(
             OpenCodeStore.decodeSnapshotRecord(base, originFallback: "local")?.origin,
             "local")
+        // Legacy label still loads.
+        var legacy = base
+        legacy["origin"] = "homeserver"
+        XCTAssertEqual(
+            OpenCodeStore.decodeSnapshotRecord(legacy)?.origin, "homeserver")
     }
 
     func testFallbackIDsDeterministic() {

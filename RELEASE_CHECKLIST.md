@@ -3,7 +3,7 @@
 Docs-only gate for cutting a Token Bar release. No product behavior changes
 here; the app stays local-first (file reads only, no accounts, no provider
 APIs). The only network uses are strictly opt-in and user-initiated: the
-pricing catalog GET and the homeserver SSH snapshot pull (both disabled by
+pricing catalog GET and the remote SSH snapshot pull (both disabled by
 default). Work through top to bottom on a Mac for the build/sign steps;
 the Linux mirror covers logic only.
 
@@ -17,7 +17,7 @@ Current sources (read-only; see README "Data sources"):
 | OpenCode | `~/.local/share/opencode/opencode.db` | `TOKENBAR_OPENCODE_DB` |
 | OpenCode extras | extra read-only DB copies | `TOKENBAR_OPENCODE_DB_EXTRA` |
 | OpenCode snapshot | sanitized snapshot files | `TOKENBAR_OPENCODE_USAGE_JSON` |
-| OpenCode sync cache | `~/Library/Application Support/TokenBar/opencode-homeserver.json` (opt-in SSH pull) | `TOKENBAR_OPENCODE_SYNC_CACHE` |
+| OpenCode sync cache | `~/Library/Application Support/TokenBar/opencode-remote.json` (opt-in SSH pull; legacy `opencode-homeserver.json` read as fallback) | `TOKENBAR_OPENCODE_SYNC_CACHE` |
 | Claude Code | `~/.claude/projects/**/*.jsonl` | `TOKENBAR_CLAUDE_ROOT` |
 
 Sync config lives in `~/Library/Application Support/TokenBar/opencode-sync.json`
@@ -100,6 +100,7 @@ Developer ID Application certificate:
       bodies (sanitized warnings only; covered by `ReportTests` + smoke).
 - [ ] No secrets committed: synthetic fixtures only under `Fixtures/`;
       never real session logs, DBs, or `.env*` (see `.gitignore`).
+      Run `./scripts/check-privacy.sh` (tracked files only; also runs in CI).
 - [ ] Release notes carry the estimate disclaimer: every dollar figure is
       labelled `Estimated cost ... (estimate only; static table, not a bill;
       subscription use is not an API invoice)`. Static table drifts from
@@ -114,16 +115,16 @@ Developer ID Application certificate:
       (`today|24h|7d|30d|best-month|lifetime`), each `--source`
       (`all|codex|opencode|claude`), and `--preset lifetime --json` all work.
       `--preset lifetime --json` carries `byOrigin` (`source/origin` pairs).
-- [ ] Homeserver workflows: `python3 scripts/export-opencode-usage.py --db
-      <copy> --out <snapshot> --origin homeserver` emits token-only JSON
+- [ ] Remote workflows: `python3 scripts/export-opencode-usage.py --db
+      <copy> --out <snapshot> --origin <label>` emits token-only JSON
       (no prompts/paths/credentials); user-copied snapshot loads via
       `TOKENBAR_OPENCODE_USAGE_JSON` with combined OpenCode total plus
-      local/homeserver split in CLI (`By origin`) and dashboard. With sync
+      local/remote split in CLI (`By origin`) and dashboard. With sync
       configured, `Sync Now` / `--sync-now` pulls the same shape over SSH
       (validates before replacing the cache; failures keep the last good
       cache and warn only) with identical combined totals.
 - [ ] Dashboard: source/preset filters, totals, breakdowns (OpenCode local
-      vs homeserver sub-lines, combined total kept), trend, empty and
+      vs remote sub-lines, combined total kept), trend, empty and
       no-scope states, sanitized warnings, launch-at-login toggle, sync
       status line in Settings (off by default; enabling with a blank host
       is rejected with a short message, never a subprocess).
@@ -137,7 +138,8 @@ Developer ID Application certificate:
       so nothing else needs cleaning; cached login-item state clears on
       unregister. To fully disconnect sync, turn the toggle off in
       Settings (in-flight pulls cancel) and optionally delete
-      `~/Library/Application Support/TokenBar/opencode-homeserver.json`.
+      `~/Library/Application Support/TokenBar/opencode-remote.json` (plus
+      legacy `opencode-homeserver.json` if present from an older version).
 - [ ] Release rollback: re-tag/re-publish the previous versioned artifact
       + checksum; note that a bundle-id change resets the login item
       (toggle off/on once).

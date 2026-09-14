@@ -118,7 +118,7 @@ final class OpenCodeSyncController: ObservableObject {
 
     /// Compact status line for Settings (one line, no setup prose).
     var statusLine: String {
-        if !config.enabled { return "Homeserver sync: off." }
+        if !config.enabled { return "Remote sync: off." }
         if isSyncing { return "Syncing…" }
         if let error = lastError { return error }
         if let at = status.lastSuccessAt {
@@ -131,6 +131,7 @@ final class OpenCodeSyncController: ObservableObject {
         config.hostAlias = config.hostAlias.trimmingCharacters(in: .whitespacesAndNewlines)
         config.remotePath = config.remotePath.trimmingCharacters(in: .whitespacesAndNewlines)
         config.remoteCommand = config.remoteCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        config.originLabel = config.originLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         config.pollIntervalSeconds = min(
             max(config.pollIntervalSeconds, OpenCodeSync.minPollIntervalSeconds),
             OpenCodeSync.maxPollIntervalSeconds)

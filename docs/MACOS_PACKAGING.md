@@ -1,7 +1,7 @@
 # macOS Packaging, Signing, Install, Launch at Login
 
 Local-first menu bar app. No accounts, no updater; the only network uses
-are strictly opt-in (pricing catalog GET, homeserver SSH snapshot pull).
+are strictly opt-in (pricing catalog GET, remote SSH snapshot pull).
 This doc is the
 M5 release path: build a versioned `TokenBar.app`, optionally sign + notarize
 it on a Mac, package a zip/DMG with a checksum, install, uninstall, and use
@@ -14,11 +14,11 @@ On a Mac with Xcode 15+ (macOS 14 SDK):
 
 ```sh
 ./scripts/build-app.sh --version 0.1.0 --build 1
-./scripts/build-app.sh --version 0.2.0 --bundle-id com.manuotel.TokenBar
+./scripts/build-app.sh --version 0.2.0 --bundle-id com.example.TokenBar
 ```
 
 Env equivalents: `TOKENBAR_VERSION`, `TOKENBAR_BUILD`, `TOKENBAR_BUNDLE_ID`
-(default bundle id `com.manuotel.TokenBar`). Output is
+(default bundle id is the shipped identifier; see `scripts/build-app.sh`). Output is
 `dist/TokenBar.app` (ignored by git):
 
 ```text

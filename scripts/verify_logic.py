@@ -1569,6 +1569,7 @@ def run():
 
     check("old record without origin defaults local",
           normalize_origin(None) == "local" and normalize_origin("") == "local"
+          and normalize_origin("remote") == "remote"
           and normalize_origin("homeserver") == "homeserver")
     check("old stats without byOrigin defaults empty",
           {}.get("byOrigin", []) == [])
@@ -1578,19 +1579,19 @@ def run():
 
     import re as _re
 
-    def sanitize_origin_label(v, fallback="homeserver"):
+    def sanitize_origin_label(v, fallback="remote"):
         # Mirror of OpenCodeStore.sanitizeOriginLabel: short [A-Za-z0-9_.-].
-        fb = sanitize_origin_label(fallback, "homeserver") if fallback != "homeserver" else "homeserver"
+        # Returns the fallback verbatim on any mismatch (like Swift).
         if not isinstance(v, str):
-            return fb
+            return fallback
         s = v.strip()
         if not s or len(s) > 64:
-            return fb
+            return fallback
         if _re.fullmatch(r"[A-Za-z0-9_.-]+", s):
             return s
-        return fb
+        return fallback
 
-    def decode_snapshot(d, fallback="homeserver"):
+    def decode_snapshot(d, fallback="remote"):
         src = d.get("source")
         if src and str(src).lower() != "opencode":
             return None
@@ -1629,9 +1630,13 @@ def run():
     snap = decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
                             "inputTokens": 100, "outputTokens": 50,
                             "sessionId": "s", "requestId": "msg-1"})
-    check("snapshot schema origin fallback homeserver",
-          snap is not None and snap["origin"] == "homeserver"
+    check("snapshot schema origin fallback remote",
+          snap is not None and snap["origin"] == "remote"
           and snap["total"] == 150)
+    check("snapshot legacy homeserver label still loads",
+          decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
+                           "inputTokens": 1, "outputTokens": 1,
+                           "origin": "homeserver"})["origin"] == "homeserver")
     check("snapshot rejects other sources",
           decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "source": "codex",
                            "inputTokens": 1, "outputTokens": 1}) is None)
@@ -1678,30 +1683,32 @@ def run():
     loc = {"ts": base_ts, "id": "opencode:msg-1", "request": "msg-1",
            "total": 100, "session": "s", "origin": "local",
            "input": 100, "output": 0, "cached": 0, "reasoning": 0, "model": "m"}
-    rem = dict(loc, total=200, input=200, origin="homeserver")
+    rem = dict(loc, total=200, input=200, origin="remote")
     for pair in ((loc, rem), (rem, loc)):
         got = dedupe_origin(list(pair))
         check("cross-origin dedupe max-total wins", len(got) == 1 and got[0]["total"] == 200)
     earlier = dict(loc, ts=base_ts - timedelta(hours=1), id="opencode:a", request="dup", total=100)
-    later = dict(loc, ts=base_ts, id="opencode:b", request="dup", total=100, origin="homeserver")
+    later = dict(loc, ts=base_ts, id="opencode:b", request="dup", total=100, origin="remote")
     for pair in ((earlier, later), (later, earlier)):
         got = dedupe_origin(list(pair))
         check("cross-origin tie earliest", len(got) == 1 and got[0]["ts"] == earlier["ts"])
     clone_a = dict(loc, request="", id="opencode:same", total=15)
-    clone_b = dict(clone_a, origin="homeserver")
+    clone_b = dict(clone_a, origin="remote")
     for pair in ((clone_a, clone_b), (clone_b, clone_a)):
         got = dedupe_origin(list(pair))
         check("id-less clones collapse with stable origin",
-              len(got) == 1 and got[0]["origin"] == "homeserver")
+              len(got) == 1 and got[0]["origin"] == "local")
     # Equal total, equal time, equal id, non-empty request: origin decides.
+    # Lexically smallest wins, so local beats remote; legacy homeserver
+    # (h < l) beat local the same way before the rename.
     tie_l = dict(loc, request="dup", id="opencode:dup", total=100, origin="local")
-    tie_r = dict(tie_l, origin="homeserver")
+    tie_r = dict(tie_l, origin="remote")
     for pair in ((tie_l, tie_r), (tie_r, tie_l)):
         got = dedupe_origin(list(pair))
         check("equal-total equal-time prefers stable origin",
-              len(got) == 1 and got[0]["origin"] == "homeserver")
+              len(got) == 1 and got[0]["origin"] == "local")
     distinct_a = dict(loc, request="", id="opencode:id-a", total=15)
-    distinct_b = dict(loc, request="", id="opencode:id-b", total=15, origin="homeserver")
+    distinct_b = dict(loc, request="", id="opencode:id-b", total=15, origin="remote")
     check("id-less distinct survive", len(dedupe_origin([distinct_a, distinct_b])) == 2)
     # Snapshot cached read/write aliases sum like the SQLite path.
     split_cache = decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
@@ -1717,39 +1724,41 @@ def run():
                                   "sessionId": "s", "requestId": "r2"})
     check("snapshot lone cached alias counts once",
           lone_cache is not None and lone_cache["cached"] == 100)
-    # Untrusted origin labels are allowlisted; local/homeserver preserved.
+    # Untrusted origin labels are allowlisted; local/remote preserved,
+    # legacy homeserver preserved.
     check("origin labels sanitized",
-          sanitize_origin_label("homeserver") == "homeserver"
+          sanitize_origin_label("remote") == "remote"
+          and sanitize_origin_label("homeserver") == "homeserver"
           and sanitize_origin_label("local") == "local"
           and sanitize_origin_label("my-mac_2.0") == "my-mac_2.0"
-          and sanitize_origin_label(None) == "homeserver"
-          and sanitize_origin_label("") == "homeserver"
-          and all(sanitize_origin_label(h) == "homeserver"
+          and sanitize_origin_label(None) == "remote"
+          and sanitize_origin_label("") == "remote"
+          and all(sanitize_origin_label(h) == "remote"
                   for h in ("a/b", "a\nb", "a b", "$(rm)", "`x`", "a;b", "../x"))
           and len(sanitize_origin_label("x" * 64)) == 64
-          and sanitize_origin_label("x" * 65) == "homeserver"
+          and sanitize_origin_label("x" * 65) == "remote"
           and (decode_snapshot({"timestamp": "2026-09-11T10:00:00Z", "model": "m",
                                 "inputTokens": 1, "outputTokens": 1,
-                                "origin": "evil/x\ny"}) or {})["origin"] == "homeserver")
+                                "origin": "evil/x\ny"}) or {})["origin"] == "remote")
     # By-origin text appears only with multiple distinct origins.
     def origin_suffix(key):
         return key.split("/")[-1] if "/" in key else key
 
     check("by-origin hidden for single origin",
           len({origin_suffix(k) for k in ("codex/local", "opencode/local", "claude/local")}) == 1
-          and len({origin_suffix(k) for k in ("opencode/local", "opencode/homeserver")}) == 2)
+          and len({origin_suffix(k) for k in ("opencode/local", "opencode/remote")}) == 2)
 
     def origin_key(rec):
         return f"opencode/{rec['origin']}"
 
     origins = {}
     for rec in (dict(loc, total=100, origin="local"),
-                dict(loc, total=300, origin="homeserver", id="opencode:b", request="b")):
+                dict(loc, total=300, origin="remote", id="opencode:b", request="b")):
         k = origin_key(rec)
         origins[k] = origins.get(k, 0) + rec["total"]
     check("origin breakdown keeps combined total",
           sum(origins.values()) == 400
-          and set(origins) == {"opencode/local", "opencode/homeserver"})
+          and set(origins) == {"opencode/local", "opencode/remote"})
 
     def sanitize_extra(w):
         if "OpenCode extra database not found" in w:
@@ -1890,7 +1899,7 @@ def run():
     fresh_report = {"records": [{"id": "a", "source": "opencode", "model": "m",
                                  "inputTokens": 1000, "outputTokens": 250,
                                  "totalTokens": 1250, "sessionId": "s",
-                                 "requestId": "r", "origin": "homeserver"}],
+                                 "requestId": "r", "origin": "remote"}],
                     "skippedCodexLines": 3, "skippedOpenCodeRows": 5,
                     "skippedClaudeLines": 7,
                     "warnings": ["OpenCode snapshot unreadable; others still load."]}
@@ -1991,7 +2000,7 @@ def run():
     check("memo oversized cached still clamps",
           abs(cost("gpt-4o", 100, 0, 5000) - cost("gpt-4o", 100, 0, 100)) < 1e-12)
 
-    # Homeserver auto-sync mirror (OpenCodeSync.swift semantics): config
+    # Remote auto-sync mirror (OpenCodeSync.swift semantics): config
     # validation, safe argv (no shell), snapshot validation before replace,
     # atomic tmp+rename replacement, failure fallback preserving last good.
     import re as _re2
@@ -2012,14 +2021,14 @@ def run():
             return None
         host = (cfg.get("hostAlias") or "").strip()
         if not host:
-            return "Homeserver sync needs an SSH host alias."
+            return "Remote sync needs an SSH host alias."
         if not sync_host_valid(host):
             return "Sync host alias has invalid characters (letters, digits, ., _, -, @)."
         command = (cfg.get("remoteCommand") or "").strip()
         path = (cfg.get("remotePath") or "").strip()
         if not command:
             if not path:
-                return "Homeserver sync needs a remote snapshot path or exporter command."
+                return "Remote sync needs a remote snapshot path or exporter command."
             if "\n" in path or "\r" in path:
                 return "Remote snapshot path must not contain line breaks."
         elif "\n" in command or "\r" in command:
@@ -2028,7 +2037,20 @@ def run():
             return "Sync interval must be 5 minutes to 24 hours."
         if not (5 <= cfg.get("timeoutSeconds", 60) <= 300):
             return "Sync timeout must be 5 to 300 seconds."
+        label = (cfg.get("originLabel") or "").strip()
+        if label and sanitize_origin_label(label, "") == "":
+            return "Remote origin label must be 1-64 chars of letters, digits, ., _, -."
         return None
+
+    def sync_effective_origin(cfg):
+        # Mirror of OpenCodeSyncConfig.effectiveOriginLabel.
+        custom = (cfg.get("originLabel") or "").strip()
+        if custom and sanitize_origin_label(custom, "") != "":
+            return sanitize_origin_label(custom, "")
+        host = (cfg.get("hostAlias") or "").strip()
+        if host and sanitize_origin_label(host, "") != "":
+            return sanitize_origin_label(host, "")
+        return "remote"
 
     def scp_argv(cfg, dest):
         return ("/usr/bin/scp",
@@ -2065,25 +2087,32 @@ def run():
             f.write(data)
         os.replace(tmp, dest)
 
-    base_cfg = {"enabled": True, "hostAlias": "homeserver",
+    base_cfg = {"enabled": True, "hostAlias": "myserver",
                 "remotePath": "/tmp/opencode-usage.json", "remoteCommand": "",
                 "pollIntervalSeconds": 900, "timeoutSeconds": 60}
     check("sync defaults disabled valid",
           sync_validated({"enabled": False, "hostAlias": "bogus host; rm"}) is None)
     check("sync enabled requires host",
           sync_validated({**base_cfg, "hostAlias": ""})
-          == "Homeserver sync needs an SSH host alias.")
+          == "Remote sync needs an SSH host alias.")
     check("sync host allowlist",
           all(sync_host_valid(h) for h in
-              ("homeserver", "my-host.1", "mac_mini", "user@host"))
+              ("myserver", "my-host.1", "mac_mini", "user@host"))
           and not any(sync_host_valid(h) for h in
                       ("", "has space", "a;b", "a|b", "-lead", "a:b",
                        "a/b", "a\nb", "a$(x)")))
     check("sync needs remote path or command",
           sync_validated({**base_cfg, "remotePath": ""})
-          == "Homeserver sync needs a remote snapshot path or exporter command."
+          == "Remote sync needs a remote snapshot path or exporter command."
           and sync_validated({**base_cfg, "remotePath": "",
                               "remoteCommand": "python3 export.py --db x.db"}) is None)
+    check("sync origin label validation + derivation",
+          sync_effective_origin({"hostAlias": "", "originLabel": ""}) == "remote"
+          and sync_effective_origin({"hostAlias": "myserver", "originLabel": ""}) == "myserver"
+          and sync_effective_origin({"hostAlias": "user@host", "originLabel": ""}) == "remote"
+          and sync_effective_origin({"hostAlias": "myserver",
+                                     "originLabel": "office-mac_2.0"}) == "office-mac_2.0"
+          and sync_validated({**base_cfg, "originLabel": "bad/label"}) is not None)
     check("sync interval/timeout bounds",
           sync_validated({**base_cfg, "pollIntervalSeconds": 60}) is not None
           and sync_validated({**base_cfg, "timeoutSeconds": 999}) is not None
@@ -2092,13 +2121,13 @@ def run():
     exe, args = scp_argv(base_cfg, "/tmp/local.json")
     check("sync scp argv discrete, batch, no shell",
           exe == "/usr/bin/scp" and "BatchMode=yes" in args
-          and "homeserver:/tmp/opencode-usage.json" in args
+          and "myserver:/tmp/opencode-usage.json" in args
           and not any(("sh" in a and "bin" in a) or a == "-c" for a in args)
           and args[-1] == "/tmp/local.json")
     exe2, args2 = ssh_argv({**base_cfg, "remoteCommand": "python3 export.py --db x.db"})
     check("sync ssh argv host, separator, command",
           exe2 == "/usr/bin/ssh" and "BatchMode=yes" in args2
-          and args2[args2.index("--") - 1] == "homeserver"
+          and args2[args2.index("--") - 1] == "myserver"
           and args2[args2.index("--") + 1] == "python3 export.py --db x.db")
     good_rec = {"id": "opencode:s1", "source": "opencode",
                 "timestamp": "2026-09-12T10:00:00Z", "model": "m",
@@ -2114,7 +2143,7 @@ def run():
               {"source": "codex", "timestamp": "2026-09-12T10:00:00Z",
                "inputTokens": 5, "outputTokens": 5}]).encode())
           and not sync_snapshot_valid(b"x" * (32 * 1024 * 1024 + 1)))
-    sync_fixture = os.path.join(root, "Fixtures", "synthetic-homeserver-sync-snapshot.json")
+    sync_fixture = os.path.join(root, "Fixtures", "synthetic-remote-sync-snapshot.json")
     if os.path.exists(sync_fixture):
         with open(sync_fixture, "rb") as f:
             sync_raw = f.read()
@@ -2122,6 +2151,12 @@ def run():
               sync_snapshot_valid(sync_raw)
               and sum(1 for e in json.loads(sync_raw)
                       if decode_snapshot(e) is not None) == 2)
+    legacy_fixture = os.path.join(root, "Fixtures", "synthetic-homeserver-sync-snapshot.json")
+    if os.path.exists(legacy_fixture):
+        with open(legacy_fixture, "rb") as f:
+            legacy_raw = f.read()
+        check("sync legacy fixture still validates",
+              sync_snapshot_valid(legacy_raw))
     with _tempfile2.TemporaryDirectory() as tmpd:
         dest = os.path.join(tmpd, "cache.json")
         sync_write_atomic(b"v1", dest)
@@ -2141,10 +2176,10 @@ def run():
               and open(dest, "rb").read() == before == good)
     def sync_error(kind):
         # Mirror of sanitizedError: generic labels only.
-        return {"cancelled": "Homeserver sync cancelled.",
-                "timeout": "Homeserver sync timed out; kept previous data.",
+        return {"cancelled": "Remote sync cancelled.",
+                "timeout": "Remote sync timed out; kept previous data.",
                 "invalid": "Remote snapshot invalid; kept previous data.",
-                "failed": "Homeserver sync failed (host unreachable); kept previous data."}[kind]
+                "failed": "Remote sync failed (host unreachable); kept previous data."}[kind]
     check("sync errors sanitized, no secrets or paths",
           all("SECRET" not in m and "/Users/" not in m and "kept previous data" in m
               for m in (sync_error("timeout"), sync_error("invalid"), sync_error("failed")))

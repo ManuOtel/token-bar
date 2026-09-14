@@ -14,7 +14,7 @@ final class StartupReportCacheTests: XCTestCase {
 
     private func record(
         _ id: String, source: UsageSource = .opencode,
-        model: String = "openai/gpt-5.6-luna", origin: String = "homeserver",
+        model: String = "openai/gpt-5.6-luna", origin: String = "remote",
         input: Int = 1000, output: Int = 250
     ) -> NormalizedUsage {
         NormalizedUsage(
@@ -37,7 +37,7 @@ final class StartupReportCacheTests: XCTestCase {
         let report = LoadReport(
             records: [
                 record("a", source: .codex, model: "gpt-5-mini", origin: "local"),
-                record("b", source: .opencode, model: "openai/gpt-5.6-luna", origin: "homeserver"),
+                record("b", source: .opencode, model: "openai/gpt-5.6-luna", origin: "remote"),
                 record("c", source: .claude, model: "claude-sonnet-4-x", origin: "local"),
             ],
             skippedCodexLines: 3,
@@ -61,7 +61,7 @@ final class StartupReportCacheTests: XCTestCase {
             ["claude-sonnet-4-x", "gpt-5-mini", "openai/gpt-5.6-luna"])
         XCTAssertEqual(
             loaded?.records.map(\.origin).sorted(),
-            ["homeserver", "local", "local"])
+            ["local", "local", "remote"])
         XCTAssertEqual(
             loaded?.records.map(\.source).sorted(by: { $0.rawValue < $1.rawValue }),
             [.claude, .codex, .opencode])
