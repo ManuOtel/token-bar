@@ -339,6 +339,11 @@ final class OpenCodeSyncTests: XCTestCase {
         XCTAssertTrue(OpenCodeSync.sanitizedError(OpenCodeSyncError.invalidSnapshot).contains("kept previous data"))
         XCTAssertTrue(OpenCodeSync.sanitizedError(OpenCodeSyncError.remoteFailed(255)).contains("unreachable"))
         XCTAssertTrue(OpenCodeSync.sanitizedError(OpenCodeSyncError.configInvalid("Custom msg.")).contains("Custom msg."))
+        // Empty-kept notice: sanitized, keeps-history, actionable retry hint.
+        let emptyKept = OpenCodeSync.sanitizedError(OpenCodeSyncError.emptySnapshotKeptPrevious)
+        XCTAssertTrue(emptyKept.contains("kept previous data"))
+        XCTAssertTrue(emptyKept.lowercased().contains("retry"))
+        XCTAssertFalse(emptyKept.contains("/"))
     }
 
     // MARK: - Single cancellable owner (review: Cancel reaches every pull)
@@ -473,19 +478,141 @@ final class OpenCodeSyncTests: XCTestCase {
 
     // MARK: - Documented decisions (review low-cost notes)
 
-    func testEmptySnapshotHonestlyReplacesCacheWithZeroRows() async throws {
-        // A valid [] means the remote genuinely has no usage, so it replaces
-        // the cache (only malformed/all-skipped payloads preserve it).
+    // MARK: - Empty-snapshot guard (valid [] must not wipe history)
+
+    func testEmptyFirstSyncAccepted() async throws {
+        // No prior cache: a genuine empty first sync is valid, not corrupt.
         let dir = tempDir()
         let cache = dir.appendingPathComponent("cache.json")
         let status = dir.appendingPathComponent("status.json")
-        try OpenCodeSync.writeSnapshotAtomically(snapshotData(), to: cache)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cache.path))
         let service = OpenCodeSyncService(fetcher: FakeFetcher(.success(Data("[]".utf8))))
         let result = await service.sync(
             config: enabledConfig(), now: now, cacheURL: cache, statusURL: status)
         XCTAssertTrue(result.didUpdateCache)
+        XCTAssertNil(result.error)
         let loaded = try OpenCodeStore.loadSnapshot(at: cache.path)
         XCTAssertTrue(loaded.records.isEmpty)
+        XCTAssertNil(service.loadStatus(from: status).lastError)
+    }
+
+    func testEmptySyncWithPriorEmptyCacheAccepted() async throws {
+        // Prior cache exists but holds no records: nothing to protect, so
+        // the empty pull is accepted like a first sync.
+        let dir = tempDir()
+        let cache = dir.appendingPathComponent("cache.json")
+        let status = dir.appendingPathComponent("status.json")
+        try OpenCodeSync.writeSnapshotAtomically(Data("[]".utf8), to: cache)
+        let service = OpenCodeSyncService(fetcher: FakeFetcher(.success(Data("[]".utf8))))
+        let result = await service.sync(
+            config: enabledConfig(), now: now, cacheURL: cache, statusURL: status)
+        XCTAssertTrue(result.didUpdateCache)
+        XCTAssertNil(result.error)
+        XCTAssertTrue(try OpenCodeStore.loadSnapshot(at: cache.path).records.isEmpty)
+    }
+
+    func testEmptySyncPreservesPriorRecords() async throws {
+        // A transient exporter/server hiccup returning [] must not zero
+        // previously imported usage: the last good cache wins and the user
+        // gets a sanitized actionable notice.
+        let dir = tempDir()
+        let cache = dir.appendingPathComponent("cache.json")
+        let status = dir.appendingPathComponent("status.json")
+        let good = snapshotData()
+        try OpenCodeSync.writeSnapshotAtomically(good, to: cache)
+        let service = OpenCodeSyncService(fetcher: FakeFetcher(.success(Data("[]".utf8))))
+        let result = await service.sync(
+            config: enabledConfig(), now: now, cacheURL: cache, statusURL: status)
+        XCTAssertFalse(result.didUpdateCache)
+        XCTAssertNotNil(result.error)
+        XCTAssertTrue(result.message.contains("kept previous data"))
+        XCTAssertTrue(result.message.lowercased().contains("retry"))
+        // Sanitized: no paths, no host alias, no payload contents.
+        XCTAssertFalse(result.message.contains("/"))
+        XCTAssertFalse(result.message.contains("myserver"))
+        XCTAssertFalse(result.message.contains(".json"))
+        XCTAssertEqual(try Data(contentsOf: cache), good)
+        XCTAssertEqual(try OpenCodeStore.loadSnapshot(at: cache.path).records.count, 1)
+        // The retry notice persists on the status line for Settings/CLI.
+        XCTAssertEqual(service.loadStatus(from: status).lastError, result.message)
+    }
+
+    func testEmptySyncWithMalformedPriorCacheAccepted() async throws {
+        // Malformed prior cache holds no decodable records, so there is no
+        // history to protect: the empty pull is accepted, not treated as
+        // corruption.
+        let dir = tempDir()
+        let cache = dir.appendingPathComponent("cache.json")
+        let status = dir.appendingPathComponent("status.json")
+        try Data("not json".utf8).write(to: cache)
+        let service = OpenCodeSyncService(fetcher: FakeFetcher(.success(Data("[]".utf8))))
+        let result = await service.sync(
+            config: enabledConfig(), now: now, cacheURL: cache, statusURL: status)
+        XCTAssertTrue(result.didUpdateCache)
+        XCTAssertNil(result.error)
+        XCTAssertTrue(try OpenCodeStore.loadSnapshot(at: cache.path).records.isEmpty)
+    }
+
+    func testNonemptyReplacementStillWorks() async throws {
+        // The guard only fires on empty pulls: a fresh nonempty snapshot
+        // still replaces a nonempty cache.
+        let dir = tempDir()
+        let cache = dir.appendingPathComponent("cache.json")
+        let status = dir.appendingPathComponent("status.json")
+        try OpenCodeSync.writeSnapshotAtomically(snapshotData(), to: cache)
+        let replacement = snapshotData([[
+            "id": "opencode:sync-msg-2", "source": "opencode",
+            "timestamp": "2026-09-12T11:00:00Z", "model": "opencode-go/m",
+            "inputTokens": 10, "outputTokens": 5, "totalTokens": 15,
+            "sessionId": "sync-ses-2", "requestId": "sync-msg-2",
+            "origin": "remote",
+        ]])
+        let service = OpenCodeSyncService(fetcher: FakeFetcher(.success(replacement)))
+        let result = await service.sync(
+            config: enabledConfig(), now: now, cacheURL: cache, statusURL: status)
+        XCTAssertTrue(result.didUpdateCache)
+        XCTAssertNil(result.error)
+        let loaded = try OpenCodeStore.loadSnapshot(at: cache.path)
+        XCTAssertEqual(loaded.records.count, 1)
+        XCTAssertEqual(loaded.records.first?.requestId, "sync-msg-2")
+    }
+
+    func testMalformedPayloadPreservesLastGoodCache() async throws {
+        // Unchanged behavior: malformed pulls never touch the cache, and
+        // local records keep rendering.
+        let dir = tempDir()
+        let cache = dir.appendingPathComponent("cache.json")
+        let status = dir.appendingPathComponent("status.json")
+        let good = snapshotData()
+        try OpenCodeSync.writeSnapshotAtomically(good, to: cache)
+        let service = OpenCodeSyncService(
+            fetcher: FakeFetcher(.success(Data("truncated {".utf8))))
+        let result = await service.sync(
+            config: enabledConfig(), now: now, cacheURL: cache, statusURL: status)
+        XCTAssertFalse(result.didUpdateCache)
+        XCTAssertNotNil(result.error)
+        XCTAssertTrue(result.message.contains("kept previous data"))
+        XCTAssertEqual(try Data(contentsOf: cache), good)
+        XCTAssertEqual(try OpenCodeStore.loadSnapshot(at: cache.path).records.count, 1)
+    }
+
+    func testIsEmptySnapshotAndExistingCacheHasRecords() throws {
+        XCTAssertTrue(OpenCodeSync.isEmptySnapshot(Data("[]".utf8)))
+        XCTAssertFalse(OpenCodeSync.isEmptySnapshot(snapshotData()))
+        XCTAssertFalse(OpenCodeSync.isEmptySnapshot(Data("not json".utf8)))
+        XCTAssertFalse(OpenCodeSync.isEmptySnapshot(Data("{\"not\":\"array\"}".utf8)))
+        let dir = tempDir()
+        let missing = dir.appendingPathComponent("missing.json")
+        XCTAssertFalse(OpenCodeSync.existingCacheHasRecords(at: missing))
+        let empty = dir.appendingPathComponent("empty.json")
+        try Data("[]".utf8).write(to: empty)
+        XCTAssertFalse(OpenCodeSync.existingCacheHasRecords(at: empty))
+        let malformed = dir.appendingPathComponent("malformed.json")
+        try Data("truncated {".utf8).write(to: malformed)
+        XCTAssertFalse(OpenCodeSync.existingCacheHasRecords(at: malformed))
+        let full = dir.appendingPathComponent("full.json")
+        try OpenCodeSync.writeSnapshotAtomically(snapshotData(), to: full)
+        XCTAssertTrue(OpenCodeSync.existingCacheHasRecords(at: full))
     }
 
     func testRemotePathWithSpacesIsAllowed() {

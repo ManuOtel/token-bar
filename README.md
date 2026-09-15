@@ -182,9 +182,15 @@ enter yourself: the SSH host alias plus the remote snapshot path (or the
 remote exporter command). Nothing is guessed and sync ships disabled.
 Remote paths may contain spaces (they travel as one argument, never
 word-split); host aliases stay strict. A valid empty snapshot (`[]`)
-honestly replaces the cache with zero rows -- it means the remote host
-has no usage; only malformed or all-skipped payloads preserve the last
-good cache. Trust split: the snapshot-path pull never executes anything
+with no prior synced records is accepted as a genuine empty first sync
+(for example a fresh remote install). But a valid empty snapshot never
+wipes existing history: when the local sync cache already holds records,
+the empty pull keeps the last good cache (a transient exporter/server
+hiccup returning `[]` must not zero previously imported usage) and
+reports one sanitized line (`Remote snapshot empty; kept previous data.
+Retry sync later.`); press `Sync Now` (or run `--sync-now`) again after
+the remote recovers. Only malformed or all-skipped payloads are rejected
+as invalid. Trust split: the snapshot-path pull never executes anything
 remote, but the exporter command runs through the remote sshd shell with
 your remote privileges, so enter only the read-only exporter invocation
 you wrote yourself. Upgrading keeps working: snapshots and caches written
@@ -443,7 +449,10 @@ boundary of the catalog GET, malformed catalog rejection, fixtures under
   snapshot path), press `Sync Now`, or keep using the manual copy. A
   failed pull keeps the previous cache and reports one sanitized line
   (`timed out` / `host unreachable` / `snapshot invalid`); usage loading
-  never breaks because sync failed.
+  never breaks because sync failed. `Remote snapshot empty; kept previous
+  data. Retry sync later.` means the remote returned a valid `[]` while
+  local history exists: the previous cache was kept, so re-export on the
+  remote host (or wait out the hiccup) and press `Sync Now` again.
 - `OpenCode snapshot contained extra non-token fields (ignored)`: the
   snapshot file held prompt/path/tool-like keys; they were ignored and only
   token counts loaded. Re-export with `scripts/export-opencode-usage.py`.

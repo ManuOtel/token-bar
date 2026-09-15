@@ -35,7 +35,9 @@ import Foundation
 ///   paths, and usage contents never enter results, status, or logs.
 /// - Bounded: configurable timeout (default 60s, hard range 5-300s),
 ///   cancellable `Task`, snapshot size cap (32MB). Failures preserve the
-///   last good cache: replacement happens only after successful validation.
+///   last good cache: replacement happens only after successful validation,
+///   and a valid-but-empty remote snapshot never wipes existing history
+///   (see `existingCacheHasRecords`).
 ///
 /// This file is the ONLY place allowed to spawn a subprocess (CI-pinned).
 /// Usage loading (`TokenBarStore.load`) stays file-reads-only and never
@@ -228,17 +230,53 @@ public enum OpenCodeSync {
     /// Records with forbidden non-token keys are ignored by the loader, not
     /// rejected here. Size-capped before decode.
     ///
-    /// Documented decision: a valid empty `[]` DOES replace the cache with
-    /// zero rows. It means the remote host genuinely has no usage (for
-    /// example a fresh install), and the global combine/dedupe renders that
-    /// honestly. Only malformed or all-skipped payloads preserve the last
-    /// good cache.
+    /// Documented decision: a valid empty `[]` is accepted here, but the
+    /// service (`OpenCodeSyncService.sync`) still refuses to let it wipe
+    /// existing history: when the current cache already holds records, the
+    /// empty pull keeps the last good cache and surfaces the
+    /// `emptySnapshotKeptPrevious` notice (a transient exporter/server
+    /// hiccup returning `[]` must not zero previously imported usage). A
+    /// genuine first sync with no prior records still accepts `[]`.
+    /// Only malformed or all-skipped payloads are invalid at this layer.
     public static func validateSnapshotData(_ data: Data) -> Bool {
         guard data.count <= maxSnapshotBytes else { return false }
         guard let json = try? JSONSerialization.jsonObject(with: data),
               let array = json as? [[String: Any]]
         else { return false }
         if array.isEmpty { return true }
+        return array.contains {
+            OpenCodeStore.decodeSnapshotRecord($0, originFallback: defaultOrigin) != nil
+        }
+    }
+
+    // MARK: - Empty-snapshot guard (pure, unit-pinned)
+
+    /// True when the payload decodes as a valid empty record set (`[]`).
+    /// Used by the service to tell "the remote genuinely returned nothing"
+    /// apart from malformed payloads (which fail `validateSnapshotData`).
+    /// Never throws, never logs: inspects structure only.
+    public static func isEmptySnapshot(_ data: Data) -> Bool {
+        guard let json = try? JSONSerialization.jsonObject(with: data),
+              let array = json as? [[String: Any]]
+        else { return false }
+        return array.isEmpty
+    }
+
+    /// True when the cache file at `url` already holds at least one
+    /// decodable `opencode` record (same decode rule as
+    /// `validateSnapshotData`). Missing, unreadable, empty, or malformed
+    /// caches all read as false: there is no prior history to protect, so
+    /// a valid empty first sync stays acceptable. Reads the file only;
+    /// never the network, never raw payloads into messages.
+    public static func existingCacheHasRecords(
+        at url: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        guard fileManager.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let array = json as? [[String: Any]]
+        else { return false }
         return array.contains {
             OpenCodeStore.decodeSnapshotRecord($0, originFallback: defaultOrigin) != nil
         }
@@ -434,6 +472,8 @@ public enum OpenCodeSync {
             switch syncError {
             case .timedOut: return "Remote sync timed out; kept previous data."
             case .invalidSnapshot: return "Remote snapshot invalid; kept previous data."
+            case .emptySnapshotKeptPrevious:
+                return "Remote snapshot empty; kept previous data. Retry sync later."
             case .configInvalid(let message): return message
             case .remoteFailed: return "Remote sync failed (host unreachable); kept previous data."
             }
@@ -617,6 +657,9 @@ public struct OpenCodeSyncStatus: Codable, Hashable, Sendable {
 public enum OpenCodeSyncError: Error, Sendable {
     case timedOut
     case invalidSnapshot
+    /// A valid-but-empty remote snapshot arrived while the cache already
+    /// holds records: the pull is discarded, the last good cache wins.
+    case emptySnapshotKeptPrevious
     case remoteFailed(Int32)
     case configInvalid(String)
 }
@@ -798,6 +841,20 @@ public struct OpenCodeSyncService: @unchecked Sendable {
                 to: data, effectiveLabel: config.effectiveOriginLabel)
             guard OpenCodeSync.validateSnapshotData(stamped) else {
                 throw OpenCodeSyncError.invalidSnapshot
+            }
+            // Empty-result guard: a valid `[]` with prior history on disk
+            // means a transient exporter/server hiccup, not a wiped remote.
+            // Keep the last good cache and surface the retry notice instead
+            // of zeroing previously imported usage. With no prior records
+            // (missing, empty, or malformed cache) the empty snapshot is
+            // accepted below, so a genuinely empty first sync stays valid.
+            // The load-effective cache is checked (generic file, else the
+            // legacy pre-rename fallback), never raw payloads or hostnames.
+            if OpenCodeSync.isEmptySnapshot(stamped) {
+                let priorURL = cacheURL ?? OpenCodeSync.cacheURLToLoad(fileManager: fileManager)
+                if OpenCodeSync.existingCacheHasRecords(at: priorURL, fileManager: fileManager) {
+                    throw OpenCodeSyncError.emptySnapshotKeptPrevious
+                }
             }
             try OpenCodeSync.writeSnapshotAtomically(stamped, to: destination, fileManager: fileManager)
             saveStatus(OpenCodeSyncStatus(
