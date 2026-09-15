@@ -6,7 +6,7 @@
 # then always detaches and cleans up (trap on EXIT).
 #
 # Usage:
-#   ./scripts/verify-dmg.sh --dmg dist/TokenBar-0.3.1-macos.dmg
+#   ./scripts/verify-dmg.sh --dmg dist/TokenBar-0.3.2-macos.dmg
 #
 # Fails clearly off macOS when hdiutil is unavailable. No signing,
 # no network, no credentials, no usage data.
