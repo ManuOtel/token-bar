@@ -2,7 +2,7 @@
 # Package a built TokenBar.app into a versioned zip (default) or DMG.
 #
 # Usage:
-#   ./scripts/package-release.sh [--version 0.3.0] [--format zip|dmg]
+#   ./scripts/package-release.sh [--version 0.3.1] [--format zip|dmg]
 #                                [--app dist/TokenBar.app] [--outdir dist]
 #
 # Env overrides: TOKENBAR_VERSION, TOKENBAR_FORMAT, TOKENBAR_APP.
@@ -91,7 +91,7 @@ if [ -z "$VERSION" ] && [ -f VERSION ]; then
   unset _file_version
 fi
 if [ -z "$VERSION" ]; then
-  VERSION="0.3.0"
+  VERSION="0.3.1"
 fi
 case "$VERSION" in
   *[!0-9A-Za-z.\-]*)
@@ -143,7 +143,19 @@ case "$FORMAT" in
     fi
     ARTIFACT="$OUTDIR/TokenBar-$VERSION-macos.dmg"
     rm -f "$ARTIFACT"
-    hdiutil create -volname "TokenBar $VERSION" -srcfolder "$APP" -ov -format UDZO "$ARTIFACT"
+    # Drag-and-drop layout: stage TokenBar.app plus an Applications symlink
+    # pointing to /Applications, then image the staging dir (never the raw
+    # .app path, so the DMG always opens with both entries side by side).
+    STAGE="$(mktemp -d)"
+    cleanup_stage() { rm -rf "$STAGE"; }
+    trap cleanup_stage EXIT
+    APP_BASE="$(basename "$APP")"
+    cp -R "$APP" "$STAGE/$APP_BASE"
+    ln -s /Applications "$STAGE/Applications"
+    hdiutil create -volname "TokenBar $VERSION" -srcfolder "$STAGE" -ov -format UDZO "$ARTIFACT"
+    trap - EXIT
+    cleanup_stage
+    unset STAGE APP_BASE
     echo "Packaged $ARTIFACT"
     echo "Install: open the DMG, drag TokenBar.app to Applications, then open."
     checksum_file "$ARTIFACT"
