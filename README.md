@@ -11,7 +11,11 @@ No accounts, no provider APIs, no cookies. Costs are estimates only,
 never a bill.
 
 Product page (live): [https://manuotel.github.io/token-bar/](https://manuotel.github.io/token-bar/)
-(static download page served by GitHub Pages from `site/`).
+(static landing page served by GitHub Pages from `site/`, no build step,
+no JavaScript, no trackers). Custom domain (needs DNS plus the Pages
+custom-domain setting before it resolves): `token-bar.manuotel.com`
+via `site/CNAME`, allowlisted in `scripts/test-site.sh` and
+`scripts/check-privacy.sh`.
 
 ## Download (latest public release)
 
