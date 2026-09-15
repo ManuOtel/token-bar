@@ -88,6 +88,10 @@ a:hover { text-decoration-thickness: 2px; }
 .brand { margin: 0; font-weight: 800; letter-spacing: 0.02em; }
 .brand-mark { color: var(--accent); letter-spacing: -0.1em; margin-right: 0.4rem; }
 
+/* Anchored sections sit below the sticky header on in-page navigation.
+   5rem clears the wrapped two-row header on narrow viewports too. */
+section[id] { scroll-margin-top: 5rem; }
+
 .nav-list {
   list-style: none;
   display: flex;
