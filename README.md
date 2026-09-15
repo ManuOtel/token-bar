@@ -10,6 +10,10 @@ data sent).
 No accounts, no provider APIs, no cookies. Costs are estimates only,
 never a bill.
 
+Product page: [https://manuotel.github.io/token-bar/](https://manuotel.github.io/token-bar/)
+(static download page served by GitHub Pages once Pages is enabled for the
+repository; not claimed live until deployment is verified).
+
 ## Download (latest public release)
 
 - [Latest macOS app zip](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip)

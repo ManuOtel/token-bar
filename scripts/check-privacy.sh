@@ -69,8 +69,9 @@ fi
 
 # 1. Personal account identifiers.
 # Allowlist (exact, documented): the project badge/link URL forms, the
-# legal attribution line, and the shipped bundle identifier in its build
-# script and test mirrors. Anything else fails.
+# public GitHub Pages site URL form, the legal attribution line, and the
+# shipped bundle identifier in its build script and test mirrors.
+# Anything else fails.
 personal_pat="${ACCT}|${EMAN}[^ ]* ${OTEL}|${OTEL}[^ ]*${EMAN}"
 personal_hits="$(echo "$tracked" | xargs grep -nEi "$personal_pat" 2>/dev/null || true)"
 if [ -n "$personal_hits" ]; then
@@ -80,7 +81,8 @@ if [ -n "$personal_hits" ]; then
         continue ;;
     esac
     if printf '%s' "$line" | grep -qiF "github.com/${ACCT}/token-bar" \
-      || printf '%s' "$line" | grep -qiF "git@github.com:${ACCT}/token-bar"; then
+      || printf '%s' "$line" | grep -qiF "git@github.com:${ACCT}/token-bar" \
+      || printf '%s' "$line" | grep -qiF "${ACCT}.github.io/token-bar"; then
       continue
     fi
     case "$line" in

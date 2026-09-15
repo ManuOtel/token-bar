@@ -334,5 +334,18 @@ else
   fi
 fi
 
+# --- 12. Public product page contract (offline, no build) ---
+# The Linux CI job already runs this script, so delegating here runs the
+# site checks on every PR without touching the CI/release workflows.
+if [ -x scripts/test-site.sh ]; then
+  if scripts/test-site.sh; then
+    ok "public site contract passes (scripts/test-site.sh)"
+  else
+    bad "public site contract passes" "scripts/test-site.sh failed"
+  fi
+else
+  bad "public site validator exists" "missing executable scripts/test-site.sh"
+fi
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

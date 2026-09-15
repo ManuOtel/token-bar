@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Token Bar: a native macOS menu-bar dashboard that totals local Codex, OpenCode, and Claude Code token usage. Local-first, no accounts, no trackers. Download the latest macOS build.">
+<meta name="color-scheme" content="dark light">
+<title>Token Bar - macOS menu-bar usage dashboard</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <p class="brand"><span class="brand-mark" aria-hidden="true">▮▮▮</span> Token Bar</p>
+    <nav aria-label="Site">
+      <ul class="nav-list">
+        <li><a href="#download">Download</a></li>
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#privacy">Privacy</a></li>
+        <li><a href="#open">Open the app</a></li>
+        <li><a href="https://github.com/ManuOtel/token-bar">Repository</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+<main id="main" class="wrap">
+  <section class="hero" aria-labelledby="page-title">
+    <p class="kicker">Native macOS 14+ menu-bar utility <span class="ver">v0.3.2</span></p>
+    <h1 id="page-title">See local AI token usage at a glance.</h1>
+    <p class="lede">Token Bar totals token usage from local Codex, OpenCode, and Claude Code history files and shows it in the menu bar. File reads only. No accounts. No trackers. Costs are estimates only, never a bill.</p>
+    <div class="cta-row" id="download">
+      <a class="btn primary" href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg">Download for macOS (.dmg)</a>
+      <a class="btn" href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip">Download for macOS (.zip)</a>
+    </div>
+    <ul class="checksum-list">
+      <li><a href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg.sha256">DMG checksum (SHA-256)</a></li>
+      <li><a href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256">ZIP checksum (SHA-256)</a></li>
+      <li><a href="https://github.com/ManuOtel/token-bar">GitHub repository ManuOtel/token-bar</a></li>
+      <li><a href="https://github.com/ManuOtel/token-bar/blob/main/CHANGELOG.md">Release changelog for Token Bar</a></li>
+    </ul>
+    <pre class="verify"><code>curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg
+curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg.sha256
+shasum -a 256 -c TokenBar-latest-macos.dmg.sha256</code></pre>
+    <p class="note">Requires macOS 14 (Sonoma) or later. Each <a href="https://github.com/ManuOtel/token-bar/releases">GitHub release</a> also keeps versioned <span class="mono">TokenBar-&lt;version&gt;-macos.zip</span> and <span class="mono">.dmg</span> assets with checksums.</p>
+  </section>
+
+  <div class="paper">
+    <section aria-labelledby="sources-title">
+      <h2 id="sources-title">Three local sources, one total</h2>
+      <ul class="stat-grid">
+        <li><span class="stat-label">Codex</span> <span class="stat-num">input 1,240,000</span> <span class="stat-sub">local session files</span></li>
+        <li><span class="stat-label">OpenCode</span> <span class="stat-num">input 860,500</span> <span class="stat-sub">local database, plus opt-in remote snapshot</span></li>
+        <li><span class="stat-label">Claude Code</span> <span class="stat-num">input 412,300</span> <span class="stat-sub">local project files</span></li>
+      </ul>
+      <p>Figures above are layout samples, not your usage. The app reads your on-disk history read-only: Codex session files, the OpenCode database, and Claude Code project files. Multi-machine OpenCode merge is an offline snapshot copy or an opt-in pull over your own SSH setup. Missing sources degrade to an empty total plus a sanitized warning, never a crash and never a raw path.</p>
+    </section>
+    <section aria-labelledby="dash-title" id="how">
+      <h2 id="dash-title">Compact first, details on demand</h2>
+      <p>The 400pt popover opens compact: hero total, estimated cost, source chips (All, Codex, OpenCode, Claude), range chips (Today, 24H, 7D, 30D, Best, All), a composition ring, a source bar, and a 14-day mini trend. Details expands to metric cards, top-5 models, the full trend, and notices. Cached tokens are a subset of input; reasoning is a subset of output; neither is added on top of the total.</p>
+    </section>
+    <section aria-labelledby="cost-title">
+      <h2 id="cost-title">Costs are estimates</h2>
+      <p>Every dollar figure is labelled an estimate from a static rate table, not a bill. Subscription use is not an API invoice. One strictly opt-in refresh fetches public model pricing metadata; without it the app stays fully offline on the built-in table.</p>
+    </section>
+    <section aria-labelledby="privacy-title" id="privacy">
+      <h2 id="privacy-title">Local-first boundary</h2>
+      <ul>
+        <li>Usage data, prompts, message bodies, paths, and credentials never leave the machine.</li>
+        <li>No accounts, no provider APIs, no cookies, no analytics on this page and none in the app.</li>
+        <li>Only two network uses exist in the app, both strictly opt-in and disabled by default: the public pricing refresh and the remote snapshot pull over your own SSH setup.</li>
+      </ul>
+    </section>
+    <section aria-labelledby="open-title" id="open">
+      <h2 id="open-title">Unsigned build: how to open</h2>
+      <p>Releases are <strong>unsigned and not notarized</strong>. macOS Gatekeeper shows a warning on first launch. That is expected: right-click Open the app once, then launch normally. DMG install: open the dmg, drag <span class="mono">TokenBar.app</span> onto Applications, open. ZIP install: unzip, drag <span class="mono">TokenBar.app</span> to Applications, open.</p>
+    </section>
+  </div>
+
+  <section aria-labelledby="more-title">
+    <h2 id="more-title">Source and history</h2>
+    <p>Token Bar is open source. Read the code, the <a href="https://github.com/ManuOtel/token-bar/blob/main/CHANGELOG.md">release changelog for Token Bar</a>, and the <a href="https://github.com/ManuOtel/token-bar">GitHub repository ManuOtel/token-bar</a>. Current page release: <span class="mono">v0.3.2</span>.</p>
+  </section>
+</main>
+<footer class="footer">
+  <div class="wrap">
+    <p>Token Bar v0.3.2. Static page: no JavaScript, no fonts, no images, no analytics, no cookies. Costs are estimates only, never a bill.</p>
+  </div>
+</footer>
+</body>
+</html>
