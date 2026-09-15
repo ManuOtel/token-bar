@@ -141,9 +141,13 @@ docs/MACOS_PACKAGING.md  # signing, notarytool, install, uninstall, login items
   fetches, validates (`OpenCodeSync.validateSnapshotData`: JSON array with
   at least one decodable opencode record, or empty), and atomically
   replaces the local cache (temp file + `replaceItemAt` swap, no
-  remove-then-move gap; readers never see halves). A valid empty `[]`
-  honestly replaces the cache with zero rows (remote has no usage); only
-  malformed or all-skipped payloads preserve the last good cache. Any
+  remove-then-move gap; readers never see halves). A valid empty `[]` is
+  accepted only when the cache holds no prior records (genuine empty first
+  sync); when prior records exist the empty pull keeps the last good cache
+  and surfaces `Remote snapshot empty; kept previous data. Retry sync
+  later.` so a transient exporter hiccup never wipes imported history.
+  Malformed or all-skipped payloads are invalid and also preserve the last
+  good cache. Any
   failure (invalid config, timeout, unreachable host, invalid payload,
   cancellation) preserves the last good cache and surfaces one sanitized
   generic message. Trust split: the snapshot-path pull executes nothing
@@ -234,6 +238,8 @@ files/db/snapshots --CodexParser/ClaudeParser/OpenCodeStore--> [NormalizedUsage]
 | Sync disabled / never ran | sync cache absent, silent; local data only, unchanged |
 | Sync pull fails / times out / cancelled | last good cache preserved; one sanitized message; usage loading unaffected |
 | Remote snapshot invalid (HTML, truncated, all-skipped) | cache NOT replaced; last good preserved; sanitized message |
+| Remote snapshot valid but empty (`[]`) with cached records | cache NOT replaced; last good preserved; `kept previous data, retry` notice; re-pull after the remote recovers |
+| Remote snapshot valid but empty (`[]`) with no cached records | accepted as empty first sync; cache holds zero rows |
 | Sync config invalid / disabled at CLI `--sync-now` | no subprocess spawned; sanitized line added to report; local load continues |
 | Malformed pricing payload / cache | ignored with an offline message, previous rates kept |
 | Future timestamps | excluded by preset upper bound |

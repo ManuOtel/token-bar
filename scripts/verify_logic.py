@@ -2299,15 +2299,20 @@ def run():
         return {"cancelled": "Remote sync cancelled.",
                 "timeout": "Remote sync timed out; kept previous data.",
                 "invalid": "Remote snapshot invalid; kept previous data.",
+                "empty": "Remote snapshot empty; kept previous data. Retry sync later.",
                 "failed": "Remote sync failed (host unreachable); kept previous data."}[kind]
     check("sync errors sanitized, no secrets or paths",
           all("SECRET" not in m and "/Users/" not in m and "kept previous data" in m
-              for m in (sync_error("timeout"), sync_error("invalid"), sync_error("failed")))
-          and "cancell" in sync_error("cancelled"))
+              for m in (sync_error("timeout"), sync_error("invalid"),
+                        sync_error("empty"), sync_error("failed")))
+          and "cancell" in sync_error("cancelled")
+          and "retry" in sync_error("empty").lower()
+          and "/" not in sync_error("empty"))
 
-    # Review fixes mirror: capped reads check size before buffering, the
-    # apply decision replaces honestly on valid [] and preserves last good
-    # otherwise, remote paths with spaces validate (argv-safe, never split).
+    # Empty-snapshot guard mirror: a valid [] never wipes cached records
+    # (transient exporter hiccup); with no prior records it stays valid.
+    # Capped reads check size before buffering, remote paths with spaces
+    # validate (argv-safe, never split).
     def sync_read_capped(path, cap):
         size = os.path.getsize(path)
         if size > cap:
@@ -2318,8 +2323,42 @@ def run():
             raise ValueError("invalid snapshot")
         return data
 
+    def sync_is_empty(raw):
+        # Mirror of OpenCodeSync.isEmptySnapshot: valid empty record set.
+        try:
+            arr = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return False
+        return isinstance(arr, list) and not arr
+
+    def sync_cache_has_records(raw, cap=32 * 1024 * 1024):
+        # Mirror of OpenCodeSync.existingCacheHasRecords: the cached bytes
+        # hold >=1 decodable opencode record. Missing (None), empty, or
+        # malformed caches read as False: no history to protect. Size-capped
+        # before buffering (mirrors readCappedFile): oversized reads as False.
+        if raw is None:
+            return False
+        if len(raw) > cap:
+            return False
+        try:
+            arr = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return False
+        if not isinstance(arr, list) or not arr:
+            return False
+        if not all(isinstance(e, dict) for e in arr):
+            return False
+        return any(decode_snapshot(e) is not None for e in arr)
+
     def sync_apply(cache_bytes, candidate):
-        return candidate if sync_snapshot_valid(candidate) else cache_bytes
+        # Mirror of the service guard: valid nonempty replaces, malformed
+        # preserves last good, valid [] preserves last good only when the
+        # cache already holds records (else the empty first sync is valid).
+        if not sync_snapshot_valid(candidate):
+            return cache_bytes
+        if sync_is_empty(candidate) and sync_cache_has_records(cache_bytes):
+            return cache_bytes
+        return candidate
 
     with _tempfile2.TemporaryDirectory() as tmpd2:
         cap_file = os.path.join(tmpd2, "snap.json")
@@ -2339,10 +2378,24 @@ def run():
         check("sync capped read checks size before buffering",
               capped_ok and capped_big and capped_missing)
     good_bytes = json.dumps([good_rec]).encode()
-    check("sync apply replaces on valid, preserves last good otherwise",
-          sync_apply(good_bytes, b"[]") == b"[]"
+    check("sync apply replaces on valid nonempty, preserves last good otherwise",
+          sync_apply(good_bytes, good_bytes) == good_bytes
           and sync_apply(good_bytes, b"truncated {") == good_bytes
-          and sync_apply(good_bytes, good_bytes) == good_bytes)
+          and sync_apply(None, b"truncated {") is None)
+    check("sync empty first sync accepted, empty later sync preserves records",
+          sync_apply(None, b"[]") == b"[]"
+          and sync_apply(b"[]", b"[]") == b"[]"
+          and sync_apply(b"not json", b"[]") == b"[]"
+          and sync_apply(good_bytes, b"[]") == good_bytes
+          and sync_is_empty(b"[]")
+          and not sync_is_empty(good_bytes)
+          and not sync_is_empty(b"not json")
+          and sync_cache_has_records(good_bytes)
+          and not sync_cache_has_records(None)
+          and not sync_cache_has_records(b"[]")
+          and not sync_cache_has_records(b"not json")
+          and not sync_cache_has_records(good_bytes, cap=10)
+          and not sync_cache_has_records(b"A" * 100, cap=10))
     check("sync remote path with spaces allowed, host stays strict",
           sync_validated({**base_cfg, "remotePath": "/tmp/my dir/u.json"}) is None
           and not sync_host_valid("has space"))
