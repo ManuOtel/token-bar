@@ -61,12 +61,20 @@ jobs:
           echo "Building TokenBar $VERSION (build $GITHUB_RUN_NUMBER)"
           ./scripts/build-app.sh --version "$VERSION" --build "$GITHUB_RUN_NUMBER"
 
-      - name: Package zip and checksum with existing script
+      - name: Package zip and dmg plus checksums with existing script
         run: |
           set -eu
           VERSION="$(tr -d ' \t\r\n' < VERSION)"
           ./scripts/package-release.sh --version "$VERSION" --format zip
+          ./scripts/package-release.sh --version "$VERSION" --format dmg
           (cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.zip.sha256")
+          (cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.dmg.sha256")
+
+      - name: Verify DMG drag-and-drop layout
+        run: |
+          set -eu
+          VERSION="$(tr -d ' \t\r\n' < VERSION)"
+          ./scripts/verify-dmg.sh --dmg "dist/TokenBar-$VERSION-macos.dmg"
 
       - name: Stage stable latest-release aliases
         run: |
@@ -76,7 +84,11 @@ jobs:
             && cp "TokenBar-$VERSION-macos.zip" "TokenBar-latest-macos.zip" \
             && shasum -a 256 "TokenBar-latest-macos.zip" > "TokenBar-latest-macos.zip.sha256" \
             && shasum -a 256 -c "TokenBar-latest-macos.zip.sha256" \
-            && ls -l "TokenBar-$VERSION-macos.zip" "TokenBar-latest-macos.zip")
+            && cp "TokenBar-$VERSION-macos.dmg" "TokenBar-latest-macos.dmg" \
+            && shasum -a 256 "TokenBar-latest-macos.dmg" > "TokenBar-latest-macos.dmg.sha256" \
+            && shasum -a 256 -c "TokenBar-latest-macos.dmg.sha256" \
+            && ls -l "TokenBar-$VERSION-macos.zip" "TokenBar-latest-macos.zip" \
+                    "TokenBar-$VERSION-macos.dmg" "TokenBar-latest-macos.dmg")
 
       - name: Create GitHub Release with versioned and latest assets
         env:
@@ -89,7 +101,9 @@ jobs:
           cat > "$NOTES" <<EOF
           TokenBar $VERSION for macOS 14+.
 
-          Download the versioned zip or the stable latest alias from this release.
+          Download the versioned zip or dmg, or the stable latest aliases
+          from this release. The dmg opens with TokenBar.app plus an
+          Applications shortcut: drag TokenBar.app onto Applications.
           Verify the checksum before opening (see README).
 
           The app is unsigned and not notarized, so macOS Gatekeeper shows a
@@ -103,5 +117,9 @@ jobs:
             "dist/TokenBar-$VERSION-macos.zip" \
             "dist/TokenBar-$VERSION-macos.zip.sha256" \
             "dist/TokenBar-latest-macos.zip" \
-            "dist/TokenBar-latest-macos.zip.sha256"
+            "dist/TokenBar-latest-macos.zip.sha256" \
+            "dist/TokenBar-$VERSION-macos.dmg" \
+            "dist/TokenBar-$VERSION-macos.dmg.sha256" \
+            "dist/TokenBar-latest-macos.dmg" \
+            "dist/TokenBar-latest-macos.dmg.sha256"
           rm -f "$NOTES"

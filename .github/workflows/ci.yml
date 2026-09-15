@@ -21,6 +21,14 @@ jobs:
         run: swift build
       - name: Swift test
         run: swift test
+      - name: DMG drag-and-drop runtime verification
+        run: |
+          set -eu
+          VERSION="$(tr -d ' \t\r\n' < VERSION)"
+          ./scripts/build-app.sh --version "$VERSION" --build "$GITHUB_RUN_NUMBER"
+          ./scripts/package-release.sh --version "$VERSION" --format dmg
+          (cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.dmg.sha256")
+          ./scripts/verify-dmg.sh --dmg "dist/TokenBar-$VERSION-macos.dmg"
 
   linux:
     name: Linux verify + shell syntax
@@ -41,6 +49,7 @@ jobs:
           bash -n scripts/run-token-bar.sh
           bash -n scripts/build-app.sh
           bash -n scripts/package-release.sh
+          bash -n scripts/verify-dmg.sh
           bash -n scripts/check-privacy.sh
           bash -n scripts/test-versioning.sh
           bash -n scripts/test-release.sh
@@ -48,6 +57,7 @@ jobs:
           sh -n scripts/run-token-bar.sh
           sh -n scripts/build-app.sh
           sh -n scripts/package-release.sh
+          sh -n scripts/verify-dmg.sh
           sh -n scripts/check-privacy.sh
           sh -n scripts/test-versioning.sh
           sh -n scripts/test-release.sh
@@ -55,6 +65,7 @@ jobs:
           test -x scripts/run-token-bar.sh
           test -x scripts/build-app.sh
           test -x scripts/package-release.sh
+          test -x scripts/verify-dmg.sh
           test -x scripts/check-privacy.sh
           test -x scripts/test-versioning.sh
           test -x scripts/test-release.sh

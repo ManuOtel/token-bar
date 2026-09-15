@@ -13,13 +13,20 @@ never a bill.
 ## Download (latest public release)
 
 - [Latest macOS app zip](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip)
-- [Latest checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256)
+- [Latest zip checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256)
+- [Latest macOS app dmg](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg)
+- [Latest dmg checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg.sha256)
 - Each GitHub Release also keeps the versioned assets
-  (`TokenBar-<version>-macos.zip` plus its `.sha256`).
+  (`TokenBar-<version>-macos.zip` plus its `.sha256`,
+  `TokenBar-<version>-macos.dmg` plus its `.sha256`).
 
 Verify the download before opening:
 
 ```sh
+curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg
+curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg.sha256
+shasum -a 256 -c TokenBar-latest-macos.dmg.sha256
+# Or the zip pair:
 curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip
 curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256
 shasum -a 256 -c TokenBar-latest-macos.zip.sha256
@@ -27,7 +34,9 @@ shasum -a 256 -c TokenBar-latest-macos.zip.sha256
 
 Note: the app is unsigned and not notarized, so macOS Gatekeeper shows a
 warning on first launch. That is expected: right-click Open the app once,
-then launch normally. Unzip, drag `TokenBar.app` to Applications, open.
+then launch normally. DMG install: open the dmg, drag `TokenBar.app` onto
+Applications, open. Zip install: unzip, drag `TokenBar.app` to
+Applications, open.
 
 ## Requirements
 
@@ -52,12 +61,15 @@ Xcode alternative: open the folder in Xcode (`File > Open`), select the
 ## Install (packaged app)
 
 ```sh
-./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.3.0)
+./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.3.1)
 ./scripts/package-release.sh --format zip
-(cd dist && shasum -a 256 -c TokenBar-0.3.0-macos.zip.sha256)
+./scripts/package-release.sh --version 0.3.1 --format dmg   # macOS only, drag-and-drop layout
+(cd dist && shasum -a 256 -c TokenBar-0.3.1-macos.zip.sha256)
+(cd dist && shasum -a 256 -c TokenBar-0.3.1-macos.dmg.sha256)
 ```
 
-Unzip, drag `TokenBar.app` to Applications, open. Dev loop needs no bundle:
+DMG install: open the dmg, drag `TokenBar.app` onto Applications, open.
+Zip install: unzip, drag `TokenBar.app` to Applications, open. Dev loop needs no bundle:
 `./scripts/run-token-bar.sh`. Launch at login is available from the
 Settings gear popover (`SMAppService.mainApp`); under `swift run` it stays
 disabled with dev-run copy. Uninstall: toggle login off, quit, delete the app. Full path

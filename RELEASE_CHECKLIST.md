@@ -45,7 +45,7 @@ config stores no password, key, or token.
 ## 3. Versioned app build
 
 Version source of truth: the `VERSION` file at the repo root (currently
-`0.3.0`; the 0.2.0 line accumulated user-visible remote-sync and Settings
+`0.3.1`; the 0.2.0 line accumulated user-visible remote-sync and Settings
 UI functionality, hence the minor bump). `scripts/build-app.sh` defaults
 to it; `scripts/package-release.sh` falls back to the built app's
 `Info.plist`, then to it.
@@ -94,9 +94,13 @@ Developer ID Application certificate:
 
 - [ ] Package *after* signing/stapling so the checksum covers the final
       artifact: `./scripts/package-release.sh --version <x.y.z> --format zip`
-      (DMG via `--format dmg`, macOS only).
-- [ ] Publish the artifact plus its `.sha256`; verify with
-      `(cd dist && shasum -a 256 -c TokenBar-<x.y.z>-macos.zip.sha256)`.
+      plus `./scripts/package-release.sh --version <x.y.z> --format dmg`
+      (macOS only, drag-and-drop layout with the Applications shortcut).
+- [ ] Publish each artifact plus its `.sha256`; verify with
+      `(cd dist && shasum -a 256 -c TokenBar-<x.y.z>-macos.zip.sha256)` and
+      `(cd dist && shasum -a 256 -c TokenBar-<x.y.z>-macos.dmg.sha256)`,
+      then `./scripts/verify-dmg.sh --dmg dist/TokenBar-<x.y.z>-macos.dmg`
+      (macOS only).
 
 ## 6. Launch-at-login validation
 

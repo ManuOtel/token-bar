@@ -11,13 +11,20 @@ notarization need a paid Apple Developer account and run only on a Mac.
 ## Download (latest public release)
 
 - [Latest macOS app zip](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip)
-- [Latest checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256)
+- [Latest zip checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256)
+- [Latest macOS app dmg](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg)
+- [Latest dmg checksum (SHA-256)](https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg.sha256)
 - Each GitHub Release also keeps the versioned assets
-  (`TokenBar-<version>-macos.zip` plus its `.sha256`).
+  (`TokenBar-<version>-macos.zip` plus its `.sha256`,
+  `TokenBar-<version>-macos.dmg` plus its `.sha256`).
 
 Verify the download before opening:
 
 ```sh
+curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg
+curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg.sha256
+shasum -a 256 -c TokenBar-latest-macos.dmg.sha256
+# Or the zip pair:
 curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip
 curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256
 shasum -a 256 -c TokenBar-latest-macos.zip.sha256
@@ -46,10 +53,15 @@ The tag-driven workflow (`.github/workflows/release.yml`, macOS) then:
 2. Runs `swift build` and `swift test`.
 3. Builds the app with the `VERSION` value and the monotonic workflow
    build number (`GITHUB_RUN_NUMBER` as `CFBundleVersion`).
-4. Packages the zip and checksum with `scripts/package-release.sh` and
-   verifies with `shasum -a 256 -c`.
-5. Stages the stable `TokenBar-latest-macos.zip` alias (plus its checksum)
-   beside the versioned asset and creates the GitHub Release with all four
+4. Packages both the zip and the dmg plus checksums with
+   `scripts/package-release.sh` and verifies each with
+   `shasum -a 256 -c`.
+5. Verifies the DMG drag-and-drop layout with `scripts/verify-dmg.sh`
+   (mounts read-only, asserts `TokenBar.app` plus the Applications
+   symlink, then always detaches).
+6. Stages the stable `TokenBar-latest-macos.zip` and
+   `TokenBar-latest-macos.dmg` aliases (plus their checksums) beside
+   the versioned assets and creates the GitHub Release with all eight
    files. The `releases/latest/download/` URLs above always resolve to the
    newest release.
 
@@ -63,8 +75,8 @@ provider credentials are used; the only auth is the automatic
 On a Mac with Xcode 15+ (macOS 14 SDK):
 
 ```sh
-./scripts/build-app.sh                                   # version defaults to VERSION (currently 0.3.0)
-./scripts/build-app.sh --version 0.3.0 --build 29        # explicit release version + bumped build
+./scripts/build-app.sh                                   # version defaults to VERSION (currently 0.3.1)
+./scripts/build-app.sh --version 0.3.1 --build 29        # explicit release version + bumped build
 ./scripts/build-app.sh --bundle-id com.example.TokenBar  # bundle id override only
 ```
 
@@ -92,27 +104,32 @@ hosts the UI. Dev loop needs no bundle:
 ## Package (zip default, DMG optional) + checksum
 
 ```sh
-./scripts/package-release.sh --format zip            # version defaults to the built app, then VERSION (currently 0.3.0)
-./scripts/package-release.sh --version 0.3.0 --format dmg   # macOS only
+./scripts/package-release.sh --format zip            # version defaults to the built app, then VERSION (currently 0.3.1)
+./scripts/package-release.sh --version 0.3.1 --format dmg   # macOS only, drag-and-drop layout
 ```
 
 This writes `dist/TokenBar-<version>-macos.zip` (or `.dmg`) plus
-`dist/TokenBar-<version>-macos.zip.sha256`. Publish both files. Users verify
+`dist/TokenBar-<version>-macos.<zip|dmg>.sha256`. Publish all files. Users verify
 with:
 
 ```sh
-(cd dist && shasum -a 256 -c TokenBar-0.3.0-macos.zip.sha256)
+(cd dist && shasum -a 256 -c TokenBar-0.3.1-macos.zip.sha256)
+(cd dist && shasum -a 256 -c TokenBar-0.3.1-macos.dmg.sha256)
+# DMG layout check (macOS only, mounts read-only then detaches):
+./scripts/verify-dmg.sh --dmg dist/TokenBar-0.3.1-macos.dmg
 ```
 
 Zip uses `ditto -c -k --sequesterRsrc --keepParent` on macOS (falls back to
-`zip -qry` elsewhere). DMG uses `hdiutil` and fails loudly off-Mac. Package
+`zip -qry` elsewhere). DMG stages `TokenBar.app` plus an `Applications`
+symlink to `/Applications` in a temp dir, images the staging dir with
+`hdiutil`, then cleans up; it fails loudly off-Mac. Package
 *after* signing/stapling so the checksum covers the final artifact.
 
 ## Install / uninstall
 
 Install (zip): unzip, drag `TokenBar.app` to `/Applications`, double-click
 (or right-click Open on first run for unsigned builds). Install (DMG): open
-the DMG, drag to Applications, eject. First launch loads local history only
+the DMG, drag `TokenBar.app` onto the Applications shortcut, eject. First launch loads local history only
 (`~/.codex/sessions`, OpenCode db, `~/.claude/projects`, read-only).
 
 Uninstall: quit TokenBar from the menu bar, turn launch at login off (so the
@@ -162,15 +179,16 @@ codesign --verify --deep --strict dist/TokenBar.app
 spctl -a -vvv -t install dist/TokenBar.app   # local Gatekeeper check
 
 # 2. Zip the signed app, submit to Apple, wait, staple.
-ditto -c -k --sequesterRsrc --keepParent dist/TokenBar.app dist/TokenBar-0.3.0-macos.zip
-xcrun notarytool submit dist/TokenBar-0.3.0-macos.zip \
+ditto -c -k --sequesterRsrc --keepParent dist/TokenBar.app dist/TokenBar-0.3.1-macos.zip
+xcrun notarytool submit dist/TokenBar-0.3.1-macos.zip \
   --keychain-profile "TOKENBAR-NOTARY" --wait
 xcrun stapler staple dist/TokenBar.app
 xcrun stapler validate dist/TokenBar.app
 spctl -a -vvv -t install dist/TokenBar.app
 
-# 3. Re-package the stapled app and publish the checksum.
-./scripts/package-release.sh --version 0.3.0 --format zip
+# 3. Re-package the stapled app and publish the checksums.
+./scripts/package-release.sh --version 0.3.1 --format zip
+./scripts/package-release.sh --version 0.3.1 --format dmg
 ```
 
 Notes: `notarytool` stores credentials in the local keychain profile; never

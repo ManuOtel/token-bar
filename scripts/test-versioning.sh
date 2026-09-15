@@ -41,7 +41,31 @@ for a in "$@"; do
 done
 exit 0
 EOF
-chmod +x "$TMP/stubbin/swift" "$TMP/stubbin/zip"
+cat > "$TMP/stubbin/hdiutil" <<'EOF'
+#!/bin/sh
+# Stub hdiutil for Linux: records the -srcfolder staging layout, asserts it
+# holds TokenBar.app plus an Applications symlink to /Applications, then
+# touches the artifact path (last non-flag arg).
+SRC=""
+LAST=""
+for a in "$@"; do
+  case "$a" in
+    -srcfolder) WANT_SRC=1 ;;
+    *)
+      if [ "${WANT_SRC:-0}" -eq 1 ]; then SRC="$a"; WANT_SRC=0;
+      else LAST="$a"; fi ;;
+  esac
+done
+if [ -n "$SRC" ]; then
+  APP_HIT="$(find "$SRC" -maxdepth 1 -name '*.app' | head -1 || true)"
+  if [ -z "$APP_HIT" ]; then echo "stub hdiutil: no .app in staging $SRC" >&2; exit 1; fi
+  if [ ! -L "$SRC/Applications" ]; then echo "stub hdiutil: Applications symlink missing in $SRC" >&2; exit 1; fi
+  if [ "$(readlink "$SRC/Applications")" != "/Applications" ]; then echo "stub hdiutil: Applications symlink target wrong" >&2; exit 1; fi
+fi
+if [ -n "$LAST" ]; then : > "$LAST"; fi
+exit 0
+EOF
+chmod +x "$TMP/stubbin/swift" "$TMP/stubbin/zip" "$TMP/stubbin/hdiutil"
 PATH="$TMP/stubbin:$PATH"
 export PATH
 
@@ -141,6 +165,32 @@ if clean_env ./scripts/package-release.sh --version 'oops!' --app "$TMP/Other.ap
   bad "package-release rejects invalid version" "exit 0"
 else
   ok "package-release rejects invalid version"
+fi
+
+# --- 9. package-release dmg stages the drag-and-drop layout (stubbed hdiutil) ---
+mkdir -p "$TMP/Dmg.app/Contents"
+clean_env ./scripts/package-release.sh --version 6.6.7 --format dmg \
+  --app "$TMP/Dmg.app" --outdir "$TMP/out-dmg" >/dev/null
+if [ -f "$TMP/out-dmg/TokenBar-6.6.7-macos.dmg" ] \
+   && [ -f "$TMP/out-dmg/TokenBar-6.6.7-macos.dmg.sha256" ]; then
+  ok "package-release dmg artifact uses the requested version (6.6.7)"
+else
+  bad "package-release dmg artifact uses the requested version" "unexpected dist contents: $(ls "$TMP/out-dmg" 2>/dev/null)"
+fi
+
+# --- 10. package-release keeps zip behavior alongside dmg ---
+mkdir -p "$TMP/Both.app"
+clean_env ./scripts/package-release.sh --version 6.6.7 --format zip \
+  --app "$TMP/Both.app" --outdir "$TMP/out-both" >/dev/null
+clean_env ./scripts/package-release.sh --version 6.6.7 --format dmg \
+  --app "$TMP/Both.app" --outdir "$TMP/out-both" >/dev/null
+if [ -f "$TMP/out-both/TokenBar-6.6.7-macos.zip" ] \
+   && [ -f "$TMP/out-both/TokenBar-6.6.7-macos.dmg" ] \
+   && [ -f "$TMP/out-both/TokenBar-6.6.7-macos.zip.sha256" ] \
+   && [ -f "$TMP/out-both/TokenBar-6.6.7-macos.dmg.sha256" ]; then
+  ok "package-release keeps both zip and dmg artifacts plus checksums"
+else
+  bad "package-release keeps both zip and dmg artifacts plus checksums" "unexpected dist contents: $(ls "$TMP/out-both" 2>/dev/null)"
 fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
