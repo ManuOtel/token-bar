@@ -1,0 +1,62 @@
+name: Pages
+
+# Public product/download page: static site/ only, no build step.
+# Deploys on main pushes and on manual dispatch. The page is not live
+# until Pages is enabled for the repository; the workflow stays correct
+# before and after that step.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# Least privilege by default: jobs only read the repo unless a job
+# explicitly widens its own permissions below.
+permissions:
+  contents: read
+
+# A second deploy never queues behind a running one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate static site (offline, no network)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Site contract checks (no network, no build)
+        run: ./scripts/test-site.sh
+
+  build:
+    name: Upload Pages artifact
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+      - name: Upload site directory
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-24.04
+    # pages: write publishes the artifact; id-token: write is the OIDC
+    # token deploy-pages uses. Scoped to this job only.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
