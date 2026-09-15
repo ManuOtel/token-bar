@@ -3,12 +3,16 @@
 #
 # Asserts (no network, no build, dependency-free POSIX sh + grep):
 #   - site/index.html plus site/styles.css exist; styles are local only
+#   - site/CNAME exists with the single custom-domain line
+#     (token-bar subdomain of the maintainer domain, intentionally
+#     allowlisted below and in scripts/check-privacy.sh)
 #   - required stable download links are present as HTML anchors:
 #     latest dmg, zip, both SHA-256 checksums, repo, changelog
 #   - exactly one h1 plus semantic landmarks (header/main/nav/footer,
 #     lang, title, viewport, skip link)
-#   - no external URLs outside the public repo or its Pages site, no
-#     scripts, no external assets, no tracker/cookie strings
+#   - no external URLs outside the public repo, its Pages site, or the
+#     intentional custom domain; no scripts, no external assets,
+#     no tracker/cookie strings
 #   - page states the unsigned/not-notarized Gatekeeper note, the
 #     estimates-only cost note, and the local-first privacy boundary
 #   - page names the current VERSION (fails stale on version bump)
@@ -80,17 +84,18 @@ for landmark in '<header' '<main' '<nav' '<footer' 'lang="en"' '<title>' 'name="
   fi
 done
 
-# --- 4. No external URLs outside the public repo ---
-# Every http(s) URL in HTML/CSS must stay on github.com/ManuOtel/token-bar.
-# Every http(s) URL in HTML/CSS must stay on the public repo or its
-# Pages site. Fragments stay split so this validator never self-matches
-# the privacy guard's path rule.
+# --- 4. No external URLs outside the allowlist plus custom domain ---
+# Every http(s) URL under site/ must stay on the public repo, its Pages
+# site, or the intentional custom domain (site/CNAME). The custom domain
+# is a deliberate product URL, allowlisted here and in
+# scripts/check-privacy.sh. Fragments stay split so this validator never
+# self-matches the privacy guard's path rule.
 _PU1='/Us'; _PU2='ers/'; _PH1='/ho'; _PH2='me/'
 URLS="$(grep -rhoE 'https?://[^"'"'"' )<>]+' site/ || true)"
 BAD_URLS=""
 for url in $URLS; do
   case "$url" in
-    https://github.com/ManuOtel/token-bar*|https://manuotel.github.io/token-bar*) ;;
+    https://github.com/ManuOtel/token-bar*|https://manuotel.github.io/token-bar*|https://token-bar.manuotel.com*) ;;
     *) BAD_URLS="$BAD_URLS $url" ;;
   esac
 done
@@ -161,6 +166,27 @@ if grep -qE "${_PU1}${_PU2}|${_PH1}${_PH2}|${_SSH}|${_IR}|${_HS}|${_OR}|${_OH}|$
   bad "site contains no private paths or snapshot names" "found home/ssh/snapshot string"
 else
   ok "site contains no private paths or snapshot names"
+fi
+
+# --- 9. Custom domain CNAME plus on-page reference ---
+# site/CNAME must hold exactly the custom-domain line (trailing newline
+# allowed); the page footer must reference the same host so the domain
+# stays an intentional product URL rather than a stray file.
+if [ -f site/CNAME ]; then
+  ok "site CNAME file exists (site/CNAME)"
+  CNAME_TRIMMED="$(tr -d ' \t\r\n' < site/CNAME)"
+  if [ "$CNAME_TRIMMED" = "token-bar.manuotel.com" ]; then
+    ok "site CNAME names the custom domain"
+  else
+    bad "site CNAME names the custom domain" "expected token-bar.manuotel.com, got '$CNAME_TRIMMED'"
+  fi
+else
+  bad "site CNAME file exists" "missing site/CNAME"
+fi
+if grep -Fq "token-bar.manuotel.com" "$SITE"; then
+  ok "site references the custom domain"
+else
+  bad "site references the custom domain" "missing token-bar.manuotel.com in $SITE"
 fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
