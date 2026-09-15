@@ -40,7 +40,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7.0.1
       - name: Upload site directory
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5.0.0
         with:
           path: site
 
@@ -59,4 +59,4 @@ jobs:
     steps:
       - name: Deploy Pages artifact
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5.0.1
