@@ -16,10 +16,11 @@ on:
 permissions:
   contents: read
 
-# A second deploy never queues behind a running one.
+# Deploys run one at a time; a queued deploy waits for the running one
+# instead of cancelling it (safer for Pages production deployments).
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   validate:

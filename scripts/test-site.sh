@@ -7,8 +7,8 @@
 #     latest dmg, zip, both SHA-256 checksums, repo, changelog
 #   - exactly one h1 plus semantic landmarks (header/main/nav/footer,
 #     lang, title, viewport, skip link)
-#   - no external URLs outside github.com/ManuOtel/token-bar, no scripts,
-#     no external assets, no tracker/cookie strings
+#   - no external URLs outside the public repo or its Pages site, no
+#     scripts, no external assets, no tracker/cookie strings
 #   - page states the unsigned/not-notarized Gatekeeper note, the
 #     estimates-only cost note, and the local-first privacy boundary
 #   - page names the current VERSION (fails stale on version bump)
