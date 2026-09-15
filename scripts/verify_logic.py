@@ -2331,11 +2331,14 @@ def run():
             return False
         return isinstance(arr, list) and not arr
 
-    def sync_cache_has_records(raw):
+    def sync_cache_has_records(raw, cap=32 * 1024 * 1024):
         # Mirror of OpenCodeSync.existingCacheHasRecords: the cached bytes
         # hold >=1 decodable opencode record. Missing (None), empty, or
-        # malformed caches read as False: no history to protect.
+        # malformed caches read as False: no history to protect. Size-capped
+        # before buffering (mirrors readCappedFile): oversized reads as False.
         if raw is None:
+            return False
+        if len(raw) > cap:
             return False
         try:
             arr = json.loads(raw)
@@ -2390,7 +2393,9 @@ def run():
           and sync_cache_has_records(good_bytes)
           and not sync_cache_has_records(None)
           and not sync_cache_has_records(b"[]")
-          and not sync_cache_has_records(b"not json"))
+          and not sync_cache_has_records(b"not json")
+          and not sync_cache_has_records(good_bytes, cap=10)
+          and not sync_cache_has_records(b"A" * 100, cap=10))
     check("sync remote path with spaces allowed, host stays strict",
           sync_validated({**base_cfg, "remotePath": "/tmp/my dir/u.json"}) is None
           and not sync_host_valid("has space"))

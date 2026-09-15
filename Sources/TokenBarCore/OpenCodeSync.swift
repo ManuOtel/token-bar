@@ -267,13 +267,17 @@ public enum OpenCodeSync {
     /// `validateSnapshotData`). Missing, unreadable, empty, or malformed
     /// caches all read as false: there is no prior history to protect, so
     /// a valid empty first sync stays acceptable. Reads the file only;
-    /// never the network, never raw payloads into messages.
+    /// never the network, never raw payloads into messages. Size-capped
+    /// before buffering (see `readCappedFile`), so a hand-placed oversized
+    /// cache cannot be fully buffered during an empty sync; oversized
+    /// reads as false, same as malformed.
     public static func existingCacheHasRecords(
         at url: URL,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        maxBytes: Int = maxSnapshotBytes
     ) -> Bool {
         guard fileManager.fileExists(atPath: url.path),
-              let data = try? Data(contentsOf: url),
+              let data = try? readCappedFile(at: url, maxBytes: maxBytes, fileManager: fileManager),
               let json = try? JSONSerialization.jsonObject(with: data),
               let array = json as? [[String: Any]]
         else { return false }
@@ -798,13 +802,61 @@ public struct ProcessSnapshotFetcher: OpenCodeSnapshotFetching, @unchecked Senda
 public struct OpenCodeSyncService: @unchecked Sendable {
     public var fetcher: any OpenCodeSnapshotFetching
     public var fileManager: FileManager
+    /// Isolated support directory for tests: when set, nil `cacheURL` /
+    /// `statusURL` syncs resolve inside it (generic file, else the legacy
+    /// pre-rename fallback) instead of the real Application Support path.
+    /// Production leaves this nil, so behavior is unchanged. Explicit
+    /// `cacheURL` arguments and `TOKENBAR_OPENCODE_SYNC_CACHE` overrides
+    /// still bypass the fallback by design.
+    public var supportDirectory: URL?
 
     public init(
         fetcher: (any OpenCodeSnapshotFetching)? = nil,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        supportDirectory: URL? = nil
     ) {
         self.fetcher = fetcher ?? ProcessSnapshotFetcher(fileManager: fileManager)
         self.fileManager = fileManager
+        self.supportDirectory = supportDirectory
+    }
+
+    /// Cache destination for a nil `cacheURL`: env override wins, else the
+    /// isolated support directory when set, else the real default.
+    func resolvedCacheDestination(explicit: URL?) -> URL {
+        if let explicit { return explicit }
+        if let override = OpenCodeSync.cachePathOverride, !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        if let supportDirectory {
+            return supportDirectory.appendingPathComponent(OpenCodeSync.cacheFileName)
+        }
+        return OpenCodeSync.defaultCacheURL(fileManager: fileManager)
+    }
+
+    /// Load-effective prior cache for a nil `cacheURL`: generic file, else
+    /// the legacy pre-rename fallback. Env overrides bypass the fallback.
+    func resolvedPriorCacheURL(explicit: URL?) -> URL {
+        if let explicit { return explicit }
+        if let override = OpenCodeSync.cachePathOverride, !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        if let supportDirectory {
+            return OpenCodeSync.cacheURLToLoad(
+                supportDirectory: supportDirectory, fileManager: fileManager)
+        }
+        return OpenCodeSync.cacheURLToLoad(fileManager: fileManager)
+    }
+
+    /// Status destination for a nil `statusURL`: same precedence as cache.
+    func resolvedStatusDestination(explicit: URL?) -> URL {
+        if let explicit { return explicit }
+        if let override = OpenCodeSync.statusPathOverride, !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        if let supportDirectory {
+            return supportDirectory.appendingPathComponent(OpenCodeSync.statusFileName)
+        }
+        return OpenCodeSync.defaultStatusURL(fileManager: fileManager)
     }
 
     public func sync(
@@ -813,8 +865,8 @@ public struct OpenCodeSyncService: @unchecked Sendable {
         cacheURL: URL? = nil,
         statusURL: URL? = nil
     ) async -> OpenCodeSyncResult {
-        let destination = cacheURL ?? OpenCodeSync.defaultCacheURL(fileManager: fileManager)
-        let statusDestination = statusURL ?? OpenCodeSync.defaultStatusURL(fileManager: fileManager)
+        let destination = resolvedCacheDestination(explicit: cacheURL)
+        let statusDestination = resolvedStatusDestination(explicit: statusURL)
         if !config.enabled {
             return OpenCodeSyncResult(
                 didUpdateCache: false, message: "Remote sync is disabled.",
@@ -851,7 +903,7 @@ public struct OpenCodeSyncService: @unchecked Sendable {
             // The load-effective cache is checked (generic file, else the
             // legacy pre-rename fallback), never raw payloads or hostnames.
             if OpenCodeSync.isEmptySnapshot(stamped) {
-                let priorURL = cacheURL ?? OpenCodeSync.cacheURLToLoad(fileManager: fileManager)
+                let priorURL = resolvedPriorCacheURL(explicit: cacheURL)
                 if OpenCodeSync.existingCacheHasRecords(at: priorURL, fileManager: fileManager) {
                     throw OpenCodeSyncError.emptySnapshotKeptPrevious
                 }
@@ -873,7 +925,7 @@ public struct OpenCodeSyncService: @unchecked Sendable {
     // MARK: - Status persistence (best-effort, never fatal)
 
     public func loadStatus(from url: URL? = nil) -> OpenCodeSyncStatus {
-        let path = url ?? OpenCodeSync.defaultStatusURL(fileManager: fileManager)
+        let path = url ?? resolvedStatusDestination(explicit: nil)
         guard let data = try? Data(contentsOf: path) else { return OpenCodeSyncStatus() }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601

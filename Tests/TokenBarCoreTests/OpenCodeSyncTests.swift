@@ -615,6 +615,69 @@ final class OpenCodeSyncTests: XCTestCase {
         XCTAssertTrue(OpenCodeSync.existingCacheHasRecords(at: full))
     }
 
+    func testExistingCacheHasRecordsCapsReads() throws {
+        // A hand-placed oversized cache must not be fully buffered during
+        // an empty sync: the size is checked before decode, so oversized
+        // reads as no prior history (same as malformed).
+        let dir = tempDir()
+        let big = dir.appendingPathComponent("big.json")
+        try Data(repeating: 0x41, count: 100).write(to: big)
+        XCTAssertFalse(OpenCodeSync.existingCacheHasRecords(at: big, maxBytes: 10))
+        // A valid record over a tiny cap also reads as false: the cap wins
+        // before decode, proving the capped path is used.
+        let valid = dir.appendingPathComponent("valid.json")
+        try OpenCodeSync.writeSnapshotAtomically(snapshotData(), to: valid)
+        XCTAssertTrue(OpenCodeSync.existingCacheHasRecords(at: valid))
+        XCTAssertFalse(OpenCodeSync.existingCacheHasRecords(at: valid, maxBytes: 10))
+    }
+
+    func testEmptySyncWithNilCacheURLPreservesLegacyHistory() async throws {
+        // cacheURL == nil legacy fallback: generic cache missing, legacy
+        // pre-rename cache holds a valid record. A valid empty remote
+        // snapshot must preserve the legacy history and return the
+        // sanitized retry notice. Temp support directory + synthetic
+        // fixture only; never real user paths.
+        let dir = tempDir()
+        let support = dir.appendingPathComponent("Support", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: support, withIntermediateDirectories: true)
+        let generic = support.appendingPathComponent(OpenCodeSync.cacheFileName)
+        let legacy = support.appendingPathComponent(OpenCodeSync.legacyCacheFileName)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: generic.path))
+        let good = snapshotData()
+        try OpenCodeSync.writeSnapshotAtomically(good, to: legacy)
+        let status = dir.appendingPathComponent("status.json")
+        // The explicit cache override bypasses the fallback by design, so
+        // it must be absent here; save/restore to avoid leaking env state.
+        let savedOverride = ProcessInfo.processInfo.environment["TOKENBAR_OPENCODE_SYNC_CACHE"]
+        unsetenv("TOKENBAR_OPENCODE_SYNC_CACHE")
+        defer {
+            if let savedOverride { setenv("TOKENBAR_OPENCODE_SYNC_CACHE", savedOverride, 1) }
+        }
+        let service = OpenCodeSyncService(
+            fetcher: FakeFetcher(.success(Data("[]".utf8))),
+            supportDirectory: support)
+        // Resolver pins: nil resolves to the legacy file for history and
+        // to the generic file for writes.
+        XCTAssertEqual(service.resolvedPriorCacheURL(explicit: nil), legacy)
+        XCTAssertEqual(service.resolvedCacheDestination(explicit: nil), generic)
+        let result = await service.sync(
+            config: enabledConfig(), now: now, cacheURL: nil, statusURL: status)
+        XCTAssertFalse(result.didUpdateCache)
+        XCTAssertNotNil(result.error)
+        XCTAssertTrue(result.message.contains("kept previous data"))
+        XCTAssertTrue(result.message.lowercased().contains("retry"))
+        // Sanitized: no paths, no host alias, no payload contents.
+        XCTAssertFalse(result.message.contains("/"))
+        XCTAssertFalse(result.message.contains("myserver"))
+        XCTAssertFalse(result.message.contains(".json"))
+        // Legacy history preserved; generic destination never created.
+        XCTAssertEqual(try Data(contentsOf: legacy), good)
+        XCTAssertEqual(try OpenCodeStore.loadSnapshot(at: legacy.path).records.count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: generic.path))
+        XCTAssertEqual(service.loadStatus(from: status).lastError, result.message)
+    }
+
     func testRemotePathWithSpacesIsAllowed() {
         // Paths travel as one argv element (never word-split); only line
         // breaks are rejected. Host aliases stay strict (see allowlist test).
