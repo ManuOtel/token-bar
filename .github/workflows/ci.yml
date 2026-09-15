@@ -53,6 +53,7 @@ jobs:
           bash -n scripts/check-privacy.sh
           bash -n scripts/test-versioning.sh
           bash -n scripts/test-release.sh
+          bash -n scripts/test-site.sh
           sh -n scripts/show-usage.sh
           sh -n scripts/run-token-bar.sh
           sh -n scripts/build-app.sh
@@ -61,6 +62,7 @@ jobs:
           sh -n scripts/check-privacy.sh
           sh -n scripts/test-versioning.sh
           sh -n scripts/test-release.sh
+          sh -n scripts/test-site.sh
           test -x scripts/show-usage.sh
           test -x scripts/run-token-bar.sh
           test -x scripts/build-app.sh
@@ -69,6 +71,7 @@ jobs:
           test -x scripts/check-privacy.sh
           test -x scripts/test-versioning.sh
           test -x scripts/test-release.sh
+          test -x scripts/test-site.sh
 
   privacy:
     name: Privacy gate (bounded opt-in network/subprocess use + public-repo guard)

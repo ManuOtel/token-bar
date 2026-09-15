@@ -1,9 +1,8 @@
 name: Pages
 
 # Public product/download page: static site/ only, no build step.
-# Deploys on main pushes and on manual dispatch. The page is not live
-# until Pages is enabled for the repository; the workflow stays correct
-# before and after that step.
+# Deploys on main pushes and on manual dispatch. The page is live at
+# https://manuotel.github.io/token-bar/ (workflow build type).
 on:
   push:
     branches: [main]

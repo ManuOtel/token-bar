@@ -10,9 +10,8 @@ data sent).
 No accounts, no provider APIs, no cookies. Costs are estimates only,
 never a bill.
 
-Product page: [https://manuotel.github.io/token-bar/](https://manuotel.github.io/token-bar/)
-(static download page served by GitHub Pages once Pages is enabled for the
-repository; not claimed live until deployment is verified).
+Product page (live): [https://manuotel.github.io/token-bar/](https://manuotel.github.io/token-bar/)
+(static download page served by GitHub Pages from `site/`).
 
 ## Download (latest public release)
 
