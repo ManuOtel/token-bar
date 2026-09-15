@@ -109,6 +109,15 @@ a:hover { text-decoration-thickness: 2px; }
   align-items: start;
 }
 
+/* Grid items default to min-width: auto, which lets the long
+   verification lines size the track and overflow narrow viewports.
+   Allow both columns to shrink; the verify block keeps its own
+   readable horizontal scroll. */
+.hero-copy,
+.hero-mock {
+  min-width: 0;
+}
+
 .kicker {
   font-family: var(--mono);
   font-size: 0.85rem;
@@ -172,10 +181,18 @@ h1 {
   border-radius: var(--radius);
   padding: 1rem 1.25rem;
   overflow-x: auto;
+  max-width: 100%;
   font-size: 0.85rem;
 }
 
-.verify code { font-family: var(--mono); color: var(--text); }
+.verify code {
+  font-family: var(--mono);
+  color: var(--text);
+  white-space: pre;
+}
+
+/* Long download URLs must wrap instead of forcing horizontal overflow. */
+.checksum-list a { overflow-wrap: anywhere; }
 
 .note { color: var(--muted); font-size: 0.95rem; }
 .note a { color: var(--accent); }
