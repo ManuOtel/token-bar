@@ -18,7 +18,10 @@ struct TokenBarApp: App {
     // derive from one shared seed so startup reads/decodes the file once.
     @State private var report: LoadReport
     @State private var source: SourceFilter = .all
-    @State private var preset: DatePreset = .today
+    // Initial dashboard range: rolling last 7 days (DashboardSnapshot
+    // default). More useful than the narrow calendar-day window for a usage
+    // tracker; every range chip stays available and math is unchanged.
+    @State private var preset: DatePreset = DashboardSnapshot.defaultPreset
     @State private var isLoading = false
     @State private var isExpanded = false
     // True only when the on-screen report came from the startup cache and

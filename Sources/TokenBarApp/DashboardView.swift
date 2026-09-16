@@ -771,7 +771,7 @@ struct DashboardView: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Nothing in this view")
-            Text("No \(sourceLongLabel(source)) records in \(rangeLongLabel.lowercased()). The data may live in another source or range.")
+            Text("No \(sourceLongLabel(source)) records in \(rangeLongLabel.lowercased()). Records may exist outside this range - try a wider range or another source.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
@@ -779,10 +779,19 @@ struct DashboardView: View {
                     .buttonStyle(.bordered)
                     .help("Switch the source filter to all")
                     .accessibilityHint("Shows records from Codex, OpenCode, and Claude")
-                Button("Show lifetime") { preset = .lifetime }
-                    .buttonStyle(.bordered)
-                    .help("Switch the range to lifetime")
-                    .accessibilityHint("Removes the date filter")
+                if let wider = DashboardSnapshot.suggestedWiderPreset(for: preset) {
+                    if wider == .lifetime {
+                        Button("Show lifetime") { preset = .lifetime }
+                            .buttonStyle(.bordered)
+                            .help("Switch the range to lifetime")
+                            .accessibilityHint("Removes the date filter")
+                    } else {
+                        Button("Show last 30 days") { preset = .last30Days }
+                            .buttonStyle(.bordered)
+                            .help("Switch the range to the last 30 days")
+                            .accessibilityHint("Shows the last 30 days of records")
+                    }
+                }
             }
         }
         .padding(12)

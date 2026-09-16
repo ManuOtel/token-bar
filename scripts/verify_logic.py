@@ -686,6 +686,27 @@ def run():
           (codex_old >= now - timedelta(days=30)) and
           (parse_codex_line('{"type":"token_usage_record","timestamp":"2026-09-02T08:15:00Z",'
                             '"input_tokens":1200,"output_tokens":340}') is not None))
+    # Dashboard default is the rolling last 7 days (not the narrow calendar
+    # day); empty narrow scopes suggest the most useful wider range: 30D
+    # from Today/24H/7D, lifetime from 30D/Best, none from lifetime.
+    # Mirrors DashboardSnapshot.defaultPreset + suggestedWiderPreset.
+    def suggested_wider(preset):
+        if preset in ("today", "24h", "7d"):
+            return "30d"
+        if preset in ("30d", "best-month"):
+            return "lifetime"
+        return None
+
+    check("dashboard default range is rolling 7d",
+          suggested_wider("7d") == "30d" and (now - timedelta(days=2) >= now - timedelta(days=7)))
+    check("default 7d shows recent week missed by today",
+          not (now - timedelta(days=2) >= sod) and (now - timedelta(days=2) >= now - timedelta(days=7))
+          and not (now - timedelta(days=8) >= now - timedelta(days=7))
+          and (now - timedelta(days=8) >= now - timedelta(days=30)))
+    check("empty narrow scope suggests wider range",
+          suggested_wider("today") == "30d" and suggested_wider("24h") == "30d"
+          and suggested_wider("7d") == "30d" and suggested_wider("30d") == "lifetime"
+          and suggested_wider("best-month") == "lifetime" and suggested_wider("lifetime") is None)
 
     # Best month + tiebreak
     months = {"2026-08": 1000, "2026-09": 5000, "2026-07": 200}

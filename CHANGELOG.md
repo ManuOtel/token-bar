@@ -2,6 +2,25 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.3.4
+
+Focused dashboard default-range fix. No change to token math, source
+semantics, privacy boundaries, sync behavior, or pricing behavior. All
+range chips stay available.
+
+- Initial dashboard range is now the rolling last 7 days (`7D`) instead of
+  the narrow calendar-day `Today`, so the menu-bar popover opens on the
+  recent week rather than reading empty most mornings. CLI default stays
+  lifetime.
+- Clearer empty/source-filter state: it now names that records may exist
+  outside the selected range and offers the most useful one-tap wider
+  range (last 30 days from Today/24H/7D, lifetime from 30D/Best) alongside
+  the existing All-sources shortcut. Accessibility labels and the compact
+  400pt layout are unchanged.
+
+Release hygiene: unsigned and not notarized, as before; Gatekeeper
+first-launch note still applies.
+
 ## 0.3.3
 
 Focused dashboard readability pass for the menu-bar popover. No change
