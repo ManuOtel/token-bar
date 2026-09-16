@@ -99,8 +99,10 @@ struct DashboardView: View {
         }
         .onExitCommand {
             // Escape collapses Details back to the compact summary.
-            // No-op when already compact or when there is nothing to show.
-            if isExpanded && !report.records.isEmpty && scopedCount > 0 {
+            // No-op when already compact, when there is nothing to show,
+            // or while the Settings popover is open (Escape belongs to
+            // Settings then, not to the dashboard underneath).
+            if !showSettings && isExpanded && !report.records.isEmpty && scopedCount > 0 {
                 isExpanded = false
             }
         }
@@ -393,38 +395,45 @@ struct DashboardView: View {
 
     private var compactFooter: some View {
         let clean = ReportFormatter.sanitizeWarnings(report.warnings)
+        // Note: no combined accessibility element on the outer row. The
+        // notices Button must stay its own activatable element; combining
+        // the row would swallow it from VoiceOver.
         return HStack(spacing: 6) {
             if clean.isEmpty {
-                Image(systemName: "checkmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Text("Updated \(lastUpdatedShort)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            } else {
-                Image(systemName: "exclamationmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                Button(action: { isExpanded = true }) {
-                    Text("\(clean.count) notice\(clean.count == 1 ? "" : "s") - see Details")
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle")
                         .font(.caption)
-                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text("Updated \(lastUpdatedShort)")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .padding(.vertical, 6)
-                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .help("Expand to read notices")
-                .accessibilityLabel("\(clean.count) notices, expand details to read")
-                .accessibilityHint("Opens the Details view with the notice list")
+                .accessibilityElement(children: .combine)
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Button(action: { isExpanded = true }) {
+                        Text("\(clean.count) notice\(clean.count == 1 ? "" : "s") - see Details")
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Expand to read notices")
+                    .accessibilityLabel("\(clean.count) notices, expand details to read")
+                    .accessibilityHint("Opens the Details view with the notice list")
+                }
             }
             Spacer()
         }
-        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Details navigation (expanded)
@@ -433,15 +442,23 @@ struct DashboardView: View {
     /// collapse is reachable without hunting back to the title row.
     /// The header toggle was removed to declutter the title row.
     private var detailsHeader: some View {
+        // Note: the combined element covers the label group only. The
+        // Show less Button stays a sibling so VoiceOver keeps it as its
+        // own activatable element; combining the whole row would swallow it.
         HStack(spacing: 8) {
-            Text("Details")
-                .font(.headline)
-                .lineLimit(1)
-            Text("\(sourceShortLabel(source)) · \(rangeShortLabel(preset))")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .accessibilityHidden(true)
+            HStack(spacing: 8) {
+                Text("Details")
+                    .font(.headline)
+                    .lineLimit(1)
+                Text("\(sourceShortLabel(source)) · \(rangeShortLabel(preset))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .accessibilityHidden(true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Details, \(sourceLongLabel(source)), \(rangeHelp(preset))")
+            .accessibilityAddTraits(.isHeader)
             Spacer()
             Button(action: { isExpanded = false }) {
                 Label("Show less", systemImage: "chevron.up")
@@ -452,9 +469,6 @@ struct DashboardView: View {
             .accessibilityLabel("Collapse details")
             .accessibilityHint("Shows the compact summary")
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Details, \(sourceLongLabel(source)), \(rangeHelp(preset))")
-        .accessibilityAddTraits(.isHeader)
     }
 
     /// Bottom collapse target so long Details content does not force a
