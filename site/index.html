@@ -7,8 +7,9 @@
 <meta name="description" content="Token Bar is a free macOS menu-bar app that totals AI token usage from Codex, OpenCode, and Claude Code on your Mac. Local-first, no accounts, no uploads. Download the latest build.">
 <link rel="canonical" href="https://token-bar.manuotel.com/">
 <meta name="robots" content="index, follow">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#17181c">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#17181c" media="(prefers-color-scheme: dark)">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Token Bar">
 <meta property="og:title" content="Token Bar: Free macOS Menu-Bar AI Token Tracker">
@@ -121,9 +122,9 @@ shasum -a 256 -c TokenBar-latest-macos.dmg.sha256</code></pre>
               </div>
               <div class="pop-ring">
                 <svg width="72" height="72" viewBox="0 0 72 72" focusable="false">
-                  <circle cx="36" cy="36" r="28" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="10"/>
-                  <circle cx="36" cy="36" r="28" fill="none" stroke="#ff9f0a" stroke-width="10" stroke-linecap="round" stroke-dasharray="66.9 175.9" transform="rotate(-90 36 36)"/>
-                  <circle cx="36" cy="36" r="28" fill="none" stroke="#0a84ff" stroke-width="10" stroke-linecap="round" stroke-dasharray="109 175.9" stroke-dashoffset="-66.9" transform="rotate(-90 36 36)"/>
+                  <circle class="ring-track" cx="36" cy="36" r="28" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="10"/>
+                  <circle class="ring-seg-output" cx="36" cy="36" r="28" fill="none" stroke="#ff9f0a" stroke-width="10" stroke-linecap="round" stroke-dasharray="66.9 175.9" transform="rotate(-90 36 36)"/>
+                  <circle class="ring-seg-input" cx="36" cy="36" r="28" fill="none" stroke="#0a84ff" stroke-width="10" stroke-linecap="round" stroke-dasharray="109 175.9" stroke-dashoffset="-66.9" transform="rotate(-90 36 36)"/>
                 </svg>
                 <p class="pop-ring-caption">Input 62% &middot; Output 38%</p>
               </div>
