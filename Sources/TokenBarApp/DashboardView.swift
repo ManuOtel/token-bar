@@ -1,7 +1,11 @@
 import SwiftUI
 import TokenBarCore
 
-/// Dark usage cockpit for the macOS menu-bar popover, in two modes.
+/// Adaptive usage cockpit for the macOS menu-bar popover, in two modes.
+/// Follows the system appearance: clean and bright under a normal light
+/// appearance, coherent dark under a dark appearance. No forced color
+/// scheme; all content surfaces use semantic SwiftUI colors so both
+/// variants stay legible.
 ///
 /// - Compact (initial): hero total, estimated cost, source/range controls,
 ///   a compact visual summary (composition ring, source bar, mini trend),
@@ -62,7 +66,6 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             Divider()
-                .overlay(Color.white.opacity(0.08))
                 .padding(.vertical, -2)
                 .accessibilityHidden(true)
             statusBanner
@@ -99,7 +102,6 @@ struct DashboardView: View {
         }
         .padding(16)
         .frame(width: 400)
-        .preferredColorScheme(.dark)
         .onAppear {
             onInitialAppear()
         }
@@ -213,7 +215,7 @@ struct DashboardView: View {
             .padding(.vertical, 6)
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.05))
+            .background(Color.primary.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Showing previous data, updating")
@@ -401,7 +403,7 @@ struct DashboardView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.04))
+        .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -557,7 +559,7 @@ struct DashboardView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.06))
+        .background(Color.primary.opacity(0.06))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -594,7 +596,7 @@ struct DashboardView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.04))
+        .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -610,7 +612,7 @@ struct DashboardView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.04))
+        .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 10))
     }
 
@@ -770,7 +772,7 @@ struct DashboardView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.04))
+        .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -811,7 +813,7 @@ struct DashboardView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.04))
+        .background(Color.primary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -845,7 +847,7 @@ struct DashboardView: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white.opacity(0.04))
+            .background(Color.primary.opacity(0.04))
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }

@@ -2,6 +2,26 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.4.1
+
+Adaptive system appearance for the menu-bar app. No change to token
+math, source semantics, privacy boundaries, sync behavior, or pricing
+behavior. macOS 14 stays the deployment target.
+
+- The popover no longer forces dark: it follows the system appearance,
+  so a normal light appearance renders clean, bright, and legible while
+  dark remains fully supported. Content surfaces, text, dividers, and
+  chart tracks use semantic SwiftUI colors; source colors (Codex green,
+  OpenCode blue, Claude orange) and estimate-only labels are unchanged.
+- Liquid Glass stays a restrained functional layer on macOS 26 and
+  later (header actions, source/range chips, primary Details action)
+  behind the existing compile/runtime gates, with the macOS 14 fallback.
+  Charts, metric cards, and explanatory text stay on readable standard
+  surfaces.
+- Compact/expanded modes, keyboard focus, VoiceOver labels, Escape to
+  collapse, Reduce Transparency and Increase Contrast handling, Settings,
+  refresh/loading states, and OpenCode local/remote rows are unchanged.
+
 ## 0.4.0
 
 Native Liquid Glass adoption for the menu-bar app. No change to token

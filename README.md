@@ -68,11 +68,11 @@ Xcode alternative: open the folder in Xcode (`File > Open`), select the
 ## Install (packaged app)
 
 ```sh
-./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.4.0)
+./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.4.1)
 
-./scripts/package-release.sh --version 0.4.0 --format dmg   # macOS only, drag-and-drop layout
-(cd dist && shasum -a 256 -c TokenBar-0.4.0-macos.zip.sha256)
-(cd dist && shasum -a 256 -c TokenBar-0.4.0-macos.dmg.sha256)
+./scripts/package-release.sh --version 0.4.1 --format dmg   # macOS only, drag-and-drop layout
+(cd dist && shasum -a 256 -c TokenBar-0.4.1-macos.zip.sha256)
+(cd dist && shasum -a 256 -c TokenBar-0.4.1-macos.dmg.sha256)
 ```
 
 DMG install: open the dmg, drag `TokenBar.app` onto Applications, open.
@@ -349,7 +349,7 @@ clearly labeled approximations.
 
 ## Menu bar dashboard
 
-Dark usage cockpit in the macOS menu bar popover (400pt, macOS 14 SwiftUI, no extra chart dependency).
+Adaptive usage cockpit in the macOS menu bar popover (400pt, macOS 14 SwiftUI, no extra chart dependency). It follows the system appearance: bright and legible under light, coherent dark under dark.
 
 - **Compact (initial, no scroll):** hero token total for the active source/range, estimated cost (estimate only), `Source` chips (All / Codex / OpenCode / Claude with per-source tokens in range) and `Range` chips (Today / 24H / 7D / 30D / Best / All), a compact visual summary (input/output composition ring with cached/reasoning labelled as subsets, stacked source bar, 14-day mini trend), and a clear `Details` expand action plus a one-line updated/notices footer. The dashboard opens on the rolling last 7 days (`7D`); every range chip stays available and token/source math is unchanged.
 - **Expanded (Details, scrollable):** toggles back to compact via `Show less` in the header. Exposes input/output/cached/reasoning cards (cached reads "subset of input", reasoning "subset of output"), a composition card whose ring splits the total into input vs output only with subset percentages in text, an always-visible source breakdown (zero sources stay listed as `no records`) with a stacked distribution bar, top-5 model bars with share tooltips, the full 14-day trend with date range, and sanitized notices.

@@ -20,7 +20,7 @@ struct TokenCompositionRing: View {
         HStack(spacing: 12) {
             ZStack {
                 Circle()
-                    .stroke(Color.white.opacity(0.10), lineWidth: 10)
+                    .stroke(Color.primary.opacity(0.12), lineWidth: 10)
                 // Output arc first (background slice), then input arc.
                 Circle()
                     .trim(from: 0, to: CGFloat(comp.outputShare))
@@ -143,7 +143,7 @@ struct ModelDistributionBars: View {
                         GeometryReader { proxy in
                             ZStack(alignment: .leading) {
                                 RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.white.opacity(0.08))
+                                    .fill(Color.primary.opacity(0.12))
                                     .frame(height: 8)
                                 RoundedRectangle(cornerRadius: 3)
                                     .fill(Color.accentColor.opacity(0.85))
