@@ -28,7 +28,10 @@ struct SettingsView: View {
                         .labelStyle(.iconOnly)
                         .font(.body)
                 }
-                .buttonStyle(.bordered)
+                // Header action: system glass on macOS 26+, bordered before.
+                // Form buttons below stay bordered; glass is a functional
+                // layer for header actions only here. See LiquidGlass.swift.
+                .liquidGlassHeaderButton()
                 .help("Close settings")
                 .accessibilityLabel("Close settings")
             }

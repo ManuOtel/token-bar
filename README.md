@@ -68,11 +68,11 @@ Xcode alternative: open the folder in Xcode (`File > Open`), select the
 ## Install (packaged app)
 
 ```sh
-./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.3.4)
+./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.4.0)
 
-./scripts/package-release.sh --version 0.3.4 --format dmg   # macOS only, drag-and-drop layout
-(cd dist && shasum -a 256 -c TokenBar-0.3.4-macos.zip.sha256)
-(cd dist && shasum -a 256 -c TokenBar-0.3.4-macos.dmg.sha256)
+./scripts/package-release.sh --version 0.4.0 --format dmg   # macOS only, drag-and-drop layout
+(cd dist && shasum -a 256 -c TokenBar-0.4.0-macos.zip.sha256)
+(cd dist && shasum -a 256 -c TokenBar-0.4.0-macos.dmg.sha256)
 ```
 
 DMG install: open the dmg, drag `TokenBar.app` onto Applications, open.
