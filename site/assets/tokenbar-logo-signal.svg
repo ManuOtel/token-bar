@@ -1,0 +1,7 @@
+<svg xmlns="http&#58;//www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Token Bar signal mark</title>
+  <rect x="8" y="38" width="12" height="18" rx="6" fill="#1aab4b"/>
+  <rect x="26" y="28" width="12" height="28" rx="6" fill="#0071e3"/>
+  <rect x="44" y="24" width="12" height="32" rx="6" fill="#e8820c"/>
+  <rect x="44" y="8" width="12" height="8" rx="4" fill="#e8820c"/>
+</svg>
