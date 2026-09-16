@@ -286,8 +286,9 @@ h1, .lede, .cta-meta, .pop-number { overflow-wrap: break-word; }
 
 /* Hero integrations row: compact support line for the three sources.
    Flat pills on the standard surface; provider logos are local SVGs.
-   Height-fixed with auto width so wide wordmarks (OpenCode) keep their
-   ratio next to square marks; theme variants swap via <picture>. */
+   All three marks are square symbols with explicit equal width and
+   height so the OpenCode square aligns optically with the OpenAI and
+   Claude symbols; theme variants swap via <picture>. */
 .hero-sources {
   list-style: none;
   display: flex;
@@ -312,9 +313,9 @@ h1, .lede, .cta-meta, .pop-number { overflow-wrap: break-word; }
 
 .hero-source-mark {
   height: 18px;
-  width: auto;
-  max-width: 110px;
+  width: 18px;
   flex: none;
+  object-fit: contain;
 }
 
 h1 {
@@ -714,15 +715,15 @@ h3 { font-size: 1.02rem; margin: 0 0 0.35rem; }
 .source-strip h3 { display: flex; align-items: center; gap: 0.5rem; margin-top: 0; }
 
 /* Source provider logos: official local SVGs, transparent by default.
-   Height-fixed with auto width so the wide OpenCode wordmark keeps its
-   ratio beside the square Claude/OpenAI marks; theme variants swap via
-   <picture>. Layout never depends on color alone because each card also
-   carries a text label. */
+   All three marks are square symbols with explicit equal width and
+   height so the OpenCode square aligns optically with the OpenAI and
+   Claude symbols; theme variants swap via <picture>. Layout never
+   depends on color alone because each card also carries a text label. */
 .source-mark {
   height: 26px;
-  width: auto;
-  max-width: 180px;
+  width: 26px;
   flex: none;
+  object-fit: contain;
   border-radius: 6px;
 }
 .source-strip p { font-size: 0.92rem; color: var(--muted); margin-bottom: 0; }

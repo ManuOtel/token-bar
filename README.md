@@ -16,7 +16,7 @@ never a bill.
 
 ## Works with
 
-| <picture><source media="(prefers-color-scheme: dark)" srcset="site/assets/provider-openai-blossom-inverse.svg"><img src="site/assets/provider-openai-blossom.svg" alt="Official OpenAI mark used for OpenAI Codex" height="32"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="site/assets/provider-opencode-dark.svg"><img src="site/assets/provider-opencode-light.svg" alt="Official OpenCode logo" height="32"></picture> | <img src="site/assets/provider-claude-spark.svg" alt="Official Claude Spark mark for Claude Code" height="32"> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="site/assets/provider-openai-blossom-inverse.svg"><img src="site/assets/provider-openai-blossom.svg" alt="Official OpenAI mark used for OpenAI Codex" height="32"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="site/assets/provider-opencode-dark-square.svg"><img src="site/assets/provider-opencode-light-square.svg" alt="Official OpenCode logo" width="32" height="32"></picture> | <img src="site/assets/provider-claude-spark.svg" alt="Official Claude Spark mark for Claude Code" height="32"> |
 |:---:|:---:|:---:|
 | **OpenAI Codex** | **OpenCode** | **Claude Code** |
 | Local session history | Local usage database | Local project history |
