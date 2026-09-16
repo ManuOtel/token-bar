@@ -2,6 +2,28 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.4.0
+
+Native Liquid Glass adoption for the menu-bar app. No change to token
+math, source semantics, privacy boundaries, sync behavior, or pricing
+behavior. macOS 14 stays the deployment target.
+
+- Functional glass surfaces on macOS 26 and later: header actions use
+  the system glass button style, source/range chips share one glass
+  container with an interactive tinted effect for the active chip, and
+  the primary Details action uses a restrained blue-tinted glass. Newer
+  APIs are guarded with `#available`, centralized in one compatibility
+  file, and fall back to the existing Material/system-color layout on
+  macOS 14/15.
+- The fallback stays legible with Reduce Transparency (glass off,
+  opaque surfaces) and Increase Contrast (stronger control strokes).
+  Charts, metric cards, and explanatory text stay on standard content
+  surfaces; source colors (Codex green, OpenCode blue, Claude orange)
+  and estimate-only labels are unchanged.
+- Compact/expanded modes, keyboard focus, VoiceOver labels, Escape to
+  collapse, Settings, refresh/loading states, and OpenCode local/remote
+  rows are unchanged.
+
 ## 0.3.4
 
 Focused dashboard default-range fix. No change to token math, source

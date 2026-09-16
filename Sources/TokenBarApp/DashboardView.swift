@@ -51,6 +51,12 @@ struct DashboardView: View {
     var onSyncNow: () -> Void
     var onPollTick: () -> Void
     @State private var showSettings = false
+    // Liquid Glass inputs, read once per render: custom glass surfaces are
+    // skipped under Reduce Transparency, and fallback strokes strengthen
+    // under Increase Contrast. See LiquidGlass.swift.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var colorContrast
+    private var increaseContrast: Bool { colorContrast == .increased }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -163,7 +169,7 @@ struct DashboardView: View {
                     .frame(minWidth: 30, minHeight: 30)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.bordered)
+            .liquidGlassHeaderButton()
             .disabled(isLoading)
             .help("Reload local histories now")
             .accessibilityLabel("Refresh")
@@ -175,7 +181,7 @@ struct DashboardView: View {
                     .frame(minWidth: 30, minHeight: 30)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.bordered)
+            .liquidGlassHeaderButton()
             .help("Open settings: launch at login, pricing, remote sync")
             .accessibilityLabel("Settings")
             .accessibilityHint("Opens launch at login, pricing, and sync settings")
@@ -234,17 +240,19 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 6) {
             sectionEyebrow("SOURCE")
                 .accessibilityLabel("Source filter, \(sourceLongLabel(source)) selected")
-            HStack(spacing: 6) {
-                ForEach(sourceTotals, id: \.filter) { entry in
-                    chipButton(
-                        title: sourceShortLabel(entry.filter),
-                        detail: compactCount(entry.tokens),
-                        isActive: source == entry.filter,
-                        help: "\(sourceLongLabel(entry.filter)): \(entry.requests) records in range"
-                    ) { source = entry.filter }
-                    .accessibilityLabel("\(sourceLongLabel(entry.filter)), \(entry.requests) records")
-                    .accessibilityHint(source == entry.filter ? "Selected source filter" : "Switch source filter to \(sourceLongLabel(entry.filter))")
-                    .accessibilityAddTraits(source == entry.filter ? [.isButton, .isSelected] : .isButton)
+            LiquidGlassContainer(spacing: LiquidGlass.chipRowSpacing) {
+                HStack(spacing: 6) {
+                    ForEach(sourceTotals, id: \.filter) { entry in
+                        chipButton(
+                            title: sourceShortLabel(entry.filter),
+                            detail: compactCount(entry.tokens),
+                            isActive: source == entry.filter,
+                            help: "\(sourceLongLabel(entry.filter)): \(entry.requests) records in range"
+                        ) { source = entry.filter }
+                        .accessibilityLabel("\(sourceLongLabel(entry.filter)), \(entry.requests) records")
+                        .accessibilityHint(source == entry.filter ? "Selected source filter" : "Switch source filter to \(sourceLongLabel(entry.filter))")
+                        .accessibilityAddTraits(source == entry.filter ? [.isButton, .isSelected] : .isButton)
+                    }
                 }
             }
         }
@@ -254,17 +262,19 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 6) {
             sectionEyebrow("RANGE")
                 .accessibilityLabel("Range filter, \(rangeHelp(preset)) selected")
-            HStack(spacing: 6) {
-                ForEach(DatePreset.allCases, id: \.self) { item in
-                    chipButton(
-                        title: rangeShortLabel(item),
-                        detail: nil,
-                        isActive: preset == item,
-                        help: rangeHelp(item)
-                    ) { preset = item }
-                    .accessibilityLabel("Range \(rangeHelp(item))")
-                    .accessibilityHint(preset == item ? "Selected range" : "Switch range to \(rangeHelp(item))")
-                    .accessibilityAddTraits(preset == item ? [.isButton, .isSelected] : .isButton)
+            LiquidGlassContainer(spacing: LiquidGlass.chipRowSpacing) {
+                HStack(spacing: 6) {
+                    ForEach(DatePreset.allCases, id: \.self) { item in
+                        chipButton(
+                            title: rangeShortLabel(item),
+                            detail: nil,
+                            isActive: preset == item,
+                            help: rangeHelp(item)
+                        ) { preset = item }
+                        .accessibilityLabel("Range \(rangeHelp(item))")
+                        .accessibilityHint(preset == item ? "Selected range" : "Switch range to \(rangeHelp(item))")
+                        .accessibilityAddTraits(preset == item ? [.isButton, .isSelected] : .isButton)
+                    }
                 }
             }
         }
@@ -306,14 +316,13 @@ struct DashboardView: View {
             .frame(maxWidth: .infinity, minHeight: 34)
             .padding(.vertical, 8)
             .padding(.horizontal, 6)
-            .background(isActive ? Color.accentColor.opacity(0.9) : Color.white.opacity(0.07))
             .foregroundStyle(isActive ? .white : .primary)
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            .overlay(
-                RoundedRectangle(cornerRadius: 9)
-                    .stroke(Color.white.opacity(isActive ? 0.0 : 0.14), lineWidth: 1)
+            .liquidGlassChip(
+                isActive: isActive,
+                reduceTransparency: reduceTransparency,
+                increaseContrast: increaseContrast
             )
-            .contentShape(RoundedRectangle(cornerRadius: 9))
+            .contentShape(RoundedRectangle(cornerRadius: LiquidGlass.cornerRadius))
         }
         .buttonStyle(.plain)
         .help(helpText)
@@ -378,9 +387,12 @@ struct DashboardView: View {
                 .padding(.vertical, 10)
                 .padding(.horizontal, 12)
                 .frame(minHeight: 38)
-                .background(Color.white.opacity(0.07))
-                .clipShape(RoundedRectangle(cornerRadius: 9))
-                .contentShape(RoundedRectangle(cornerRadius: 9))
+                .liquidGlassAction(
+                    isPrimary: true,
+                    reduceTransparency: reduceTransparency,
+                    increaseContrast: increaseContrast
+                )
+                .contentShape(RoundedRectangle(cornerRadius: LiquidGlass.cornerRadius))
             }
             .buttonStyle(.plain)
             .help("Expand richer details")
@@ -464,7 +476,7 @@ struct DashboardView: View {
                 Label("Show less", systemImage: "chevron.up")
                     .font(.callout)
             }
-            .buttonStyle(.bordered)
+            .liquidGlassHeaderButton()
             .help("Collapse to the compact summary (or press Escape)")
             .accessibilityLabel("Collapse details")
             .accessibilityHint("Shows the compact summary")
@@ -488,9 +500,12 @@ struct DashboardView: View {
             .padding(.vertical, 10)
             .padding(.horizontal, 12)
             .frame(minHeight: 38)
-            .background(Color.white.opacity(0.07))
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            .contentShape(RoundedRectangle(cornerRadius: 9))
+            .liquidGlassAction(
+                isPrimary: false,
+                reduceTransparency: reduceTransparency,
+                increaseContrast: increaseContrast
+            )
+            .contentShape(RoundedRectangle(cornerRadius: LiquidGlass.cornerRadius))
         }
         .buttonStyle(.plain)
         .help("Collapse to the compact summary (or press Escape)")
