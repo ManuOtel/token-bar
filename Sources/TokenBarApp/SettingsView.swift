@@ -43,7 +43,8 @@ struct SettingsView: View {
         }
         .padding(14)
         .frame(width: 300)
-        .preferredColorScheme(.dark)
+        // Follows the system appearance like the dashboard: bright under
+        // light, coherent dark under dark. No forced color scheme.
         // Edited values save on submit, and once more on close: focus loss
         // without Return must not silently drop the host alias or path.
         .onDisappear { sync.saveConfig() }

@@ -14,9 +14,10 @@ import SwiftUI
 ///   branch, so `swift build`/`swift test` keep passing there.
 /// - Runtime gate: `if #available(macOS 26, *)`. A binary built with the
 ///   new SDK still runs on macOS 14/15 through the fallback.
-/// - Fallback: the exact pre-glass visuals (standard Material opacities,
-///   system colors, accent-blue active chips), so macOS 14 renders what it
-///   always rendered.
+/// - Fallback: adaptive pre-glass visuals (semantic opacities over the
+///   system popover material, accent-blue active chips), so macOS 14
+///   renders a clean bright popover under a light appearance and a
+///   coherent dark popover under a dark appearance.
 /// - Accessibility: custom `glassEffect` surfaces are skipped when Reduce
 ///   Transparency is on (opaque fallback instead); Increase Contrast
 ///   strengthens the fallback strokes. The system `.glass` button style
@@ -112,8 +113,8 @@ extension View {
     ///
     /// The primary (expand) action carries the restrained blue tint; the
     /// secondary (collapse) action uses untinted regular glass. The fallback
-    /// is the previous plain surface in both cases, so macOS 14 output is
-    /// pixel-identical to before.
+    /// is the adaptive plain surface below, so macOS 14 follows the system
+    /// appearance instead of forcing dark.
     @ViewBuilder
     func liquidGlassAction(isPrimary: Bool, reduceTransparency: Bool, increaseContrast: Bool) -> some View {
 #if compiler(>=6.2)
@@ -138,25 +139,31 @@ extension View {
     }
 
     /// Pre-glass chip visuals, kept as the macOS 14/15 rendering.
+    /// Adaptive by design: `.primary` resolves to black under a light
+    /// appearance and white under dark, so the same opacity reads as a
+    /// subtle gray chip in light mode and the previous translucent chip
+    /// in dark mode. Active chips keep the accent fill with white text.
     @ViewBuilder
     fileprivate func chipFallbackSurface(isActive: Bool, increaseContrast: Bool) -> some View {
         self
-            .background(isActive ? Color.accentColor.opacity(0.9) : Color.white.opacity(0.07))
+            .background(isActive ? Color.accentColor.opacity(0.9) : Color.primary.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: LiquidGlass.cornerRadius))
             .overlay(
                 RoundedRectangle(cornerRadius: LiquidGlass.cornerRadius)
                     .stroke(
-                        Color.white.opacity(isActive ? 0.0 : (increaseContrast ? 0.35 : 0.14)),
+                        Color.primary.opacity(isActive ? 0.0 : (increaseContrast ? 0.35 : 0.14)),
                         lineWidth: 1
                     )
             )
     }
 
     /// Pre-glass full-width action visuals, kept as the macOS 14/15 rendering.
+    /// Same adaptive treatment as chips: subtle darkening in light mode,
+    /// subtle lightening in dark mode.
     @ViewBuilder
     fileprivate func actionFallbackSurface(increaseContrast: Bool) -> some View {
         self
-            .background(Color.white.opacity(increaseContrast ? 0.10 : 0.07))
+            .background(Color.primary.opacity(increaseContrast ? 0.12 : 0.07))
             .clipShape(RoundedRectangle(cornerRadius: LiquidGlass.cornerRadius))
     }
 }
