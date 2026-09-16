@@ -83,11 +83,11 @@
     --inset-highlight: rgba(255, 255, 255, 0.12);
     --text: #f5f5f7;
     --muted: #aab3bf;
-    --blue: #0a84ff;
+    --blue: #0071e3;
     --blue-link: #7aa7ff;
-    --blue-glow: rgba(10, 132, 255, 0.28);
+    --blue-glow: rgba(0, 113, 227, 0.28);
     --codex: #30d158;
-    --opencode: #0a84ff;
+    --opencode: #0071e3;
     --claude: #ff9f0a;
     --focus: #8ab8ff;
     --ring-track: rgba(255, 255, 255, 0.12);
