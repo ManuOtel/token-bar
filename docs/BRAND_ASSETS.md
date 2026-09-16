@@ -1,10 +1,12 @@
 # Brand assets (third-party provider marks)
 
 Token Bar's own mark is `site/assets/tokenbar-logo.svg` (the orbit logo,
-primary everywhere). The three source marks below are **real provider
+primary everywhere). The provider marks below are **real provider
 artwork**, bundled locally so the README and the static site never fetch
-images at runtime. Each file is used exactly as shipped by its owner,
-except for the one dark-theme fill adaptation noted in the table.
+images at runtime. Four files are byte-identical to the upstream or
+mirror source named in the table; the remaining dark-theme OpenAI inverse
+is derived locally from the official Blossom file with the single fill
+adaptation noted in the table.
 
 No file here is a Token Bar invention. All provider marks remain the
 property of their respective owners and are shown only to identify the
@@ -13,11 +15,11 @@ affiliation with, any provider.
 
 | Provider | Bundled file | Official source | Retrieved | License / trademark note |
 |---|---|---|---|---|
-| OpenCode (Anomaly) | `site/assets/provider-opencode-light.svg` (SHA-256 `00ac8ac1…cd321`) | `https://github.com/sst/opencode` (`packages/web/src/assets/logo-light.svg`, `dev` branch; same artwork as `https://opencode.ai/brand`) | 2026-09-16 | Artwork by the OpenCode authors; repository is MIT-licensed. "OpenCode" wordmark is a trademark of its owner. Light-background variant, byte-identical to upstream. |
-| OpenCode (Anomaly) | `site/assets/provider-opencode-dark.svg` (SHA-256 `231e3f47…47170ee`) | `https://github.com/sst/opencode` (`packages/web/src/assets/logo-dark.svg`, `dev` branch; same artwork as `https://opencode.ai/brand`) | 2026-09-16 | Same as above. Dark-background variant, byte-identical to upstream. |
-| Claude Code (Anthropic) | `site/assets/provider-claude-spark.svg` (SHA-256 `6d53db4b…48bef25`) | `https://anthropic.com/press-kit` (official Anthropic press kit, "Claude logos / 3 Claude Spark / SVG / Claude Spark - Clay.svg") | 2026-09-16 | Artwork by Anthropic PBC. The single clay (`#D97757`) color reads on light and dark backgrounds, so one file serves both themes. Byte-identical to the press-kit file. "Claude" is a trademark of Anthropic. The compact Spark was chosen over the full Claude Code lockup for legibility at 18-26 px; the full Slate/Ivory lockups ship in the same press kit. |
-| OpenAI (for OpenAI Codex) | `site/assets/provider-openai-blossom.svg` (SHA-256 `ca35a572…ef873cc7`) | `https://openai.com/brand/` via Wikimedia Commons `File:OpenAI logo 2025 (symbol).svg` (page documents Source: `https://openai.com/brand/`, Author: OpenAI) | 2026-09-16 | Artwork by OpenAI. `openai.com` serves bot-protection pages to scripts, so the bytes were retrieved through the Commons mirror that cites the official brand page as its source; geometry verified as the current Blossom knot. Byte-identical to the mirror. "OpenAI" is a trademark of OpenAI. |
-| OpenAI (for OpenAI Codex, dark theme) | `site/assets/provider-openai-blossom-inverse.svg` (SHA-256 `31c1e09b…16c9e5a6`) | Derived locally from the file above | 2026-09-16 | Same ownership as above. Geometry is identical to the official file; the only change is a single root `fill="#fff"` presentation attribute so the black mark stays legible on the site's dark theme (the same reason OpenCode itself ships official light/dark fill pairs). No endorsement claim. |
+| OpenCode (Anomaly) | `site/assets/provider-opencode-light.svg` (SHA-256 `00ac8ac1b456ac230499fa76c08205d7658e29c383cd635669780c644fdcd321`) | `https://github.com/sst/opencode` (`packages/web/src/assets/logo-light.svg` at commit `2e018f70f2d13080de3dd5fda8720acf77ebd296`; same artwork as `https://opencode.ai/brand`) | 2026-09-16 | Artwork by the OpenCode authors; repository is MIT-licensed. "OpenCode" wordmark is a trademark of its owner. Light-background variant, byte-identical to upstream. |
+| OpenCode (Anomaly) | `site/assets/provider-opencode-dark.svg` (SHA-256 `231e3f47f332a0ace170bae2605488ac016cc85e584d89b1f9f9f0dff47170ee`) | `https://github.com/sst/opencode` (`packages/web/src/assets/logo-dark.svg` at commit `2e018f70f2d13080de3dd5fda8720acf77ebd296`; same artwork as `https://opencode.ai/brand`) | 2026-09-16 | Same as above. Dark-background variant, byte-identical to upstream. |
+| Claude Code (Anthropic) | `site/assets/provider-claude-spark.svg` (SHA-256 `6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219`) | `https://anthropic.com/press-kit` (official Anthropic press kit, "Claude logos / 3 Claude Spark / SVG / Claude Spark - Clay.svg") | 2026-09-16 | Artwork by Anthropic PBC. The single clay (`#D97757`) color reads on light and dark backgrounds, so one file serves both themes. Byte-identical to the press-kit file. "Claude" is a trademark of Anthropic. The compact Spark was chosen over the full Claude Code lockup for legibility at 18-26 px; the full Slate/Ivory lockups ship in the same press kit. |
+| OpenAI (for OpenAI Codex) | `site/assets/provider-openai-blossom.svg` (SHA-256 `ca35a5723163b6a766b8b37de9bedd24c2b3ae81d3caa4b9429ccb91ef873cc7`) | `https://openai.com/brand/` via Wikimedia Commons `File:OpenAI logo 2025 (symbol).svg` (page documents Source: `https://openai.com/brand/`, Author: OpenAI) | 2026-09-16 | Artwork by OpenAI. `openai.com` serves bot-protection pages to scripts, so the bytes were retrieved through the Commons mirror that cites the official brand page as its source; geometry verified as the current Blossom knot. Byte-identical to the mirror. "OpenAI" is a trademark of OpenAI. |
+| OpenAI (for OpenAI Codex, dark theme) | `site/assets/provider-openai-blossom-inverse.svg` (SHA-256 `31c1e09b9f7b36a6a295a3f2cb6b6fd392472cd4963a4b7b45cc62ea16c9e5a6`) | Derived locally from the file above | 2026-09-16 | Same ownership as above. Geometry is identical to the official file; the only change is a single root `fill="#fff"` presentation attribute so the black mark stays legible on the site's dark theme (the same reason OpenCode itself ships official light/dark fill pairs). No endorsement claim. |
 
 ## Codex branding limitation
 

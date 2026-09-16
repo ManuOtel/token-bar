@@ -25,6 +25,9 @@
 #     meaningful alt text, theme variants via <picture>, a trademark
 #     disclaimer, a brand-attribution doc, and no remote image embeds;
 #     the old invented source marks are fully gone
+#   - brand-attribution doc records the full 64-char SHA-256 of each
+#     bundled provider file plus the pinned OpenCode upstream commit,
+#     and the bundled bytes hash to those values
 #
 # Run: ./scripts/test-site.sh (from the repo root).
 set -eu
@@ -581,6 +584,64 @@ if grep -oiE '<img[^>]+>' README.md | grep -qiE 'src="https?://'; then
 else
   ok "README images stay local with no remote embeds"
 fi
+
+# --- 13. Brand asset integrity: full hashes plus pinned OpenCode commit ---
+# docs/BRAND_ASSETS.md must record the full 64-char SHA-256 of each
+# bundled provider file (no abbreviated prefixes) plus the exact pinned
+# OpenCode upstream commit, and the bundled bytes must hash to those
+# values. Portable across macOS/Linux: shasum preferred, sha256sum
+# fallback. POSIX sh only (no bashisms).
+_OPENCODE_PIN="2e018f70f2d13080de3dd5fda8720acf77ebd296"
+for _need in \
+  "00ac8ac1b456ac230499fa76c08205d7658e29c383cd635669780c644fdcd321" \
+  "231e3f47f332a0ace170bae2605488ac016cc85e584d89b1f9f9f0dff47170ee" \
+  "6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219" \
+  "ca35a5723163b6a766b8b37de9bedd24c2b3ae81d3caa4b9429ccb91ef873cc7" \
+  "31c1e09b9f7b36a6a295a3f2cb6b6fd392472cd4963a4b7b45cc62ea16c9e5a6"; do
+  if grep -Fq "$_need" "$ATTR" 2>/dev/null; then
+    ok "attribution doc records full hash $_need"
+  else
+    bad "attribution doc records full hash $_need" "missing full 64-char hash in $ATTR"
+  fi
+done
+if grep -Fq "$_OPENCODE_PIN" "$ATTR" 2>/dev/null; then
+  ok "attribution doc pins OpenCode upstream commit $_OPENCODE_PIN"
+else
+  bad "attribution doc pins OpenCode upstream commit" "missing $_OPENCODE_PIN in $ATTR"
+fi
+if [ "$(grep -F -c "$_OPENCODE_PIN" "$ATTR" 2>/dev/null || true)" -ge 2 ]; then
+  ok "attribution doc pins the OpenCode commit on both variants"
+else
+  bad "attribution doc pins the OpenCode commit on both variants" "expected $_OPENCODE_PIN on both OpenCode rows in $ATTR"
+fi
+_hash_file() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -d' ' -f1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    return 1
+  fi
+}
+_check_asset_hash() {
+  _asset="$1"
+  _expected="$2"
+  _actual=""
+  if _actual="$(_hash_file "$_asset" 2>/dev/null)"; then
+    if [ "$_actual" = "$_expected" ]; then
+      ok "bundled asset hashes to recorded SHA-256 ($_asset)"
+    else
+      bad "bundled asset hashes to recorded SHA-256 ($_asset)" "expected $_expected, got $_actual"
+    fi
+  else
+    bad "bundled asset hashes to recorded SHA-256 ($_asset)" "no shasum or sha256sum available"
+  fi
+}
+_check_asset_hash "site/assets/provider-opencode-light.svg" "00ac8ac1b456ac230499fa76c08205d7658e29c383cd635669780c644fdcd321"
+_check_asset_hash "site/assets/provider-opencode-dark.svg" "231e3f47f332a0ace170bae2605488ac016cc85e584d89b1f9f9f0dff47170ee"
+_check_asset_hash "site/assets/provider-claude-spark.svg" "6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219"
+_check_asset_hash "site/assets/provider-openai-blossom.svg" "ca35a5723163b6a766b8b37de9bedd24c2b3ae81d3caa4b9429ccb91ef873cc7"
+_check_asset_hash "site/assets/provider-openai-blossom-inverse.svg" "31c1e09b9f7b36a6a295a3f2cb6b6fd392472cd4963a4b7b45cc62ea16c9e5a6"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
