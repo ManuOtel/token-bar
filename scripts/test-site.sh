@@ -10,9 +10,11 @@
 #     latest dmg, zip, both SHA-256 checksums, repo, changelog
 #   - exactly one h1 plus semantic landmarks (header/main/nav/footer,
 #     lang, title, viewport, skip link)
-#   - no external URLs outside the public repo, its Pages site, or the
-#     intentional custom domain; no scripts, no external assets,
-#     no tracker/cookie strings
+#   - no external URLs outside the public repo, its Pages site, the
+#     intentional custom domain, or the SEO standards allowlist
+#     (schema.org JSON-LD context, sitemaps.org namespace); no scripts
+#     except one JSON-LD metadata block, no external assets except the
+#     canonical link, no tracker/cookie strings
 #   - page states the unsigned/not-notarized Gatekeeper note, the
 #     estimates-only cost note, and the local-first privacy boundary
 #   - page names the current VERSION (fails stale on version bump)
@@ -86,8 +88,9 @@ done
 
 # --- 4. No external URLs outside the allowlist plus custom domain ---
 # Every http(s) URL under site/ must stay on the public repo, its Pages
-# site, or the intentional custom domain (site/CNAME). The custom domain
-# is a deliberate product URL, allowlisted here and in
+# site, the intentional custom domain (site/CNAME), or the SEO standards
+# allowlist (schema.org JSON-LD context, sitemaps.org sitemap namespace).
+# The custom domain is a deliberate product URL, allowlisted here and in
 # scripts/check-privacy.sh. Fragments stay split so this validator never
 # self-matches the privacy guard's path rule.
 _PU1='/Us'; _PU2='ers/'; _PH1='/ho'; _PH2='me/'
@@ -95,7 +98,7 @@ URLS="$(grep -rhoE 'https?://[^"'"'"' )<>]+' site/ || true)"
 BAD_URLS=""
 for url in $URLS; do
   case "$url" in
-    https://github.com/ManuOtel/token-bar*|https://manuotel.github.io/token-bar*|https://token-bar.manuotel.com*) ;;
+    https://github.com/ManuOtel/token-bar*|https://manuotel.github.io/token-bar*|https://token-bar.manuotel.com*|https://schema.org*|http://www.sitemaps.org/*|https://www.sitemaps.org/*) ;;
     *) BAD_URLS="$BAD_URLS $url" ;;
   esac
 done
@@ -105,13 +108,18 @@ else
   bad "site uses no external URLs outside the public repo" "found:$BAD_URLS"
 fi
 
-# --- 5. No scripts, external assets, trackers, or cookies ---
-if grep -qiE '<script|onclick|onload=|onerror=|<iframe' "$SITE"; then
+# --- 5. No scripts (except one JSON-LD block), external assets
+# (except the canonical link), trackers, or cookies ---
+# The single <script type="application/ld+json"> metadata block is the
+# only script allowed: it carries no code, only structured data.
+SCRIPT_HITS="$(grep -iE '<script|onclick|onload=|onerror=|<iframe' "$SITE" | grep -vi 'application/ld+json' || true)"
+if [ -n "$SCRIPT_HITS" ]; then
   bad "site ships no scripts or frames" "found script/iframe/event handler"
 else
   ok "site ships no scripts or frames"
 fi
-if grep -qiE '@import|url\(http|<img[^>]+src="http|<link[^>]+href="http' site/index.html site/styles.css; then
+ASSET_HITS="$(grep -iE '@import|url\(http|<img[^>]+src="http|<link[^>]+href="http' site/index.html site/styles.css | grep -vi 'rel="canonical"' || true)"
+if [ -n "$ASSET_HITS" ]; then
   bad "site ships no external assets" "found remote import/img/link"
 else
   ok "site ships no external assets"
@@ -187,6 +195,61 @@ if grep -Fq "token-bar.manuotel.com" "$SITE"; then
   ok "site references the custom domain"
 else
   bad "site references the custom domain" "missing token-bar.manuotel.com in $SITE"
+fi
+
+# --- 10. Search discoverability: canonical, robots, social, JSON-LD, sitemap ---
+if grep -Fq '<link rel="canonical" href="https://token-bar.manuotel.com/">' "$SITE"; then
+  ok "site sets the canonical homepage URL"
+else
+  bad "site sets the canonical homepage URL" "missing canonical link to https://token-bar.manuotel.com/"
+fi
+if grep -qiE '<meta name="robots" content="[^"]*index[^"]*"' "$SITE" \
+  && ! grep -qiE '<meta name="robots" content="[^"]*noindex' "$SITE"; then
+  ok "site permits indexing via robots metadata"
+else
+  bad "site permits indexing via robots metadata" "needs an index robots meta without noindex"
+fi
+for tag in 'property="og:title"' 'property="og:description"' 'property="og:url"' 'name="twitter:card"'; do
+  if grep -Fq "$tag" "$SITE"; then
+    ok "site sets social metadata $tag"
+  else
+    bad "site sets social metadata $tag" "missing in $SITE"
+  fi
+done
+LD_COUNT="$(grep -c 'application/ld+json' "$SITE" || true)"
+if [ "$LD_COUNT" = "1" ]; then
+  ok "site ships exactly one JSON-LD block"
+else
+  bad "site ships exactly one JSON-LD block" "found $LD_COUNT"
+fi
+for claim in '"@type": "SoftwareApplication"' '"downloadUrl"' '"price": 0' '"priceCurrency": "USD"'; do
+  if grep -Fq "$claim" "$SITE"; then
+    ok "JSON-LD states $claim"
+  else
+    bad "JSON-LD states $claim" "missing in $SITE"
+  fi
+done
+if [ -n "${CURRENT:-}" ] && grep -Fq "\"softwareVersion\": \"$CURRENT\"" "$SITE"; then
+  ok "JSON-LD softwareVersion matches VERSION ($CURRENT)"
+else
+  bad "JSON-LD softwareVersion matches VERSION" "missing \"softwareVersion\": \"${CURRENT:-unknown}\" in $SITE"
+fi
+if [ -f site/robots.txt ] \
+  && grep -Fq "Allow: /" site/robots.txt \
+  && grep -Fq "Sitemap: https://token-bar.manuotel.com/sitemap.xml" site/robots.txt; then
+  ok "site serves crawler robots.txt with sitemap pointer"
+else
+  bad "site serves crawler robots.txt with sitemap pointer" "missing site/robots.txt Allow plus Sitemap lines"
+fi
+if [ -f site/sitemap.xml ] \
+  && grep -Fq "<loc>https://token-bar.manuotel.com/</loc>" site/sitemap.xml; then
+  if python3 -c "import xml.dom.minidom,sys; xml.dom.minidom.parse('site/sitemap.xml')" 2>/dev/null; then
+    ok "site serves a valid sitemap with the canonical homepage URL"
+  else
+    bad "site serves a valid sitemap" "site/sitemap.xml does not parse as XML"
+  fi
+else
+  bad "site serves a valid sitemap" "missing site/sitemap.xml canonical loc"
 fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"

@@ -3,22 +3,56 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Token Bar: a native macOS menu-bar utility that totals your own local Codex, OpenCode, and Claude Code token usage. Local-first, no accounts, no trackers, no cookies. Download the latest macOS build.">
+<title>Token Bar: Free macOS Menu-Bar AI Token Tracker (Codex, OpenCode, Claude Code)</title>
+<meta name="description" content="Token Bar is a free macOS menu-bar app that totals AI token usage from Codex, OpenCode, and Claude Code on your Mac. Local-first, no accounts, no uploads. Download the latest build.">
+<link rel="canonical" href="https://token-bar.manuotel.com/">
+<meta name="robots" content="index, follow">
 <meta name="color-scheme" content="dark">
-<title>Token Bar - local AI token usage in your menu bar</title>
+<meta name="theme-color" content="#17181c">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Token Bar">
+<meta property="og:title" content="Token Bar: Free macOS Menu-Bar AI Token Tracker">
+<meta property="og:description" content="A free, local-first macOS menu-bar app that totals AI token usage from Codex, OpenCode, and Claude Code. No accounts, no uploads; costs are estimates only.">
+<meta property="og:url" content="https://token-bar.manuotel.com/">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Token Bar: Free macOS Menu-Bar AI Token Tracker">
+<meta name="twitter:description" content="A free, local-first macOS menu-bar app that totals AI token usage from Codex, OpenCode, and Claude Code. No accounts, no uploads.">
 <link rel="stylesheet" href="styles.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Token Bar",
+  "description": "Token Bar is a free, local-first macOS menu-bar app that totals AI token usage from Codex, OpenCode, and Claude Code. No accounts, no uploads; costs are estimates only.",
+  "url": "https://token-bar.manuotel.com/",
+  "downloadUrl": "https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg",
+  "operatingSystem": "macOS 14.0 or later",
+  "applicationCategory": "DeveloperApplication",
+  "isAccessibleForFree": true,
+  "offers": {
+    "@type": "Offer",
+    "price": 0,
+    "priceCurrency": "USD"
+  },
+  "softwareVersion": "0.3.4",
+  "license": "https://github.com/ManuOtel/token-bar/blob/main/LICENSE"
+}
+</script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar">
   <div class="wrap topbar-inner">
-    <p class="brand"><span class="brand-mark" aria-hidden="true">▮▮▮</span> Token Bar <span class="ver">v0.3.4</span></p>
+    <p class="brand"><span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" focusable="false"><rect x="1" y="7" width="4" height="9" rx="1.2" fill="#30d158"/><rect x="7" y="4" width="4" height="12" rx="1.2" fill="#0a84ff"/><rect x="13" y="1.5" width="4" height="14.5" rx="1.2" fill="#ff9f0a"/></svg></span> Token Bar <span class="ver">v0.3.4</span></p>
     <nav aria-label="Site">
       <ul class="nav-list">
         <li><a href="#download">Download</a></li>
         <li><a href="#sources">Sources</a></li>
         <li><a href="#readout">Readout</a></li>
         <li><a href="#install">Install</a></li>
+        <li><a href="#faq">FAQ</a></li>
+        <li><a href="#privacy">Privacy</a></li>
         <li><a href="https://github.com/ManuOtel/token-bar">GitHub</a></li>
       </ul>
     </nav>
@@ -29,17 +63,18 @@
   <section class="hero" aria-labelledby="page-title" id="download">
     <div class="hero-grid">
       <div class="hero-copy">
-        <p class="kicker">Native macOS 14+ menu-bar utility</p>
-        <h1 id="page-title">Token totals for your coding agents, in the menu bar.</h1>
-        <p class="lede">Token Bar reads the usage history already on your Mac from Codex, OpenCode, and Claude Code, and totals it where you can always see it. Read-only file access. No accounts. No usage upload. Every cost figure is an estimate only, never a bill.</p>
+        <p class="kicker">Free native macOS 14+ menu-bar app</p>
+        <h1 id="page-title">Your AI token usage, one glance away.</h1>
+        <p class="lede">Token Bar totals the token usage already on your Mac from Codex, OpenCode, and Claude Code, and shows it in the menu bar. Read-only file access. No accounts. No usage upload. Every cost figure is an estimate only, never a bill.</p>
         <div class="cta-row">
           <a class="btn primary" href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg">Download for macOS (.dmg)</a>
-          <a class="btn" href="https://github.com/ManuOtel/token-bar">GitHub repository ManuOtel/token-bar</a>
+          <a class="btn" href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip">Download .zip instead</a>
         </div>
-        <p class="cta-meta">DMG disk image &middot; macOS 14 (Sonoma) or later &middot; v0.3.4 &middot; <a href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip">Download .zip instead</a></p>
+        <p class="cta-meta">DMG disk image &middot; macOS 14 (Sonoma) or later &middot; v0.3.4 &middot; free, no sign-in</p>
         <ul class="checksum-list">
           <li><a href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg.sha256">DMG checksum (SHA-256)</a></li>
           <li><a href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256">ZIP checksum (SHA-256)</a></li>
+          <li><a href="https://github.com/ManuOtel/token-bar">GitHub repository ManuOtel/token-bar</a></li>
           <li><a href="https://github.com/ManuOtel/token-bar/blob/main/CHANGELOG.md">Release changelog for Token Bar</a></li>
         </ul>
         <pre class="verify"><code>curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg
@@ -47,40 +82,69 @@ curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar
 shasum -a 256 -c TokenBar-latest-macos.dmg.sha256</code></pre>
         <p class="note">Releases are <strong>unsigned and not notarized</strong>, so macOS Gatekeeper warns on first launch. That is expected: right-click Open the app once, then launch normally. Each <a href="https://github.com/ManuOtel/token-bar/releases">GitHub release</a> also keeps versioned <span class="mono">TokenBar-&lt;version&gt;-macos.zip</span> and <span class="mono">.dmg</span> assets with checksums.</p>
       </div>
-      <div class="hero-specimen">
-        <div class="specimen" role="img" aria-label="Illustrative sample of the Token Bar compact popover: token total, estimated cost, source and range selectors, source mix bar, and 14-day trend. All figures are illustrative samples, not your usage.">
+      <div class="hero-popover">
+        <div class="popover" role="img" aria-label="Illustrative sample of the Token Bar compact popover: header with title and settings, source and range selectors, token total with estimated cost, input-output ring, source mix bar, 14-day trend, and a Details button. All figures are illustrative samples, not your usage.">
           <div aria-hidden="true">
-            <p class="specimen-bar"><span class="dots"><i></i><i></i><i></i></span> TokenBar &mdash; All &middot; 7D</p>
-            <p class="specimen-total">2,512,800 <span>tokens</span></p>
-            <p class="specimen-cost">est. $4.10 <span>estimate only</span></p>
-            <ul class="specimen-chips">
+            <div class="pop-head">
+              <div class="pop-title">
+                <p class="pop-eyebrow">Token Bar</p>
+                <p class="pop-sub">Local usage</p>
+                <p class="pop-view">All &middot; 7D</p>
+              </div>
+              <div class="pop-actions">
+                <span class="pop-icon"><svg width="13" height="13" viewBox="0 0 14 14" focusable="false"><path d="M12.5 7A5.5 5.5 0 1 1 7 1.5c1.9 0 3.5.9 4.6 2.3M11.8 1v3h-3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+                <span class="pop-icon"><svg width="13" height="13" viewBox="0 0 14 14" focusable="false"><path d="M7 4.6A2.4 2.4 0 1 0 7 9.4 2.4 2.4 0 0 0 7 4.6Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 1.2v1.7M7 11.1v1.7M1.2 7h1.7M11.1 7h1.7M2.9 2.9l1.2 1.2M9.9 9.9l1.2 1.2M11.1 2.9 9.9 4.1M4.1 9.9 2.9 11.1" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+              </div>
+            </div>
+            <p class="pop-label">Source</p>
+            <ul class="pop-chips">
               <li class="on">All</li>
-              <li>Codex</li>
-              <li>OpenCode</li>
-              <li>Claude</li>
+              <li><i class="dot codex"></i>Codex</li>
+              <li><i class="dot opencode"></i>OpenCode</li>
+              <li><i class="dot claude"></i>Claude</li>
             </ul>
-            <ul class="specimen-chips ghost">
+            <p class="pop-label">Range</p>
+            <ul class="pop-chips range">
               <li>Today</li>
+              <li>24H</li>
               <li class="on">7D</li>
               <li>30D</li>
               <li>Best</li>
               <li>All</li>
             </ul>
-            <div class="specimen-mix">
-              <span style="--w: 49%"></span><span style="--w: 34%"></span><span style="--w: 17%"></span>
+            <div class="pop-hero">
+              <div class="pop-total">
+                <p class="pop-caption">Total in view</p>
+                <p class="pop-number">2,512,800</p>
+                <p class="pop-cost">&asymp; $4.10 est.</p>
+                <p class="pop-meta">1,204 req &middot; 86 sess &middot; 7D</p>
+              </div>
+              <div class="pop-ring">
+                <svg width="72" height="72" viewBox="0 0 72 72" focusable="false">
+                  <circle cx="36" cy="36" r="28" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="10"/>
+                  <circle cx="36" cy="36" r="28" fill="none" stroke="#ff9f0a" stroke-width="10" stroke-linecap="round" stroke-dasharray="66.9 175.9" transform="rotate(-90 36 36)"/>
+                  <circle cx="36" cy="36" r="28" fill="none" stroke="#0a84ff" stroke-width="10" stroke-linecap="round" stroke-dasharray="109 175.9" stroke-dashoffset="-66.9" transform="rotate(-90 36 36)"/>
+                </svg>
+                <p class="pop-ring-caption">Input 62% &middot; Output 38%</p>
+              </div>
             </div>
-            <ul class="specimen-legend">
-              <li><i class="sw a"></i>Codex 49%</li>
-              <li><i class="sw b"></i>OpenCode 34%</li>
-              <li><i class="sw c"></i>Claude 17%</li>
+            <div class="pop-mix">
+              <span class="seg codex" style="--w: 49%"></span><span class="seg opencode" style="--w: 34%"></span><span class="seg claude" style="--w: 17%"></span>
+            </div>
+            <ul class="pop-legend">
+              <li><i class="dot codex"></i>Codex 49%</li>
+              <li><i class="dot opencode"></i>OpenCode 34%</li>
+              <li><i class="dot claude"></i>Claude 17%</li>
             </ul>
-            <div class="specimen-trend">
+            <p class="pop-label">Last 14 days</p>
+            <div class="pop-trend">
               <span style="--h: 30%"></span><span style="--h: 45%"></span><span style="--h: 38%"></span><span style="--h: 60%"></span><span style="--h: 52%"></span><span style="--h: 74%"></span><span style="--h: 66%"></span><span style="--h: 88%"></span><span style="--h: 70%"></span><span style="--h: 95%"></span><span style="--h: 80%"></span><span style="--h: 58%"></span><span style="--h: 72%"></span><span style="--h: 100%"></span>
             </div>
-            <p class="specimen-foot">updated just now &middot; Details &rsaquo;</p>
+            <p class="pop-details">Show details: sources, models, trend <span aria-hidden="true">&rsaquo;</span></p>
+            <p class="pop-foot">Updated just now</p>
           </div>
         </div>
-        <p class="specimen-note">Illustrative sample figures, not your usage.</p>
+        <p class="popover-note">The actual compact popover, sampled with illustrative figures.</p>
       </div>
     </div>
     <ul class="trust" aria-label="Local-first guarantees">
@@ -95,16 +159,16 @@ shasum -a 256 -c TokenBar-latest-macos.dmg.sha256</code></pre>
     <p class="sec-kicker">Sources</p>
     <h2 id="sources-title">Three local sources. One total.</h2>
     <ul class="source-strip">
-      <li>
-        <h3>Codex</h3>
+      <li class="src-codex">
+        <h3><span class="dot codex" aria-hidden="true"></span>Codex</h3>
         <p>Local session history, read-only. Per-record counts with file-sequential model attribution; unknown models stay listed under <span class="mono">unknown</span> at fallback rates.</p>
       </li>
-      <li>
-        <h3>OpenCode</h3>
+      <li class="src-opencode">
+        <h3><span class="dot opencode" aria-hidden="true"></span>OpenCode</h3>
         <p>Local usage database, read-only. Per-message rows lead; session rollups fill gaps only. A second machine joins as an opt-in token-only snapshot.</p>
       </li>
-      <li>
-        <h3>Claude Code</h3>
+      <li class="src-claude">
+        <h3><span class="dot claude" aria-hidden="true"></span>Claude Code</h3>
         <p>Local project history, read-only. Cache reads fold into input, matching provider semantics.</p>
       </li>
     </ul>
@@ -145,6 +209,29 @@ shasum -a 256 -c TokenBar-latest-macos.dmg.sha256</code></pre>
       <li><strong>Open once past Gatekeeper.</strong> Releases are <strong>unsigned and not notarized</strong>: right-click Open the app once, then launch normally.</li>
       <li><strong>Read your usage.</strong> First launch scans local history only; later launches show the cached report instantly while a background refresh recomputes. Launch-at-login lives behind the Settings gear, off until you enable it.</li>
     </ol>
+  </section>
+
+  <section aria-labelledby="faq-title" id="faq">
+    <p class="sec-kicker">FAQ</p>
+    <h2 id="faq-title">Questions, answered briefly.</h2>
+    <div class="faq-grid">
+      <div>
+        <h3>What does the free app do?</h3>
+        <p>Token Bar is a free macOS menu-bar app that totals your AI token usage across Codex, OpenCode, and Claude Code, with source and range filters, per-model and daily-trend views, and clearly labelled cost estimates. It is free to download and use, with no sign-in.</p>
+      </div>
+      <div>
+        <h3>Which sources are supported?</h3>
+        <p>Codex, OpenCode, and Claude Code, read from the usage history already on your Mac. A second machine can join the OpenCode total through an opt-in token-only snapshot, either copied manually or pulled over your own SSH setup.</p>
+      </div>
+      <div>
+        <h3>Does my usage leave my Mac?</h3>
+        <p>No. Usage data, prompts, message bodies, paths, and credentials never leave the machine. There are no accounts, no provider integrations, no analytics, and no cookies. The only network uses are strictly opt-in and off by default: a public pricing refresh and the remote snapshot pull.</p>
+      </div>
+      <div>
+        <h3>How do I install it?</h3>
+        <p>Download the DMG, verify its SHA-256 checksum, drag Token Bar to Applications, then right-click Open once past the expected Gatekeeper warning for unsigned builds. It needs macOS 14 (Sonoma) or later.</p>
+      </div>
+    </div>
   </section>
 
   <section aria-labelledby="privacy-title" id="privacy">
