@@ -6,16 +6,19 @@ import TokenBarCore
 /// - Compact (initial): hero total, estimated cost, source/range controls,
 ///   a compact visual summary (composition ring, source bar, mini trend),
 ///   and a clear Details action. Fits a ~400pt popover without scrolling.
-/// - Expanded (Details): the full readable breakdown (metric cards,
-///   composition, source rows with OpenCode origin split, model bars,
-///   14-day trend, notices), scrollable.
+/// - Expanded (Details): the full readable breakdown (section header with
+///   a Show less action, metric cards, composition, source rows with
+///   OpenCode origin split, model bars, 14-day trend, notices, plus a
+///   bottom Show less action), scrollable.
 ///
 /// Launch at login, pricing, and remote sync live behind the gear button
 /// in the header (a small settings popover), never as always-visible footer
-/// sections.
+/// sections. The header holds only Refresh and Settings so the title row
+/// stays uncrowded; expand/collapse lives in the content flow where the
+/// eye already is.
 /// Labels stay short and single-line so nothing wraps or clips at the
 /// compact size; every control is a real button (keyboard focusable) with
-/// a tooltip and accessibility label.
+/// a tooltip and accessibility label. Escape collapses Details.
 struct SourceChipData: Hashable {
     var filter: SourceFilter
     var tokens: Int
@@ -52,16 +55,11 @@ struct DashboardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            if isStaleCache {
-                HStack(spacing: 6) {
-                    ProgressView().scaleEffect(0.6)
-                    Text("Showing previous data - updating…")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .accessibilityLabel("Showing previous data, updating")
-            }
+            Divider()
+                .overlay(Color.white.opacity(0.08))
+                .padding(.vertical, -2)
+                .accessibilityHidden(true)
+            statusBanner
             sourceSection
             rangeSection
             if report.records.isEmpty {
@@ -73,12 +71,14 @@ struct DashboardView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
+                        detailsHeader
                         heroStats
                         metricGrid
                         compositionCard
                         sourceBreakdown
                         modelBreakdown
                         trendFull
+                        collapseFooter
                     }
                 }
                 .frame(maxHeight: 380)
@@ -96,6 +96,13 @@ struct DashboardView: View {
         .preferredColorScheme(.dark)
         .onAppear {
             onInitialAppear()
+        }
+        .onExitCommand {
+            // Escape collapses Details back to the compact summary.
+            // No-op when already compact or when there is nothing to show.
+            if isExpanded && !report.records.isEmpty && scopedCount > 0 {
+                isExpanded = false
+            }
         }
         .onDisappear {
             // If the outer menu-bar window is dismissed while the nested
@@ -118,8 +125,12 @@ struct DashboardView: View {
 
     // MARK: - Header
 
+    /// Title row with only two icon actions (Refresh, Settings).
+    /// Expand/collapse lives in the content flow, not here, so the top
+    /// row scans as title + status + two targets. The caption names the
+    /// active view for sighted scanning and VoiceOver.
     private var header: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("TOKEN BAR")
                     .font(.caption)
@@ -130,24 +141,37 @@ struct DashboardView: View {
                 Text("Local usage")
                     .font(.headline)
                     .lineLimit(1)
+                Text("\(sourceShortLabel(source)) · \(rangeShortLabel(preset))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Token Bar, local usage")
+            .accessibilityLabel("Token Bar, local usage, \(sourceLongLabel(source)), \(rangeHelp(preset))")
             Spacer()
-            if isLoading { ProgressView().scaleEffect(0.7).accessibilityLabel("Loading") }
+            if isLoading {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .accessibilityLabel("Loading updated usage")
+            }
             Button(action: onRefresh) {
                 Label("Refresh", systemImage: "arrow.clockwise")
                     .labelStyle(.iconOnly)
                     .font(.body)
+                    .frame(minWidth: 30, minHeight: 30)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.bordered)
             .disabled(isLoading)
             .help("Reload local histories now")
             .accessibilityLabel("Refresh")
+            .accessibilityHint("Reloads local histories now")
             Button(action: { showSettings = true }) {
                 Label("Settings", systemImage: "gearshape")
                     .labelStyle(.iconOnly)
                     .font(.body)
+                    .frame(minWidth: 30, minHeight: 30)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.bordered)
             .help("Open settings: launch at login, pricing, remote sync")
@@ -156,17 +180,49 @@ struct DashboardView: View {
             .popover(isPresented: $showSettings) {
                 SettingsView(loginItem: loginItem, pricing: pricing, sync: sync, onSyncNow: onSyncNow)
             }
-            Button(action: { isExpanded.toggle() }) {
-                Label(
-                    isExpanded ? "Show less" : "Details",
-                    systemImage: isExpanded ? "chevron.up" : "chevron.down"
-                )
-                .font(.callout)
+        }
+    }
+
+    // MARK: - Status banner (stale cache / background refresh)
+
+    /// One-line status slot below the header. Stale cache reads as a calm
+    /// pill with an icon; a manual refresh with live data keeps only the
+    /// header spinner so the layout does not jump.
+    @ViewBuilder
+    private var statusBanner: some View {
+        if isStaleCache {
+            HStack(spacing: 6) {
+                ProgressView().scaleEffect(0.6)
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text("Showing previous data - updating…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .buttonStyle(.bordered)
-            .help(isExpanded ? "Collapse to the compact summary" : "Expand richer details")
-            .accessibilityLabel(isExpanded ? "Collapse details" : "Expand details")
-            .accessibilityHint(isExpanded ? "Shows the compact summary" : "Shows source, model and trend details")
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Showing previous data, updating")
+            .accessibilityHint("A background refresh is recomputing totals")
+        } else if isLoading && !report.records.isEmpty && scopedCount > 0 {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text("Updating totals…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Updating totals")
         }
     }
 
@@ -174,13 +230,8 @@ struct DashboardView: View {
 
     private var sourceSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("SOURCE")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .accessibilityHidden(true)
+            sectionEyebrow("SOURCE")
+                .accessibilityLabel("Source filter, \(sourceLongLabel(source)) selected")
             HStack(spacing: 6) {
                 ForEach(sourceTotals, id: \.filter) { entry in
                     chipButton(
@@ -190,6 +241,8 @@ struct DashboardView: View {
                         help: "\(sourceLongLabel(entry.filter)): \(entry.requests) records in range"
                     ) { source = entry.filter }
                     .accessibilityLabel("\(sourceLongLabel(entry.filter)), \(entry.requests) records")
+                    .accessibilityHint(source == entry.filter ? "Selected source filter" : "Switch source filter to \(sourceLongLabel(entry.filter))")
+                    .accessibilityAddTraits(source == entry.filter ? [.isButton, .isSelected] : .isButton)
                 }
             }
         }
@@ -197,13 +250,8 @@ struct DashboardView: View {
 
     private var rangeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("RANGE")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .accessibilityHidden(true)
+            sectionEyebrow("RANGE")
+                .accessibilityLabel("Range filter, \(rangeHelp(preset)) selected")
             HStack(spacing: 6) {
                 ForEach(DatePreset.allCases, id: \.self) { item in
                     chipButton(
@@ -213,9 +261,23 @@ struct DashboardView: View {
                         help: rangeHelp(item)
                     ) { preset = item }
                     .accessibilityLabel("Range \(rangeHelp(item))")
+                    .accessibilityHint(preset == item ? "Selected range" : "Switch range to \(rangeHelp(item))")
+                    .accessibilityAddTraits(preset == item ? [.isButton, .isSelected] : .isButton)
                 }
             }
         }
+    }
+
+    /// Shared small-caps section label. Callers attach a richer VoiceOver
+    /// label naming the current selection; without an override the visible
+    /// text itself is announced.
+    private func sectionEyebrow(_ title: String) -> some View {
+        Text(title)
+            .font(.caption)
+            .fontWeight(.semibold)
+            .tracking(1.2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
     }
 
     private func chipButton(
@@ -228,7 +290,7 @@ struct DashboardView: View {
         Button(action: action) {
             VStack(spacing: 1) {
                 Text(title)
-                    .font(.caption)
+                    .font(.callout)
                     .fontWeight(isActive ? .semibold : .regular)
                     .lineLimit(1)
                 if let detail {
@@ -239,16 +301,17 @@ struct DashboardView: View {
                         .foregroundStyle(isActive ? .primary : .secondary)
                 }
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 7)
-            .padding(.horizontal, 4)
-            .background(isActive ? Color.accentColor.opacity(0.85) : Color.white.opacity(0.06))
+            .frame(maxWidth: .infinity, minHeight: 34)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 6)
+            .background(isActive ? Color.accentColor.opacity(0.9) : Color.white.opacity(0.07))
             .foregroundStyle(isActive ? .white : .primary)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.white.opacity(isActive ? 0.0 : 0.10), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 9)
+                    .stroke(Color.white.opacity(isActive ? 0.0 : 0.14), lineWidth: 1)
             )
+            .contentShape(RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
         .help(helpText)
@@ -260,18 +323,25 @@ struct DashboardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
+                    Text("TOTAL IN VIEW")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .tracking(0.8)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .accessibilityHidden(true)
                     Text(fullCount(stats.totalTokens))
                         .font(.system(size: 30, weight: .bold, design: .rounded))
                         .monospacedDigit()
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
-                        .accessibilityLabel("\(fullCount(stats.totalTokens)) tokens")
+                        .accessibilityLabel("\(fullCount(stats.totalTokens)) tokens in \(rangeLongLabel), \(sourceLongLabel(source))")
                     Text("≈ \(costString(stats.estimatedCostUSD)) est.")
                         .font(.callout)
                         .fontWeight(.semibold)
                         .monospacedDigit()
                         .lineLimit(1)
-                    Text("\(stats.requests) req · \(stats.sessions) sess")
+                    Text("\(stats.requests) req · \(stats.sessions) sess · \(rangeShortLabel(preset))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -282,25 +352,38 @@ struct DashboardView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             SourceStackedBar(stats: stats, compactCount: compactCount)
-            DailyTrendChart(stats: stats, fullCount: fullCount, maxBars: 14, barHeight: 36)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("LAST 14 DAYS")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .accessibilityHidden(true)
+                DailyTrendChart(stats: stats, fullCount: fullCount, maxBars: 14, barHeight: 36)
+            }
             Button(action: { isExpanded.toggle() }) {
                 HStack {
                     Text("Show details: sources, models, trend")
                         .font(.callout)
+                        .fontWeight(.medium)
                         .lineLimit(1)
                     Spacer()
                     Image(systemName: "chevron.down")
                         .font(.caption)
+                        .accessibilityHidden(true)
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 10)
-                .background(Color.white.opacity(0.06))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 38)
+                .background(Color.white.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+                .contentShape(RoundedRectangle(cornerRadius: 9))
             }
             .buttonStyle(.plain)
             .help("Expand richer details")
             .accessibilityLabel("Show details")
-            .accessibilityHint("Shows sources, models and trend details")
+            .accessibilityHint("Shows sources, models and trend details. Escape collapses again.")
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -310,26 +393,95 @@ struct DashboardView: View {
 
     private var compactFooter: some View {
         let clean = ReportFormatter.sanitizeWarnings(report.warnings)
-        return HStack(spacing: 8) {
+        return HStack(spacing: 6) {
             if clean.isEmpty {
+                Image(systemName: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Text("Updated \(lastUpdatedShort)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             } else {
+                Image(systemName: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Button(action: { isExpanded = true }) {
                     Text("\(clean.count) notice\(clean.count == 1 ? "" : "s") - see Details")
                         .font(.caption)
+                        .fontWeight(.medium)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("Expand to read notices")
                 .accessibilityLabel("\(clean.count) notices, expand details to read")
+                .accessibilityHint("Opens the Details view with the notice list")
             }
             Spacer()
         }
         .accessibilityElement(children: .combine)
+    }
+
+    // MARK: - Details navigation (expanded)
+
+    /// Section header pinned at the top of the expanded scroll content so
+    /// collapse is reachable without hunting back to the title row.
+    /// The header toggle was removed to declutter the title row.
+    private var detailsHeader: some View {
+        HStack(spacing: 8) {
+            Text("Details")
+                .font(.headline)
+                .lineLimit(1)
+            Text("\(sourceShortLabel(source)) · \(rangeShortLabel(preset))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityHidden(true)
+            Spacer()
+            Button(action: { isExpanded = false }) {
+                Label("Show less", systemImage: "chevron.up")
+                    .font(.callout)
+            }
+            .buttonStyle(.bordered)
+            .help("Collapse to the compact summary (or press Escape)")
+            .accessibilityLabel("Collapse details")
+            .accessibilityHint("Shows the compact summary")
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Details, \(sourceLongLabel(source)), \(rangeHelp(preset))")
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    /// Bottom collapse target so long Details content does not force a
+    /// scroll back to the top to get home.
+    private var collapseFooter: some View {
+        Button(action: { isExpanded = false }) {
+            HStack {
+                Text("Show less")
+                    .font(.callout)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                Spacer()
+                Image(systemName: "chevron.up")
+                    .font(.caption)
+                    .accessibilityHidden(true)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 38)
+            .background(Color.white.opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .help("Collapse to the compact summary (or press Escape)")
+        .accessibilityLabel("Collapse details")
+        .accessibilityHint("Shows the compact summary")
     }
 
     // MARK: - Hero + metrics (expanded)
@@ -419,13 +571,8 @@ struct DashboardView: View {
 
     private var compositionCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("COMPOSITION")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .accessibilityHidden(true)
+            sectionEyebrow("COMPOSITION")
+                .accessibilityLabel("Composition, input versus output split")
             TokenCompositionRing(stats: stats, compactCount: compactCount)
             let comp = DashboardInsights.composition(for: stats)
             Text("Ring splits the total into input (\(Int(comp.inputShare * 100))%) vs output (\(Int(comp.outputShare * 100))%). Cached (\(Int(comp.cachedShareOfInput * 100))% of input) and reasoning (\(Int(comp.reasoningShareOfOutput * 100))% of output) are subsets, never added on top.")
@@ -442,13 +589,8 @@ struct DashboardView: View {
 
     private var sourceBreakdown: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("SOURCES IN THIS RANGE")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .accessibilityHidden(true)
+            sectionEyebrow("SOURCES IN THIS RANGE")
+                .accessibilityLabel("Sources in this range")
             SourceStackedBar(stats: stats, compactCount: compactCount)
             let byKey = Dictionary(uniqueKeysWithValues: stats.bySource.map { ($0.key, $0) })
             let maxTokens = max(stats.bySource.map(\.totalTokens).max() ?? 0, 1)
@@ -528,26 +670,16 @@ struct DashboardView: View {
 
     private var modelBreakdown: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("TOP MODELS")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .accessibilityHidden(true)
+            sectionEyebrow("TOP MODELS")
+                .accessibilityLabel("Top models in this view")
             ModelDistributionBars(stats: stats, compactCount: compactCount, fullCount: fullCount, limit: 5)
         }
     }
 
     private var trendFull: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("DAILY TREND")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .tracking(1.2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .accessibilityHidden(true)
+            sectionEyebrow("DAILY TREND")
+                .accessibilityLabel("Daily trend, last 14 days")
             DailyTrendChart(stats: stats, fullCount: fullCount, maxBars: 14, barHeight: 64)
         }
     }
@@ -559,14 +691,29 @@ struct DashboardView: View {
             if isLoading {
                 HStack(spacing: 8) {
                     ProgressView().scaleEffect(0.8)
+                    Image(systemName: "magnifyingglass")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     Text("Reading local histories…")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Reading local histories")
+                .accessibilityHint("Scanning Codex, OpenCode, and Claude histories")
             } else {
-                Text("No usage data yet")
-                    .font(.headline)
+                HStack(spacing: 8) {
+                    Image(systemName: "tray")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text("No usage data yet")
+                        .font(.headline)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("No usage data yet")
                 Text("Token Bar reads local histories only. Nothing was found at:")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -575,6 +722,8 @@ struct DashboardView: View {
                     Text("OpenCode: ~/.local/share/opencode/opencode.db").font(.caption).monospaced()
                     Text("Claude: ~/.claude/projects/**/*.jsonl").font(.caption).monospaced()
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Checked Codex sessions, the OpenCode database, and Claude projects. Nothing found.")
                 Text("Testing overrides: TOKENBAR_CODEX_ROOT, TOKENBAR_OPENCODE_DB, TOKENBAR_CLAUDE_ROOT.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -585,7 +734,9 @@ struct DashboardView: View {
                     .lineLimit(1)
                 Button("Retry now", action: onRefresh)
                     .buttonStyle(.bordered)
+                    .controlSize(.regular)
                     .help("Reload local histories now")
+                    .accessibilityHint("Scans local histories again")
             }
         }
         .padding(12)
@@ -596,8 +747,16 @@ struct DashboardView: View {
 
     private var noScopeState: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Nothing in this view")
-                .font(.headline)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text("Nothing in this view")
+                    .font(.headline)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Nothing in this view")
             Text("No \(sourceLongLabel(source)) records in \(rangeLongLabel.lowercased()). The data may live in another source or range.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -605,9 +764,11 @@ struct DashboardView: View {
                 Button("Show all sources") { source = .all }
                     .buttonStyle(.bordered)
                     .help("Switch the source filter to all")
+                    .accessibilityHint("Shows records from Codex, OpenCode, and Claude")
                 Button("Show lifetime") { preset = .lifetime }
                     .buttonStyle(.bordered)
                     .help("Switch the range to lifetime")
+                    .accessibilityHint("Removes the date filter")
             }
         }
         .padding(12)
@@ -622,20 +783,32 @@ struct DashboardView: View {
         // never reach the menu bar UI.
         let clean = ReportFormatter.sanitizeWarnings(report.warnings)
         if !clean.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("NOTICES (\(clean.count))")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .tracking(1.2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text("NOTICES (\(clean.count))")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .tracking(1.2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(clean.count) notices")
+                .accessibilityAddTraits(.isHeader)
                 ForEach(clean, id: \.self) { warning in
-                    Text(friendlyNotice(warning))
+                    Text("• \(friendlyNotice(warning))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
         }
     }
 

@@ -2,7 +2,7 @@
 # Package a built TokenBar.app into a versioned zip (default) or DMG.
 #
 # Usage:
-#   ./scripts/package-release.sh [--version 0.3.2] [--format zip|dmg]
+#   ./scripts/package-release.sh [--version 0.3.3] [--format zip|dmg]
 #                                [--app dist/TokenBar.app] [--outdir dist]
 #
 # Env overrides: TOKENBAR_VERSION, TOKENBAR_FORMAT, TOKENBAR_APP.
@@ -91,7 +91,7 @@ if [ -z "$VERSION" ] && [ -f VERSION ]; then
   unset _file_version
 fi
 if [ -z "$VERSION" ]; then
-  VERSION="0.3.2"
+  VERSION="0.3.3"
 fi
 case "$VERSION" in
   *[!0-9A-Za-z.\-]*)

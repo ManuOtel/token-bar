@@ -45,7 +45,7 @@ config stores no password, key, or token.
 ## 3. Versioned app build
 
 Version source of truth: the `VERSION` file at the repo root (currently
-`0.3.2`; the 0.2.0 line accumulated user-visible remote-sync and Settings
+`0.3.3`; the 0.2.0 line accumulated user-visible remote-sync and Settings
 UI functionality, hence the minor bump). `scripts/build-app.sh` defaults
 to it; `scripts/package-release.sh` falls back to the built app's
 `Info.plist`, then to it.
