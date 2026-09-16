@@ -1,4 +1,8 @@
+<img src="site/assets/tokenbar-logo.svg" alt="Token Bar orbit logo: three colored orbit arcs around three usage bars" width="96">
+
 # Token Bar
+
+**Your AI token usage, one glance away.**
 
 [![CI](https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml/badge.svg)](https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml)
 
@@ -9,6 +13,15 @@ copy), plus one strictly opt-in public OpenRouter pricing GET (no usage
 data sent).
 No accounts, no provider APIs, no cookies. Costs are estimates only,
 never a bill.
+
+## Works with
+
+| ![Codex source mark: green code brackets](site/assets/source-codex.svg) | ![OpenCode source mark: blue open ring with core dot](site/assets/source-opencode.svg) | ![Claude Code source mark: orange diamond with core dot](site/assets/source-claude.svg) |
+|:---:|:---:|:---:|
+| **Codex** | **OpenCode** | **Claude Code** |
+| Local session history | Local usage database | Local project history |
+
+Marks above are local Token Bar source-integration icons, not provider logos.
 
 Product page (live): [https://manuotel.github.io/token-bar/](https://manuotel.github.io/token-bar/)
 (static landing page served by GitHub Pages from `site/`, no build step,

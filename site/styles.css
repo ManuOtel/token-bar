@@ -10,8 +10,8 @@
    Static CSS only imitates the visual language: backdrop-filter layers
    sit on top of opaque solid fallbacks, so the page remains usable where
    blur is unsupported or Reduce Transparency is on. This is not Apple's
-   native Liquid Glass material. Local system stacks, inline SVG, no
-   external fonts, assets, scripts, or network. */
+   native Liquid Glass material. Local system stacks, local SVG assets,
+   no external fonts, remote images, scripts, or network. */
 
 :root {
   color-scheme: light dark;
@@ -184,7 +184,13 @@ section[id] { scroll-margin-top: 4.5rem; }
   gap: 0.5rem;
 }
 
-.brand-mark { display: inline-flex; }
+.brand-logo {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  flex: none;
+}
 
 .ver {
   display: inline-block;
@@ -256,6 +262,57 @@ h1, .lede, .cta-meta, .pop-number { overflow-wrap: break-word; }
   font-weight: 600;
   color: var(--muted);
   margin: 0 0 0.75rem;
+}
+
+/* Hero identity: canonical logo plus product line. Flat, compact, and
+   transparent by default so the orbit mark reads on light and dark. */
+.hero-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0 0 0.8rem;
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  font-size: 1rem;
+}
+
+.hero-logo {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 10px;
+}
+
+/* Hero integrations row: compact support line for the three sources.
+   Flat pills on the standard surface; marks are local SVGs with fixed
+   provider colors that stay legible on both themes at small sizes. */
+.hero-sources {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 1rem 0 0;
+  padding: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.hero-sources li {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid var(--hairline);
+  background: var(--panel);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem 0.3rem 0.45rem;
+}
+
+.hero-source-mark {
+  width: 18px;
+  height: 18px;
+  flex: none;
 }
 
 h1 {
@@ -652,7 +709,18 @@ h3 { font-size: 1.02rem; margin: 0 0 0.35rem; }
 .source-strip li.src-opencode { border-top-color: var(--opencode); }
 .source-strip li.src-claude { border-top-color: var(--claude); }
 
-.source-strip h3 { display: flex; align-items: center; gap: 0.45rem; margin-top: 0; }
+.source-strip h3 { display: flex; align-items: center; gap: 0.5rem; margin-top: 0; }
+
+/* Source integration marks: local geometric SVGs, transparent by default.
+   Fixed provider fills match the canonical logo palette and stay legible
+   on light and dark at small sizes; layout never depends on color alone
+   because each card also carries a text label. */
+.source-mark {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 6px;
+}
 .source-strip p { font-size: 0.92rem; color: var(--muted); margin-bottom: 0; }
 .source-strip p .mono { color: var(--text); }
 

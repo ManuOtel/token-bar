@@ -20,7 +20,7 @@
 <meta name="twitter:title" content="Token Bar: Free macOS Menu-Bar AI Token Tracker">
 <meta name="twitter:description" content="A free, local-first macOS menu-bar app that totals AI token usage from Codex, OpenCode, and Claude Code. No accounts, no uploads.">
 <link rel="stylesheet" href="styles.css">
-<link rel="icon" type="image/svg+xml" href="/assets/tokenbar-logo.svg">
+<link rel="icon" type="image/svg+xml" href="assets/tokenbar-logo.svg">
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -46,7 +46,7 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar">
   <div class="wrap topbar-inner">
-    <p class="brand"><span class="brand-mark" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" focusable="false"><rect x="1" y="7" width="4" height="9" rx="1.2" fill="#30d158"/><rect x="7" y="4" width="4" height="12" rx="1.2" fill="#0a84ff"/><rect x="13" y="1.5" width="4" height="14.5" rx="1.2" fill="#ff9f0a"/></svg></span> Token Bar <span class="ver">v0.4.1</span></p>
+    <p class="brand"><img src="assets/tokenbar-logo.svg" alt="Token Bar logo" width="22" height="22" class="brand-logo"> Token Bar <span class="ver">v0.4.1</span></p>
     <nav aria-label="Site">
       <ul class="nav-list">
         <li><a href="#download">Download</a></li>
@@ -65,9 +65,15 @@
   <section class="hero" aria-labelledby="page-title" id="download">
     <div class="hero-grid">
       <div class="hero-copy">
+        <p class="hero-identity"><img src="assets/tokenbar-logo.svg" alt="Token Bar orbit logo" width="44" height="44" class="hero-logo"><span>Token Bar for macOS</span></p>
         <p class="kicker">Free native macOS 14+ menu-bar app</p>
         <h1 id="page-title">Your AI token usage, one glance away.</h1>
         <p class="lede">Token Bar totals the token usage already on your Mac from Codex, OpenCode, and Claude Code, and shows it in the menu bar. Read-only file access. No accounts. No usage upload. Every cost figure is an estimate only, never a bill.</p>
+        <ul class="hero-sources" aria-label="Works with">
+          <li><img src="assets/source-codex.svg" alt="Codex integration mark" width="18" height="18" class="hero-source-mark">Codex</li>
+          <li><img src="assets/source-opencode.svg" alt="OpenCode integration mark" width="18" height="18" class="hero-source-mark">OpenCode</li>
+          <li><img src="assets/source-claude.svg" alt="Claude Code integration mark" width="18" height="18" class="hero-source-mark">Claude Code</li>
+        </ul>
         <div class="cta-row">
           <a class="btn primary" href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg">Download for macOS (.dmg)</a>
           <a class="btn" href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip">Download .zip instead</a>
@@ -162,19 +168,19 @@ shasum -a 256 -c TokenBar-latest-macos.dmg.sha256</code></pre>
     <h2 id="sources-title">Three local sources. One total.</h2>
     <ul class="source-strip">
       <li class="src-codex">
-        <h3><span class="dot codex" aria-hidden="true"></span>Codex</h3>
+        <h3><img src="assets/source-codex.svg" alt="Codex integration mark" width="26" height="26" class="source-mark">Codex</h3>
         <p>Local session history, read-only. Per-record counts with file-sequential model attribution; unknown models stay listed under <span class="mono">unknown</span> at fallback rates.</p>
       </li>
       <li class="src-opencode">
-        <h3><span class="dot opencode" aria-hidden="true"></span>OpenCode</h3>
+        <h3><img src="assets/source-opencode.svg" alt="OpenCode integration mark" width="26" height="26" class="source-mark">OpenCode</h3>
         <p>Local usage database, read-only. Per-message rows lead; session rollups fill gaps only. A second machine joins as an opt-in token-only snapshot.</p>
       </li>
       <li class="src-claude">
-        <h3><span class="dot claude" aria-hidden="true"></span>Claude Code</h3>
+        <h3><img src="assets/source-claude.svg" alt="Claude Code integration mark" width="26" height="26" class="source-mark">Claude Code</h3>
         <p>Local project history, read-only. Cache reads fold into input, matching provider semantics.</p>
       </li>
     </ul>
-    <p class="fine">Cached counts are a subset of input; reasoning is a subset of output. Neither is ever added on top of the total. Missing sources show an empty total plus a short sanitized notice, never a raw file path.</p>
+    <p class="fine">Source icons above are local Token Bar integration marks, not provider logos. Cached counts are a subset of input; reasoning is a subset of output. Neither is ever added on top of the total. Missing sources show an empty total plus a short sanitized notice, never a raw file path.</p>
   </section>
 
   <section aria-labelledby="readout-title" id="readout">
@@ -250,7 +256,7 @@ shasum -a 256 -c TokenBar-latest-macos.dmg.sha256</code></pre>
 </main>
 <footer class="footer">
   <div class="wrap footer-inner">
-    <p>Token Bar v0.4.1. This static page ships no JavaScript, no fonts, no remote images, no analytics, and no cookies (local SVG favicon only). Costs are estimates only, never a bill. Also served at <a href="https://token-bar.manuotel.com/">token-bar.manuotel.com</a>.</p>
+    <p>Token Bar v0.4.1. This static page ships no JavaScript, no fonts, no remote images, no analytics, and no cookies (local SVG assets only). Costs are estimates only, never a bill. Also served at <a href="https://token-bar.manuotel.com/">token-bar.manuotel.com</a>.</p>
   </div>
 </footer>
 </body>

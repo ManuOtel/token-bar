@@ -20,6 +20,9 @@
 #   - page names the current VERSION (fails stale on version bump)
 #   - no obvious personal data (emails, home dirs, SSH material,
 #     real snapshot names)
+#   - canonical Token Bar logo plus local source-integration marks are
+#     wired by relative asset paths in the README and the site, with
+#     accessible titles and no remote image embeds
 #
 # Run: ./scripts/test-site.sh (from the repo root).
 set -eu
@@ -259,6 +262,10 @@ fi
 # --- 11. Canonical orbit logo plus favicon contract ---
 # Exactly one canonical asset (site/assets/tokenbar-logo.svg); comparison
 # candidates (orbit/pulse/signal suffixed files) must not ship.
+# The favicon plus all brand/source imagery use document-relative
+# assets/... paths so the page works under the custom-domain root and the
+# GitHub Pages project subpath alike. Root-relative /assets/... stays
+# rejected because it breaks the project subpath.
 LOGO="site/assets/tokenbar-logo.svg"
 if [ -f "$LOGO" ]; then
   ok "canonical orbit logo exists ($LOGO)"
@@ -312,10 +319,146 @@ if [ -f "$LOGO" ]; then
     ok "canonical logo stays transparent by default"
   fi
 fi
-if grep -Fq '<link rel="icon" type="image/svg+xml" href="/assets/tokenbar-logo.svg">' "$SITE"; then
-  ok "site wires the canonical SVG as favicon with a root-relative path"
+if grep -Fq '<link rel="icon" type="image/svg+xml" href="assets/tokenbar-logo.svg">' "$SITE"; then
+  ok "site wires the canonical SVG as favicon with a relative path"
 else
-  bad "site wires the canonical SVG as favicon" "missing <link rel=icon type=image/svg+xml href=/assets/tokenbar-logo.svg> in $SITE"
+  bad "site wires the canonical SVG as favicon" "missing <link rel=icon type=image/svg+xml href=assets/tokenbar-logo.svg> in $SITE"
+fi
+if grep -Fq 'href="/assets/tokenbar-logo.svg"' "$SITE"; then
+  bad "site avoids root-relative asset paths" "found href=/assets/... which breaks the GitHub Pages project subpath"
+else
+  ok "site avoids root-relative asset paths"
+fi
+
+# --- 12. Branding use plus local source-integration marks ---
+# The Token Bar logo is primary (header brand plus hero identity); the
+# three source marks support the integration list only. All four ship as
+# local code-native SVGs under site/assets/, referenced by relative paths
+# with alt text. Remote <img>/image embeds stay rejected by section 5.
+if grep -Fq 'src="assets/tokenbar-logo.svg"' "$SITE" && grep -Fq 'class="brand-logo"' "$SITE"; then
+  ok "site header uses the canonical logo by relative path"
+else
+  bad "site header uses the canonical logo by relative path" "needs img src=assets/tokenbar-logo.svg with class=brand-logo in $SITE"
+fi
+if grep -Fq 'class="hero-logo"' "$SITE" && grep -Fq 'src="assets/tokenbar-logo.svg"' "$SITE"; then
+  ok "site hero uses the canonical logo identity"
+else
+  bad "site hero uses the canonical logo identity" "needs img class=hero-logo with src=assets/tokenbar-logo.svg in $SITE"
+fi
+if grep -Fq 'class="hero-sources"' "$SITE" \
+  && grep -Fq 'src="assets/source-codex.svg"' "$SITE" \
+  && grep -Fq 'src="assets/source-opencode.svg"' "$SITE" \
+  && grep -Fq 'src="assets/source-claude.svg"' "$SITE"; then
+  ok "site hero lists the three local source marks"
+else
+  bad "site hero lists the three local source marks" "needs hero-sources row with all three assets/source-*.svg in $SITE"
+fi
+if grep -Fq 'class="source-mark"' "$SITE" \
+  && grep -Fq 'src="assets/source-codex.svg"' "$SITE" \
+  && grep -Fq 'src="assets/source-opencode.svg"' "$SITE" \
+  && grep -Fq 'src="assets/source-claude.svg"' "$SITE"; then
+  ok "site sources section uses the three local source marks"
+else
+  bad "site sources section uses the three local source marks" "needs source-mark imgs for all three sources in $SITE"
+fi
+for mark in codex opencode claude; do
+  MARK="site/assets/source-$mark.svg"
+  if [ -f "$MARK" ]; then
+    ok "local source mark exists ($MARK)"
+  else
+    bad "local source mark exists" "missing $MARK"
+    continue
+  fi
+  if python3 -c "import xml.dom.minidom; d=xml.dom.minidom.parse('$MARK'); assert d.documentElement.tagName=='svg'" 2>/dev/null; then
+    ok "source mark parses as SVG XML ($mark)"
+  else
+    bad "source mark parses as SVG XML" "$MARK does not parse"
+  fi
+  if grep -Fq 'xmlns="http://www.w3.org/2000/svg"' "$MARK" \
+    && grep -Fq 'viewBox="0 0 64 64"' "$MARK"; then
+    ok "source mark keeps the SVG namespace and square viewBox ($mark)"
+  else
+    bad "source mark keeps the SVG namespace and square viewBox" "needs xmlns plus viewBox 0 0 64 64 in $MARK"
+  fi
+  if grep -Fq '<title' "$MARK" && grep -Fq 'role="img"' "$MARK"; then
+    ok "source mark carries accessible title metadata ($mark)"
+  else
+    bad "source mark carries accessible title metadata" "needs <title> plus role=img in $MARK"
+  fi
+  case "$mark" in
+    codex) EXPECT='#30d158' ;;
+    opencode) EXPECT='#0a84ff' ;;
+    claude) EXPECT='#ff9f0a' ;;
+  esac
+  if grep -Fq "$EXPECT" "$MARK"; then
+    ok "source mark uses its source palette color $EXPECT ($mark)"
+  else
+    bad "source mark uses its source palette color" "missing $EXPECT in $MARK"
+  fi
+  if grep -qiE '<script|onclick|onload=|onerror=|<image|<foreignObject|url\(|linearGradient|radialGradient|<pattern|@import|http://|https://' "$MARK" \
+    | grep -vF 'http://www.w3.org/2000/svg' | grep -q .; then
+    bad "source mark stays code-native with no scripts or remote refs ($mark)" "found script/gradient/image/remote reference in $MARK"
+  else
+    ok "source mark stays code-native with no scripts or remote refs ($mark)"
+  fi
+  if grep -Eq '<rect[^>]*x="0"[^>]*y="0"[^>]*width="6[04]"' "$MARK"; then
+    bad "source mark stays transparent by default ($mark)" "found full-canvas background rect in $MARK"
+  else
+    ok "source mark stays transparent by default ($mark)"
+  fi
+done
+# Every <img> on the page must stay local and relative: remote http(s)
+# image sources are rejected, and root-relative /assets/... is rejected
+# because it breaks the project subpath.
+if grep -oiE '<img[^>]+>' "$SITE" | grep -qiE 'src="https?://'; then
+  bad "site images stay local with no remote embeds" "found remote <img> src in $SITE"
+else
+  ok "site images stay local with no remote embeds"
+fi
+if grep -oiE '<img[^>]+src="[^"]+"' "$SITE" | grep -vF 'src="assets/' | grep -q .; then
+  bad "site images use relative assets paths" "found non-assets <img> src in $SITE"
+else
+  ok "site images use relative assets paths"
+fi
+if grep -Fq 'alt="Token Bar logo"' "$SITE" \
+  && grep -Fq 'alt="Token Bar orbit logo"' "$SITE" \
+  && grep -Fq 'alt="Codex integration mark"' "$SITE" \
+  && grep -Fq 'alt="OpenCode integration mark"' "$SITE" \
+  && grep -Fq 'alt="Claude Code integration mark"' "$SITE"; then
+  ok "site brand and source images carry alt text"
+else
+  bad "site brand and source images carry alt text" "needs alt text for the Token Bar logo plus all three source marks in $SITE"
+fi
+# README mirrors the same local branding: repository-relative paths that
+# render on GitHub, with alt text and no remote image embeds.
+if grep -Fq 'src="site/assets/tokenbar-logo.svg"' README.md 2>/dev/null \
+  || grep -Fq '(site/assets/tokenbar-logo.svg)' README.md 2>/dev/null; then
+  ok "README uses the canonical logo by repository-relative path"
+else
+  bad "README uses the canonical logo by repository-relative path" "missing site/assets/tokenbar-logo.svg in README.md"
+fi
+for mark in codex opencode claude; do
+  if grep -Fq "site/assets/source-$mark.svg" README.md; then
+    ok "README uses the local source mark ($mark)"
+  else
+    bad "README uses the local source mark" "missing site/assets/source-$mark.svg in README.md"
+  fi
+done
+if grep -qiE '!\[.*\]\(https?://' README.md; then
+  REMOTE_MD="$(grep -oiE '!\[[^]]*\]\(https?://[^)]+\)' README.md || true)"
+  UNEXPECTED_MD="$(printf '%s\n' "$REMOTE_MD" | grep -vF 'https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml/badge.svg' || true)"
+  if [ -n "$UNEXPECTED_MD" ]; then
+    bad "README ships no remote image embeds beyond the CI badge" "found remote markdown image in README.md: $UNEXPECTED_MD"
+  else
+    ok "README ships no remote image embeds beyond the CI badge"
+  fi
+else
+  ok "README ships no remote image embeds beyond the CI badge"
+fi
+if grep -oiE '<img[^>]+>' README.md | grep -qiE 'src="https?://'; then
+  bad "README images stay local with no remote embeds" "found remote <img> src in README.md"
+else
+  ok "README images stay local with no remote embeds"
 fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
