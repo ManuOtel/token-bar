@@ -225,4 +225,54 @@ final class DashboardSnapshotTests: XCTestCase {
                 "menu title must equal the shared compact count for \(total)")
         }
     }
+
+    // MARK: - Today-zero Codex with lifetime history is a range effect
+
+    func testTodayZeroCodexWithLifetimeHistoryIsRangeEffect() {
+        // Triage guard for "Codex shows 0 while OpenCode has usage" on the
+        // app's default Today view: Codex history from 8 days ago parses
+        // fine but lives outside the calendar-day window, while an OpenCode
+        // record from 1 hour ago is inside it. Lifetime must show both.
+        // Synthetic records only, no local data.
+        let records = [
+            record("codex-8d", source: .codex, hoursAgo: 8 * 24, input: 1200, output: 340),
+            record("opencode-1h", source: .opencode, hoursAgo: 1, input: 2000, output: 1000),
+        ]
+        // Ingestion is intact: the Codex row survives the lifetime filter.
+        let lifetimeCodex = Aggregator.filter(
+            records, source: .codex, preset: .lifetime, now: now, calendar: calendar)
+        XCTAssertEqual(lifetimeCodex.map(\.id), ["codex-8d"])
+        // ... but the calendar-day window correctly excludes it.
+        let todayCodex = Aggregator.filter(
+            records, source: .codex, preset: .today, now: now, calendar: calendar)
+        XCTAssertTrue(todayCodex.isEmpty)
+        // Chip totals tell the same story the dashboard shows.
+        let todayDash = DashboardSnapshot.make(
+            records: records, source: .all, preset: .today,
+            now: now, snapshot: nil, calendar: calendar)
+        let todayChips = Dictionary(
+            uniqueKeysWithValues: todayDash.sourceTotals.map { ($0.filter, $0) })
+        XCTAssertEqual(todayChips[.codex]?.requests, 0)
+        XCTAssertEqual(todayChips[.codex]?.tokens, 0)
+        XCTAssertEqual(todayChips[.opencode]?.requests, 1)
+        XCTAssertGreaterThan(todayChips[.opencode]?.tokens ?? 0, 0)
+        let lifetimeDash = DashboardSnapshot.make(
+            records: records, source: .all, preset: .lifetime,
+            now: now, snapshot: nil, calendar: calendar)
+        let lifetimeChips = Dictionary(
+            uniqueKeysWithValues: lifetimeDash.sourceTotals.map { ($0.filter, $0) })
+        XCTAssertEqual(lifetimeChips[.codex]?.requests, 1)
+        XCTAssertGreaterThan(lifetimeChips[.codex]?.tokens ?? 0, 0)
+        XCTAssertEqual(lifetimeChips[.opencode]?.requests, 1)
+        // The Codex-scoped Today selection is empty while Lifetime is not,
+        // so the empty-state "try another range" guidance applies.
+        let codexToday = DashboardSnapshot.make(
+            records: records, source: .codex, preset: .today,
+            now: now, snapshot: nil, calendar: calendar)
+        XCTAssertEqual(codexToday.scopedCount, 0)
+        let codexLifetime = DashboardSnapshot.make(
+            records: records, source: .codex, preset: .lifetime,
+            now: now, snapshot: nil, calendar: calendar)
+        XCTAssertEqual(codexLifetime.scopedCount, 1)
+    }
 }

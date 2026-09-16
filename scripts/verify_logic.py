@@ -676,6 +676,16 @@ def run():
           (now - timedelta(days=8) < now - timedelta(days=7)))
     check("30d boundary", (now - timedelta(days=29) >= now - timedelta(days=30)) and
           (now - timedelta(days=31) < now - timedelta(days=30)))
+    # Today-zero Codex with lifetime history is a range effect, not ingestion
+    # loss: Codex history from 8 days ago parses but sits outside the
+    # calendar-day window, while OpenCode usage from 1 hour ago is inside it.
+    codex_old = now - timedelta(days=8)
+    opencode_recent = now - timedelta(hours=1)
+    check("today zero codex with lifetime history is range effect",
+          not (codex_old >= sod) and (opencode_recent >= sod) and
+          (codex_old >= now - timedelta(days=30)) and
+          (parse_codex_line('{"type":"token_usage_record","timestamp":"2026-09-02T08:15:00Z",'
+                            '"input_tokens":1200,"output_tokens":340}') is not None))
 
     # Best month + tiebreak
     months = {"2026-08": 1000, "2026-09": 5000, "2026-07": 200}
