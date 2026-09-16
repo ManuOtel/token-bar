@@ -16,12 +16,16 @@ never a bill.
 
 ## Works with
 
-| ![Codex source mark: green code brackets](site/assets/source-codex.svg) | ![OpenCode source mark: blue open ring with core dot](site/assets/source-opencode.svg) | ![Claude Code source mark: orange diamond with core dot](site/assets/source-claude.svg) |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="site/assets/provider-openai-blossom-inverse.svg"><img src="site/assets/provider-openai-blossom.svg" alt="Official OpenAI mark used for OpenAI Codex" height="32"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="site/assets/provider-opencode-dark.svg"><img src="site/assets/provider-opencode-light.svg" alt="Official OpenCode logo" height="32"></picture> | <img src="site/assets/provider-claude-spark.svg" alt="Official Claude Spark mark for Claude Code" height="32"> |
 |:---:|:---:|:---:|
-| **Codex** | **OpenCode** | **Claude Code** |
+| **OpenAI Codex** | **OpenCode** | **Claude Code** |
 | Local session history | Local usage database | Local project history |
 
-Marks above are local Token Bar source-integration icons, not provider logos.
+Logos above are the official marks of OpenAI, OpenCode, and Anthropic,
+bundled locally (see `docs/BRAND_ASSETS.md`) and shown only to identify
+each local source. There is no standalone Codex mark, so the OpenAI mark
+stands in for OpenAI Codex. All marks remain the property of their
+owners; this project is not affiliated with or endorsed by them.
 
 Product page (live): [https://manuotel.github.io/token-bar/](https://manuotel.github.io/token-bar/)
 (static landing page served by GitHub Pages from `site/`, no build step,

@@ -20,9 +20,11 @@
 #   - page names the current VERSION (fails stale on version bump)
 #   - no obvious personal data (emails, home dirs, SSH material,
 #     real snapshot names)
-#   - canonical Token Bar logo plus local source-integration marks are
+#   - canonical Token Bar logo plus real bundled provider logos are
 #     wired by relative asset paths in the README and the site, with
-#     accessible titles and no remote image embeds
+#     meaningful alt text, theme variants via <picture>, a trademark
+#     disclaimer, a brand-attribution doc, and no remote image embeds;
+#     the old invented source marks are fully gone
 #
 # Run: ./scripts/test-site.sh (from the repo root).
 set -eu
@@ -330,11 +332,16 @@ else
   ok "site avoids root-relative asset paths"
 fi
 
-# --- 12. Branding use plus local source-integration marks ---
-# The Token Bar logo is primary (header brand plus hero identity); the
-# three source marks support the integration list only. All four ship as
-# local code-native SVGs under site/assets/, referenced by relative paths
-# with alt text. Remote <img>/image embeds stay rejected by section 5.
+# --- 12. Branding use plus real bundled provider logos ---
+# The Token Bar logo is primary (header brand plus hero identity, larger
+# than any provider mark); the three provider logos support the source
+# list only. All provider artwork is official, bundled locally under
+# site/assets/ (see docs/BRAND_ASSETS.md), referenced by relative paths
+# with meaningful alt text, and swapped for dark themes via <picture>
+# (no JavaScript, no runtime fetch). Remote <img>/image embeds stay
+# rejected by section 5. The old invented source marks
+# (assets/source-*.svg plus "integration mark" copy) must be fully gone
+# from the README, the site, and docs.
 if grep -Fq 'src="assets/tokenbar-logo.svg"' "$SITE" && grep -Fq 'class="brand-logo"' "$SITE"; then
   ok "site header uses the canonical logo by relative path"
 else
@@ -345,68 +352,155 @@ if grep -Fq 'class="hero-logo"' "$SITE" && grep -Fq 'src="assets/tokenbar-logo.s
 else
   bad "site hero uses the canonical logo identity" "needs img class=hero-logo with src=assets/tokenbar-logo.svg in $SITE"
 fi
-if grep -Fq 'class="hero-sources"' "$SITE" \
-  && grep -Fq 'src="assets/source-codex.svg"' "$SITE" \
-  && grep -Fq 'src="assets/source-opencode.svg"' "$SITE" \
-  && grep -Fq 'src="assets/source-claude.svg"' "$SITE"; then
-  ok "site hero lists the three local source marks"
-else
-  bad "site hero lists the three local source marks" "needs hero-sources row with all three assets/source-*.svg in $SITE"
-fi
-if grep -Fq 'class="source-mark"' "$SITE" \
-  && grep -Fq 'src="assets/source-codex.svg"' "$SITE" \
-  && grep -Fq 'src="assets/source-opencode.svg"' "$SITE" \
-  && grep -Fq 'src="assets/source-claude.svg"' "$SITE"; then
-  ok "site sources section uses the three local source marks"
-else
-  bad "site sources section uses the three local source marks" "needs source-mark imgs for all three sources in $SITE"
-fi
-for mark in codex opencode claude; do
-  MARK="site/assets/source-$mark.svg"
-  if [ -f "$MARK" ]; then
-    ok "local source mark exists ($MARK)"
+# 12a. Old invented marks are gone: files plus every reference and the
+# old disclaimer copy (scoped to content files so this script never
+# self-matches its own assertion literals).
+for old in site/assets/source-codex.svg site/assets/source-opencode.svg site/assets/source-claude.svg; do
+  if [ -e "$old" ]; then
+    bad "invented source mark removed" "still ships $old"
   else
-    bad "local source mark exists" "missing $MARK"
-    continue
-  fi
-  if python3 -c "import xml.dom.minidom; d=xml.dom.minidom.parse('$MARK'); assert d.documentElement.tagName=='svg'" 2>/dev/null; then
-    ok "source mark parses as SVG XML ($mark)"
-  else
-    bad "source mark parses as SVG XML" "$MARK does not parse"
-  fi
-  if grep -Fq 'xmlns="http://www.w3.org/2000/svg"' "$MARK" \
-    && grep -Fq 'viewBox="0 0 64 64"' "$MARK"; then
-    ok "source mark keeps the SVG namespace and square viewBox ($mark)"
-  else
-    bad "source mark keeps the SVG namespace and square viewBox" "needs xmlns plus viewBox 0 0 64 64 in $MARK"
-  fi
-  if grep -Fq '<title' "$MARK" && grep -Fq 'role="img"' "$MARK"; then
-    ok "source mark carries accessible title metadata ($mark)"
-  else
-    bad "source mark carries accessible title metadata" "needs <title> plus role=img in $MARK"
-  fi
-  case "$mark" in
-    codex) EXPECT='#30d158' ;;
-    opencode) EXPECT='#0a84ff' ;;
-    claude) EXPECT='#ff9f0a' ;;
-  esac
-  if grep -Fq "$EXPECT" "$MARK"; then
-    ok "source mark uses its source palette color $EXPECT ($mark)"
-  else
-    bad "source mark uses its source palette color" "missing $EXPECT in $MARK"
-  fi
-  if grep -qiE '<script|onclick|onload=|onerror=|<image|<foreignObject|url\(|linearGradient|radialGradient|<pattern|@import|http://|https://' "$MARK" \
-    | grep -vF 'http://www.w3.org/2000/svg' | grep -q .; then
-    bad "source mark stays code-native with no scripts or remote refs ($mark)" "found script/gradient/image/remote reference in $MARK"
-  else
-    ok "source mark stays code-native with no scripts or remote refs ($mark)"
-  fi
-  if grep -Eq '<rect[^>]*x="0"[^>]*y="0"[^>]*width="6[04]"' "$MARK"; then
-    bad "source mark stays transparent by default ($mark)" "found full-canvas background rect in $MARK"
-  else
-    ok "source mark stays transparent by default ($mark)"
+    ok "invented source mark removed ($old)"
   fi
 done
+if grep -rFq -e 'assets/source-codex.svg' -e 'assets/source-opencode.svg' -e 'assets/source-claude.svg' README.md site/ docs/ 2>/dev/null; then
+  bad "no references to invented source marks" "found assets/source-*.svg in README.md, site/, or docs/"
+else
+  ok "no references to invented source marks"
+fi
+if grep -rqiF 'integration mark' README.md site/index.html site/styles.css docs/BRAND_ASSETS.md 2>/dev/null; then
+  bad "no invented-mark disclaimer copy" "found 'integration mark' in README.md, site/, or docs/BRAND_ASSETS.md"
+else
+  ok "no invented-mark disclaimer copy"
+fi
+if grep -rqiE 'local Token Bar (source-integration icons|integration marks), not provider logos' README.md site/ 2>/dev/null; then
+  bad "old not-provider-logos disclaimer removed" "found the old disclaimer in README.md or site/"
+else
+  ok "old not-provider-logos disclaimer removed"
+fi
+# 12b. Real provider assets exist with the exact bundled filenames.
+for asset in \
+  site/assets/provider-opencode-light.svg \
+  site/assets/provider-opencode-dark.svg \
+  site/assets/provider-claude-spark.svg \
+  site/assets/provider-openai-blossom.svg \
+  site/assets/provider-openai-blossom-inverse.svg; do
+  if [ -f "$asset" ]; then
+    ok "bundled provider asset exists ($asset)"
+  else
+    bad "bundled provider asset exists" "missing $asset"
+  fi
+done
+# 12c. Each provider asset parses as SVG XML, keeps the SVG namespace,
+# and carries no scripts, gradients, embedded images, or remote refs
+# (the xmlns vocabulary identifier is allowlisted, never fetched).
+for asset in site/assets/provider-*.svg; do
+  if python3 -c "import xml.dom.minidom; d=xml.dom.minidom.parse('$asset'); assert d.documentElement.tagName=='svg'" 2>/dev/null; then
+    ok "provider asset parses as SVG XML ($asset)"
+  else
+    bad "provider asset parses as SVG XML" "$asset does not parse"
+  fi
+  if grep -Fq 'xmlns="http://www.w3.org/2000/svg"' "$asset"; then
+    ok "provider asset keeps the SVG namespace ($asset)"
+  else
+    bad "provider asset keeps the SVG namespace" "missing xmlns in $asset"
+  fi
+  if grep -qiE '<script|onclick|onload=|onerror=|<image|<foreignObject|url\(|linearGradient|radialGradient|<pattern|@import|http://|https://' "$asset" \
+    | grep -vF 'http://www.w3.org/2000/svg' | grep -q .; then
+    bad "provider asset ships no scripts or remote refs ($asset)" "found script/gradient/image/remote reference in $asset"
+  else
+    ok "provider asset ships no scripts or remote refs ($asset)"
+  fi
+  if grep -Eq '<rect[^>]*x="0"[^>]*y="0"[^>]*width="6[04]"' "$asset"; then
+    bad "provider asset has no full-canvas background rect ($asset)" "found full-canvas background rect in $asset"
+  else
+    ok "provider asset has no full-canvas background rect ($asset)"
+  fi
+done
+# 12d. Provider-specific artwork markers (official geometry, not redraws).
+if grep -Fq 'viewBox="0 0 234 42"' site/assets/provider-opencode-light.svg \
+  && grep -Fq 'viewBox="0 0 234 42"' site/assets/provider-opencode-dark.svg; then
+  ok "OpenCode assets keep the official wordmark viewBox"
+else
+  bad "OpenCode assets keep the official wordmark viewBox" "needs viewBox 0 0 234 42 in both provider-opencode-*.svg"
+fi
+if grep -Fq '#D97757' site/assets/provider-claude-spark.svg \
+  && grep -Fq 'viewBox="0 0 94 94"' site/assets/provider-claude-spark.svg; then
+  ok "Claude asset keeps the official Spark clay artwork"
+else
+  bad "Claude asset keeps the official Spark clay artwork" "needs #D97757 plus viewBox 0 0 94 94 in provider-claude-spark.svg"
+fi
+if grep -Fq 'viewBox="1.68 1.75 16.65 16.5"' site/assets/provider-openai-blossom.svg; then
+  ok "OpenAI asset keeps the official Blossom symbol viewBox"
+else
+  bad "OpenAI asset keeps the official Blossom symbol viewBox" "needs viewBox 1.68 1.75 16.65 16.5 in provider-openai-blossom.svg"
+fi
+# 12e. The dark-theme OpenAI inverse differs from the official base only
+# by its single root fill adaptation (geometry untouched).
+if sed 's/ fill="#fff"//' site/assets/provider-openai-blossom-inverse.svg | cmp -s - site/assets/provider-openai-blossom.svg; then
+  ok "OpenAI inverse variant keeps official geometry with a fill-only adaptation"
+else
+  bad "OpenAI inverse variant keeps official geometry" "provider-openai-blossom-inverse.svg differs beyond the fill adaptation"
+fi
+# 12f. The site wires the real assets by relative paths with theme
+# variants, meaningful alt text, and the precise "OpenAI Codex" label
+# (never claiming a Codex-specific logo).
+if grep -Fq 'class="hero-sources"' "$SITE" \
+  && grep -Fq 'src="assets/provider-openai-blossom.svg"' "$SITE" \
+  && grep -Fq 'srcset="assets/provider-openai-blossom-inverse.svg"' "$SITE" \
+  && grep -Fq 'src="assets/provider-opencode-light.svg"' "$SITE" \
+  && grep -Fq 'srcset="assets/provider-opencode-dark.svg"' "$SITE" \
+  && grep -Fq 'src="assets/provider-claude-spark.svg"' "$SITE"; then
+  ok "site hero lists the three real provider logos"
+else
+  bad "site hero lists the three real provider logos" "needs hero-sources row with all three provider assets plus dark srcsets in $SITE"
+fi
+if grep -Fq 'class="source-mark"' "$SITE" \
+  && grep -Fq 'src="assets/provider-openai-blossom.svg"' "$SITE" \
+  && grep -Fq 'src="assets/provider-opencode-light.svg"' "$SITE" \
+  && grep -Fq 'src="assets/provider-claude-spark.svg"' "$SITE"; then
+  ok "site sources section uses the three real provider logos"
+else
+  bad "site sources section uses the three real provider logos" "needs source-mark imgs for all three providers in $SITE"
+fi
+if grep -Fq '>OpenAI Codex<' "$SITE"; then
+  ok "site labels the OpenAI mark precisely as OpenAI Codex"
+else
+  bad "site labels the OpenAI mark precisely as OpenAI Codex" "missing the OpenAI Codex label in $SITE"
+fi
+if grep -Fq 'alt="Official OpenAI mark used for OpenAI Codex"' "$SITE" \
+  && grep -Fq 'alt="Official OpenCode logo"' "$SITE" \
+  && grep -Fq 'alt="Official Claude Spark mark for Claude Code"' "$SITE" \
+  && grep -Fq 'alt="Token Bar logo"' "$SITE" \
+  && grep -Fq 'alt="Token Bar orbit logo"' "$SITE"; then
+  ok "site brand and provider images carry ownership-accurate alt text"
+else
+  bad "site brand and provider images carry ownership-accurate alt text" "needs official-mark alt text for the Token Bar logo plus all three providers in $SITE"
+fi
+if grep -qiE 'property of their (owners|respective owners)|not affiliated with or endorsed' "$SITE"; then
+  ok "site states the trademark ownership disclaimer"
+else
+  bad "site states the trademark ownership disclaimer" "needs the ownership/not-endorsed disclaimer in $SITE"
+fi
+# 12g. The brand-attribution doc exists and names each provider, asset,
+# source URL, retrieval date, and license/trademark note.
+ATTR="docs/BRAND_ASSETS.md"
+if [ -f "$ATTR" ]; then
+  ok "brand-attribution doc exists ($ATTR)"
+else
+  bad "brand-attribution doc exists" "missing $ATTR"
+fi
+for need in 'provider-opencode-light.svg' 'provider-opencode-dark.svg' 'provider-claude-spark.svg' 'provider-openai-blossom.svg' 'github.com/sst/opencode' 'anthropic.com/press-kit' 'openai.com/brand' '2026-09-16' 'trademark'; do
+  if grep -Fq "$need" "$ATTR" 2>/dev/null; then
+    ok "attribution doc records $need"
+  else
+    bad "attribution doc records $need" "missing $need in $ATTR"
+  fi
+done
+if grep -qiE 'no standalone Codex mark' "$ATTR" 2>/dev/null; then
+  ok "attribution doc states the Codex branding limitation"
+else
+  bad "attribution doc states the Codex branding limitation" "missing the no-standalone-Codex-mark note in $ATTR"
+fi
 # Every <img> on the page must stay local and relative: remote http(s)
 # image sources are rejected, and root-relative /assets/... is rejected
 # because it breaks the project subpath.
@@ -420,30 +514,57 @@ if grep -oiE '<img[^>]+src="[^"]+"' "$SITE" | grep -vF 'src="assets/' | grep -q 
 else
   ok "site images use relative assets paths"
 fi
-if grep -Fq 'alt="Token Bar logo"' "$SITE" \
-  && grep -Fq 'alt="Token Bar orbit logo"' "$SITE" \
-  && grep -Fq 'alt="Codex integration mark"' "$SITE" \
-  && grep -Fq 'alt="OpenCode integration mark"' "$SITE" \
-  && grep -Fq 'alt="Claude Code integration mark"' "$SITE"; then
-  ok "site brand and source images carry alt text"
+# Theme <source> variants must also stay document-relative: remote or
+# root-relative srcsets would break the project subpath or fetch at runtime.
+if grep -oiE '<source[^>]+srcset="[^"]+"' "$SITE" | grep -qiE 'srcset="https?://|srcset="/'; then
+  bad "site theme variants use relative asset srcsets" "found remote or root-relative srcset in $SITE"
 else
-  bad "site brand and source images carry alt text" "needs alt text for the Token Bar logo plus all three source marks in $SITE"
+  ok "site theme variants use relative asset srcsets"
+fi
+if grep -oiE '<source[^>]+srcset="[^"]+"' "$SITE" | grep -vF 'srcset="assets/' | grep -q .; then
+  bad "site srcsets stay under local assets" "found non-assets srcset in $SITE"
+else
+  ok "site srcsets stay under local assets"
 fi
 # README mirrors the same local branding: repository-relative paths that
-# render on GitHub, with alt text and no remote image embeds.
+# render on GitHub, with ownership-accurate alt text, the precise
+# OpenAI Codex label, a trademark disclaimer, and no remote image embeds.
 if grep -Fq 'src="site/assets/tokenbar-logo.svg"' README.md 2>/dev/null \
   || grep -Fq '(site/assets/tokenbar-logo.svg)' README.md 2>/dev/null; then
   ok "README uses the canonical logo by repository-relative path"
 else
   bad "README uses the canonical logo by repository-relative path" "missing site/assets/tokenbar-logo.svg in README.md"
 fi
-for mark in codex opencode claude; do
-  if grep -Fq "site/assets/source-$mark.svg" README.md; then
-    ok "README uses the local source mark ($mark)"
+for asset in provider-openai-blossom provider-opencode-light provider-claude-spark; do
+  if grep -Fq "site/assets/$asset.svg" README.md; then
+    ok "README uses the real provider asset ($asset)"
   else
-    bad "README uses the local source mark" "missing site/assets/source-$mark.svg in README.md"
+    bad "README uses the real provider asset" "missing site/assets/$asset.svg in README.md"
   fi
 done
+if grep -Fq 'srcset="site/assets/provider-openai-blossom-inverse.svg"' README.md \
+  && grep -Fq 'srcset="site/assets/provider-opencode-dark.svg"' README.md; then
+  ok "README wires dark-theme provider variants"
+else
+  bad "README wires dark-theme provider variants" "missing dark srcsets for OpenAI/OpenCode in README.md"
+fi
+if grep -Fq '**OpenAI Codex**' README.md; then
+  ok "README labels the OpenAI mark precisely as OpenAI Codex"
+else
+  bad "README labels the OpenAI mark precisely as OpenAI Codex" "missing the OpenAI Codex label in README.md"
+fi
+if grep -Fq 'alt="Official OpenAI mark used for OpenAI Codex"' README.md \
+  && grep -Fq 'alt="Official OpenCode logo"' README.md \
+  && grep -Fq 'alt="Official Claude Spark mark for Claude Code"' README.md; then
+  ok "README provider images carry ownership-accurate alt text"
+else
+  bad "README provider images carry ownership-accurate alt text" "needs official-mark alt text for all three providers in README.md"
+fi
+if grep -qiE 'property of their|not affiliated with or endorsed' README.md; then
+  ok "README states the trademark ownership disclaimer"
+else
+  bad "README states the trademark ownership disclaimer" "missing the ownership/not-endorsed disclaimer in README.md"
+fi
 if grep -qiE '!\[.*\]\(https?://' README.md; then
   REMOTE_MD="$(grep -oiE '!\[[^]]*\]\(https?://[^)]+\)' README.md || true)"
   UNEXPECTED_MD="$(printf '%s\n' "$REMOTE_MD" | grep -vF 'https://github.com/ManuOtel/token-bar/actions/workflows/ci.yml/badge.svg' || true)"
