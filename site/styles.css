@@ -285,8 +285,9 @@ h1, .lede, .cta-meta, .pop-number { overflow-wrap: break-word; }
 }
 
 /* Hero integrations row: compact support line for the three sources.
-   Flat pills on the standard surface; marks are local SVGs with fixed
-   provider colors that stay legible on both themes at small sizes. */
+   Flat pills on the standard surface; provider logos are local SVGs.
+   Height-fixed with auto width so wide wordmarks (OpenCode) keep their
+   ratio next to square marks; theme variants swap via <picture>. */
 .hero-sources {
   list-style: none;
   display: flex;
@@ -310,8 +311,9 @@ h1, .lede, .cta-meta, .pop-number { overflow-wrap: break-word; }
 }
 
 .hero-source-mark {
-  width: 18px;
   height: 18px;
+  width: auto;
+  max-width: 110px;
   flex: none;
 }
 
@@ -711,13 +713,15 @@ h3 { font-size: 1.02rem; margin: 0 0 0.35rem; }
 
 .source-strip h3 { display: flex; align-items: center; gap: 0.5rem; margin-top: 0; }
 
-/* Source integration marks: local geometric SVGs, transparent by default.
-   Fixed provider fills match the canonical logo palette and stay legible
-   on light and dark at small sizes; layout never depends on color alone
-   because each card also carries a text label. */
+/* Source provider logos: official local SVGs, transparent by default.
+   Height-fixed with auto width so the wide OpenCode wordmark keeps its
+   ratio beside the square Claude/OpenAI marks; theme variants swap via
+   <picture>. Layout never depends on color alone because each card also
+   carries a text label. */
 .source-mark {
-  width: 26px;
   height: 26px;
+  width: auto;
+  max-width: 180px;
   flex: none;
   border-radius: 6px;
 }
