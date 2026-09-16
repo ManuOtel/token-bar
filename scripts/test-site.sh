@@ -381,9 +381,11 @@ else
   ok "old not-provider-logos disclaimer removed"
 fi
 # 12b. Real provider assets exist with the exact bundled filenames.
+# OpenCode ships the official square symbol (light/dark square variants);
+# the old wordmark files must be gone (see 12b0 below).
 for asset in \
-  site/assets/provider-opencode-light.svg \
-  site/assets/provider-opencode-dark.svg \
+  site/assets/provider-opencode-light-square.svg \
+  site/assets/provider-opencode-dark-square.svg \
   site/assets/provider-claude-spark.svg \
   site/assets/provider-openai-blossom.svg \
   site/assets/provider-openai-blossom-inverse.svg; do
@@ -393,9 +395,31 @@ for asset in \
     bad "bundled provider asset exists" "missing $asset"
   fi
 done
+# 12b0. Old OpenCode wordmark files and references are gone: files plus
+# every reference and the old wordmark geometry (scoped to content files
+# so this script never self-matches its own assertion literals).
+for old in site/assets/provider-opencode-light.svg site/assets/provider-opencode-dark.svg; do
+  if [ -e "$old" ]; then
+    bad "old OpenCode wordmark removed" "still ships $old"
+  else
+    ok "old OpenCode wordmark removed ($old)"
+  fi
+done
+if grep -rFq -e 'provider-opencode-light.svg' -e 'provider-opencode-dark.svg' README.md site/ docs/ 2>/dev/null; then
+  bad "no references to the old OpenCode wordmark" "found provider-opencode-light.svg or provider-opencode-dark.svg in README.md, site/, or docs/"
+else
+  ok "no references to the old OpenCode wordmark"
+fi
+if grep -rFq 'viewBox="0 0 234 42"' site/ README.md docs/BRAND_ASSETS.md 2>/dev/null; then
+  bad "old OpenCode wordmark geometry removed" "found the 234x42 wordmark viewBox in site/, README.md, or docs/BRAND_ASSETS.md"
+else
+  ok "old OpenCode wordmark geometry removed"
+fi
 # 12c. Each provider asset parses as SVG XML, keeps the SVG namespace,
 # and carries no scripts, gradients, embedded images, or remote refs
 # (the xmlns vocabulary identifier is allowlisted, never fetched).
+# Local url(#...) fragment refs for the official clip/mask artwork are
+# allowed; any other url( payload is rejected by the follow-up check.
 for asset in site/assets/provider-*.svg; do
   if python3 -c "import xml.dom.minidom; d=xml.dom.minidom.parse('$asset'); assert d.documentElement.tagName=='svg'" 2>/dev/null; then
     ok "provider asset parses as SVG XML ($asset)"
@@ -407,11 +431,24 @@ for asset in site/assets/provider-*.svg; do
   else
     bad "provider asset keeps the SVG namespace" "missing xmlns in $asset"
   fi
-  if grep -qiE '<script|onclick|onload=|onerror=|<image|<foreignObject|url\(|linearGradient|radialGradient|<pattern|@import|http://|https://' "$asset" \
+  if grep -qiE '<script|onclick|onload=|onerror=|<image|<foreignObject|linearGradient|radialGradient|<pattern|@import|http://|https://' "$asset" \
     | grep -vF 'http://www.w3.org/2000/svg' | grep -q .; then
     bad "provider asset ships no scripts or remote refs ($asset)" "found script/gradient/image/remote reference in $asset"
   else
     ok "provider asset ships no scripts or remote refs ($asset)"
+  fi
+  _URLS="$(grep -Eo 'url\([^)]*\)' "$asset" || true)"
+  _BAD_REFS=""
+  for _u in $_URLS; do
+    case "$_u" in
+      'url(#'*) ;;
+      *) _BAD_REFS="$_BAD_REFS $_u" ;;
+    esac
+  done
+  if [ -z "$_BAD_REFS" ]; then
+    ok "provider asset uses local-only url refs ($asset)"
+  else
+    bad "provider asset uses local-only url refs ($asset)" "found non-fragment url reference in $asset:$_BAD_REFS"
   fi
   if grep -Eq '<rect[^>]*x="0"[^>]*y="0"[^>]*width="6[04]"' "$asset"; then
     bad "provider asset has no full-canvas background rect ($asset)" "found full-canvas background rect in $asset"
@@ -420,11 +457,21 @@ for asset in site/assets/provider-*.svg; do
   fi
 done
 # 12d. Provider-specific artwork markers (official geometry, not redraws).
-if grep -Fq 'viewBox="0 0 234 42"' site/assets/provider-opencode-light.svg \
-  && grep -Fq 'viewBox="0 0 234 42"' site/assets/provider-opencode-dark.svg; then
-  ok "OpenCode assets keep the official wordmark viewBox"
+# OpenCode ships the official square symbol: square viewBox plus equal
+# width and height in both theme variants.
+if grep -Fq 'viewBox="0 0 300 300"' site/assets/provider-opencode-light-square.svg \
+  && grep -Fq 'viewBox="0 0 300 300"' site/assets/provider-opencode-dark-square.svg; then
+  ok "OpenCode assets keep the official square viewBox"
 else
-  bad "OpenCode assets keep the official wordmark viewBox" "needs viewBox 0 0 234 42 in both provider-opencode-*.svg"
+  bad "OpenCode assets keep the official square viewBox" "needs viewBox 0 0 300 300 in both provider-opencode-*-square.svg"
+fi
+if grep -Fq 'width="300"' site/assets/provider-opencode-light-square.svg \
+  && grep -Fq 'height="300"' site/assets/provider-opencode-light-square.svg \
+  && grep -Fq 'width="300"' site/assets/provider-opencode-dark-square.svg \
+  && grep -Fq 'height="300"' site/assets/provider-opencode-dark-square.svg; then
+  ok "OpenCode assets keep equal square dimensions"
+else
+  bad "OpenCode assets keep equal square dimensions" "needs width/height 300 in both provider-opencode-*-square.svg"
 fi
 if grep -Fq '#D97757' site/assets/provider-claude-spark.svg \
   && grep -Fq 'viewBox="0 0 94 94"' site/assets/provider-claude-spark.svg; then
@@ -450,8 +497,8 @@ fi
 if grep -Fq 'class="hero-sources"' "$SITE" \
   && grep -Fq 'src="assets/provider-openai-blossom.svg"' "$SITE" \
   && grep -Fq 'srcset="assets/provider-openai-blossom-inverse.svg"' "$SITE" \
-  && grep -Fq 'src="assets/provider-opencode-light.svg"' "$SITE" \
-  && grep -Fq 'srcset="assets/provider-opencode-dark.svg"' "$SITE" \
+  && grep -Fq 'src="assets/provider-opencode-light-square.svg"' "$SITE" \
+  && grep -Fq 'srcset="assets/provider-opencode-dark-square.svg"' "$SITE" \
   && grep -Fq 'src="assets/provider-claude-spark.svg"' "$SITE"; then
   ok "site hero lists the three real provider logos"
 else
@@ -459,7 +506,7 @@ else
 fi
 if grep -Fq 'class="source-mark"' "$SITE" \
   && grep -Fq 'src="assets/provider-openai-blossom.svg"' "$SITE" \
-  && grep -Fq 'src="assets/provider-opencode-light.svg"' "$SITE" \
+  && grep -Fq 'src="assets/provider-opencode-light-square.svg"' "$SITE" \
   && grep -Fq 'src="assets/provider-claude-spark.svg"' "$SITE"; then
   ok "site sources section uses the three real provider logos"
 else
@@ -492,7 +539,7 @@ if [ -f "$ATTR" ]; then
 else
   bad "brand-attribution doc exists" "missing $ATTR"
 fi
-for need in 'provider-opencode-light.svg' 'provider-opencode-dark.svg' 'provider-claude-spark.svg' 'provider-openai-blossom.svg' 'github.com/sst/opencode' 'anthropic.com/press-kit' 'openai.com/brand' '2026-09-16' 'trademark'; do
+for need in 'provider-opencode-light-square.svg' 'provider-opencode-dark-square.svg' 'provider-claude-spark.svg' 'provider-openai-blossom.svg' 'opencode-logo-light-square.svg' 'opencode-logo-dark-square.svg' 'github.com/anomalyco/opencode' 'anthropic.com/press-kit' 'openai.com/brand' '2026-09-16' 'trademark'; do
   if grep -Fq "$need" "$ATTR" 2>/dev/null; then
     ok "attribution doc records $need"
   else
@@ -538,7 +585,7 @@ if grep -Fq 'src="site/assets/tokenbar-logo.svg"' README.md 2>/dev/null \
 else
   bad "README uses the canonical logo by repository-relative path" "missing site/assets/tokenbar-logo.svg in README.md"
 fi
-for asset in provider-openai-blossom provider-opencode-light provider-claude-spark; do
+for asset in provider-openai-blossom provider-opencode-light-square provider-claude-spark; do
   if grep -Fq "site/assets/$asset.svg" README.md; then
     ok "README uses the real provider asset ($asset)"
   else
@@ -546,7 +593,7 @@ for asset in provider-openai-blossom provider-opencode-light provider-claude-spa
   fi
 done
 if grep -Fq 'srcset="site/assets/provider-openai-blossom-inverse.svg"' README.md \
-  && grep -Fq 'srcset="site/assets/provider-opencode-dark.svg"' README.md; then
+  && grep -Fq 'srcset="site/assets/provider-opencode-dark-square.svg"' README.md; then
   ok "README wires dark-theme provider variants"
 else
   bad "README wires dark-theme provider variants" "missing dark srcsets for OpenAI/OpenCode in README.md"
@@ -591,10 +638,10 @@ fi
 # OpenCode upstream commit, and the bundled bytes must hash to those
 # values. Portable across macOS/Linux: shasum preferred, sha256sum
 # fallback. POSIX sh only (no bashisms).
-_OPENCODE_PIN="2e018f70f2d13080de3dd5fda8720acf77ebd296"
+_OPENCODE_PIN="1364769e516289bcd805dd813c36e68391858ab9"
 for _need in \
-  "00ac8ac1b456ac230499fa76c08205d7658e29c383cd635669780c644fdcd321" \
-  "231e3f47f332a0ace170bae2605488ac016cc85e584d89b1f9f9f0dff47170ee" \
+  "b1c48d82ebd304eab820658387642bcf4c9b8350d6860894d0fe21ddca25ef3f" \
+  "d6a0e3b8a295f413543f41cb73957e670351b5cb088c8d9dbd186b9e9d633cca" \
   "6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219" \
   "ca35a5723163b6a766b8b37de9bedd24c2b3ae81d3caa4b9429ccb91ef873cc7" \
   "31c1e09b9f7b36a6a295a3f2cb6b6fd392472cd4963a4b7b45cc62ea16c9e5a6"; do
@@ -637,8 +684,8 @@ _check_asset_hash() {
     bad "bundled asset hashes to recorded SHA-256 ($_asset)" "no shasum or sha256sum available"
   fi
 }
-_check_asset_hash "site/assets/provider-opencode-light.svg" "00ac8ac1b456ac230499fa76c08205d7658e29c383cd635669780c644fdcd321"
-_check_asset_hash "site/assets/provider-opencode-dark.svg" "231e3f47f332a0ace170bae2605488ac016cc85e584d89b1f9f9f0dff47170ee"
+_check_asset_hash "site/assets/provider-opencode-light-square.svg" "b1c48d82ebd304eab820658387642bcf4c9b8350d6860894d0fe21ddca25ef3f"
+_check_asset_hash "site/assets/provider-opencode-dark-square.svg" "d6a0e3b8a295f413543f41cb73957e670351b5cb088c8d9dbd186b9e9d633cca"
 _check_asset_hash "site/assets/provider-claude-spark.svg" "6d53db4be375e899c937c26cf16684a80d6e869b1928d72b37748bef2560e219"
 _check_asset_hash "site/assets/provider-openai-blossom.svg" "ca35a5723163b6a766b8b37de9bedd24c2b3ae81d3caa4b9429ccb91ef873cc7"
 _check_asset_hash "site/assets/provider-openai-blossom-inverse.svg" "31c1e09b9f7b36a6a295a3f2cb6b6fd392472cd4963a4b7b45cc62ea16c9e5a6"
