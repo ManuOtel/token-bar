@@ -435,6 +435,10 @@ boundary of the catalog GET, malformed catalog rejection, fixtures under
 
 - `No usage records in this scope`: the filter/preset matched zero records.
   Retry `./scripts/show-usage.sh --preset lifetime --source all`.
+- Codex reads `0` on Today while another source shows usage: the app opens
+  on Today and Codex history may simply hold no records for this calendar
+  day. Switch the range to Lifetime (or 7D/30D) before assuming ingestion
+  loss; per-source chips are per-range totals.
 - `Codex sessions not found (...)`: default `~/.codex/sessions/**/*.jsonl`
   is absent. Point testing data with
   `TOKENBAR_CODEX_ROOT=/tmp/fake-codex ./scripts/show-usage.sh`.
