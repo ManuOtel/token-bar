@@ -88,8 +88,12 @@ done
 
 # --- 4. No external URLs outside the allowlist plus custom domain ---
 # Every http(s) URL under site/ must stay on the public repo, its Pages
-# site, the intentional custom domain (site/CNAME), or the SEO standards
-# allowlist (schema.org JSON-LD context, sitemaps.org sitemap namespace).
+# site, the intentional custom domain (site/CNAME), or the standards
+# allowlist (schema.org JSON-LD context, sitemaps.org sitemap namespace,
+# and the w3.org SVG XML namespace identifier). The SVG xmlns string is a
+# vocabulary identifier parsed locally by the renderer, never fetched over
+# the network, so it is allowlisted as a literal while remote SVG/img/link
+# fetches stay rejected by section 5 below.
 # The custom domain is a deliberate product URL, allowlisted here and in
 # scripts/check-privacy.sh. Fragments stay split so this validator never
 # self-matches the privacy guard's path rule.
@@ -98,7 +102,7 @@ URLS="$(grep -rhoE 'https?://[^"'"'"' )<>]+' site/ || true)"
 BAD_URLS=""
 for url in $URLS; do
   case "$url" in
-    https://github.com/ManuOtel/token-bar*|https://manuotel.github.io/token-bar*|https://token-bar.manuotel.com*|https://schema.org*|http://www.sitemaps.org/*|https://www.sitemaps.org/*) ;;
+    https://github.com/ManuOtel/token-bar*|https://manuotel.github.io/token-bar*|https://token-bar.manuotel.com*|https://schema.org*|http://www.sitemaps.org/*|https://www.sitemaps.org/*|http://www.w3.org/2000/svg) ;;
     *) BAD_URLS="$BAD_URLS $url" ;;
   esac
 done
@@ -250,6 +254,68 @@ if [ -f site/sitemap.xml ] \
   fi
 else
   bad "site serves a valid sitemap" "missing site/sitemap.xml canonical loc"
+fi
+
+# --- 11. Canonical orbit logo plus favicon contract ---
+# Exactly one canonical asset (site/assets/tokenbar-logo.svg); comparison
+# candidates (orbit/pulse/signal suffixed files) must not ship.
+LOGO="site/assets/tokenbar-logo.svg"
+if [ -f "$LOGO" ]; then
+  ok "canonical orbit logo exists ($LOGO)"
+else
+  bad "canonical orbit logo exists" "missing $LOGO"
+fi
+if ls site/assets/tokenbar-logo-orbit.svg site/assets/tokenbar-logo-pulse.svg site/assets/tokenbar-logo-signal.svg >/dev/null 2>&1; then
+  bad "site ships no comparison-candidate logo assets" "found suffixed tokenbar-logo-*.svg beside the canonical asset"
+else
+  ok "site ships no comparison-candidate logo assets"
+fi
+if [ -f "$LOGO" ]; then
+  if python3 -c "import xml.dom.minidom; d=xml.dom.minidom.parse('$LOGO'); assert d.documentElement.tagName=='svg'" 2>/dev/null; then
+    ok "canonical logo parses as SVG XML"
+  else
+    bad "canonical logo parses as SVG XML" "$LOGO does not parse"
+  fi
+  if grep -Fq 'xmlns="http://www.w3.org/2000/svg"' "$LOGO" \
+    && grep -Fq 'viewBox="0 0 64 64"' "$LOGO"; then
+    ok "canonical logo keeps the SVG namespace and square viewBox"
+  else
+    bad "canonical logo keeps the SVG namespace and square viewBox" "needs xmlns plus viewBox 0 0 64 64"
+  fi
+  if grep -Fq '<title' "$LOGO" && grep -Fq 'role="img"' "$LOGO"; then
+    ok "canonical logo carries accessible title metadata"
+  else
+    bad "canonical logo carries accessible title metadata" "needs <title> plus role=img"
+  fi
+  for color in '#30d158' '#0a84ff' '#ff9f0a'; do
+    if grep -Fq "$color" "$LOGO"; then
+      ok "canonical logo keeps provider color $color"
+    else
+      bad "canonical logo keeps provider color $color" "missing $color in $LOGO"
+    fi
+  done
+  if [ "$(grep -c '<path' "$LOGO" || true)" = "3" ] \
+    && [ "$(grep -c '<rect' "$LOGO" || true)" = "3" ]; then
+    ok "canonical logo keeps the three-orbit plus three-bar geometry"
+  else
+    bad "canonical logo keeps the three-orbit plus three-bar geometry" "expected 3 paths and 3 rects in $LOGO"
+  fi
+  if grep -qiE '<script|onclick|onload=|onerror=|<image|<foreignObject|url\(|linearGradient|radialGradient|<pattern|@import|http://|https://' "$LOGO" \
+    | grep -vF 'http://www.w3.org/2000/svg' | grep -q .; then
+    bad "canonical logo stays code-native with no scripts or remote refs" "found script/gradient/image/remote reference"
+  else
+    ok "canonical logo stays code-native with no scripts or remote refs"
+  fi
+  if grep -Eq '<rect[^>]*x="0"[^>]*y="0"[^>]*width="6[04]"' "$LOGO"; then
+    bad "canonical logo stays transparent by default" "found full-canvas background rect"
+  else
+    ok "canonical logo stays transparent by default"
+  fi
+fi
+if grep -Fq '<link rel="icon" type="image/svg+xml" href="/assets/tokenbar-logo.svg">' "$SITE"; then
+  ok "site wires the canonical SVG as favicon with a root-relative path"
+else
+  bad "site wires the canonical SVG as favicon" "missing <link rel=icon type=image/svg+xml href=/assets/tokenbar-logo.svg> in $SITE"
 fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
