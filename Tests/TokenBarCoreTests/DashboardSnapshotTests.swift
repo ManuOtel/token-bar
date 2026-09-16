@@ -230,7 +230,8 @@ final class DashboardSnapshotTests: XCTestCase {
 
     func testTodayZeroCodexWithLifetimeHistoryIsRangeEffect() {
         // Triage guard for "Codex shows 0 while OpenCode has usage" on the
-        // app's default Today view: Codex history from 8 days ago parses
+        // narrow calendar-day window (formerly the app default): Codex
+        // history from 8 days ago parses
         // fine but lives outside the calendar-day window, while an OpenCode
         // record from 1 hour ago is inside it. Lifetime must show both.
         // Synthetic records only, no local data.
@@ -274,5 +275,70 @@ final class DashboardSnapshotTests: XCTestCase {
             records: records, source: .codex, preset: .lifetime,
             now: now, snapshot: nil, calendar: calendar)
         XCTAssertEqual(codexLifetime.scopedCount, 1)
+    }
+
+    // MARK: - Initial range defaults to the rolling last 7 days
+
+    func testDefaultPresetIsRollingLast7Days() {
+        // A usage tracker that opens on the narrow calendar-day window reads
+        // as empty most mornings; the initial dashboard range is the rolling
+        // last 7 days. Range chips and token/source math are unchanged.
+        XCTAssertEqual(DashboardSnapshot.defaultPreset, .last7Days)
+    }
+
+    func testDefaultRangeShowsRecentWeekMissedByToday() {
+        // Synthetic only: a record from 2 days ago sits outside the calendar
+        // day but inside the default 7D window, so the new default shows it.
+        // An 8-day-old record stays outside 7D (30D catches it), pinning that
+        // the empty-state widening suggestion still matters.
+        let records = [
+            record("codex-2d", source: .codex, hoursAgo: 2 * 24, input: 1200, output: 340),
+            record("codex-8d", source: .codex, hoursAgo: 8 * 24, input: 1200, output: 340),
+        ]
+        let today = DashboardSnapshot.make(
+            records: records, source: .codex, preset: .today,
+            now: now, snapshot: nil, calendar: calendar)
+        XCTAssertEqual(today.scopedCount, 0)
+        let week = DashboardSnapshot.make(
+            records: records, source: .codex, preset: DashboardSnapshot.defaultPreset,
+            now: now, snapshot: nil, calendar: calendar)
+        XCTAssertEqual(week.scopedCount, 1)
+        XCTAssertEqual(week.stats.requests, 1)
+        let month = DashboardSnapshot.make(
+            records: records, source: .codex, preset: .last30Days,
+            now: now, snapshot: nil, calendar: calendar)
+        XCTAssertEqual(month.scopedCount, 2)
+    }
+
+    // MARK: - Empty-range guidance offers the most useful wider range
+
+    func testSuggestedWiderPresetMapping() {
+        // Narrow windows widen to 30D first; 30D and Best widen to lifetime;
+        // lifetime has no wider range. Source-agnostic, no per-source logic.
+        XCTAssertEqual(DashboardSnapshot.suggestedWiderPreset(for: .today), .last30Days)
+        XCTAssertEqual(DashboardSnapshot.suggestedWiderPreset(for: .last24Hours), .last30Days)
+        XCTAssertEqual(DashboardSnapshot.suggestedWiderPreset(for: .last7Days), .last30Days)
+        XCTAssertEqual(DashboardSnapshot.suggestedWiderPreset(for: .last30Days), .lifetime)
+        XCTAssertEqual(DashboardSnapshot.suggestedWiderPreset(for: .bestMonth), .lifetime)
+        XCTAssertNil(DashboardSnapshot.suggestedWiderPreset(for: .lifetime))
+    }
+
+    func testEmptyNarrowScopeSuggestsWiderRangeWithHistory() {
+        // The verified confusion shape: Codex history from 8 days ago is
+        // empty under Today, and the guidance must point at 30D (which holds
+        // the record), not back at Today. Synthetic records only.
+        let records = [
+            record("codex-8d", source: .codex, hoursAgo: 8 * 24, input: 1200, output: 340),
+        ]
+        let today = DashboardSnapshot.make(
+            records: records, source: .codex, preset: .today,
+            now: now, snapshot: nil, calendar: calendar)
+        XCTAssertEqual(today.scopedCount, 0)
+        XCTAssertEqual(DashboardSnapshot.suggestedWiderPreset(for: .today), .last30Days)
+        let wider = DashboardSnapshot.make(
+            records: records, source: .codex,
+            preset: DashboardSnapshot.suggestedWiderPreset(for: .today)!,
+            now: now, snapshot: nil, calendar: calendar)
+        XCTAssertEqual(wider.scopedCount, 1)
     }
 }

@@ -68,11 +68,11 @@ Xcode alternative: open the folder in Xcode (`File > Open`), select the
 ## Install (packaged app)
 
 ```sh
-./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.3.3)
+./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.3.4)
 
-./scripts/package-release.sh --version 0.3.3 --format dmg   # macOS only, drag-and-drop layout
-(cd dist && shasum -a 256 -c TokenBar-0.3.3-macos.zip.sha256)
-(cd dist && shasum -a 256 -c TokenBar-0.3.3-macos.dmg.sha256)
+./scripts/package-release.sh --version 0.3.4 --format dmg   # macOS only, drag-and-drop layout
+(cd dist && shasum -a 256 -c TokenBar-0.3.4-macos.zip.sha256)
+(cd dist && shasum -a 256 -c TokenBar-0.3.4-macos.dmg.sha256)
 ```
 
 DMG install: open the dmg, drag `TokenBar.app` onto Applications, open.
@@ -351,10 +351,10 @@ clearly labeled approximations.
 
 Dark usage cockpit in the macOS menu bar popover (400pt, macOS 14 SwiftUI, no extra chart dependency).
 
-- **Compact (initial, no scroll):** hero token total for the active source/range, estimated cost (estimate only), `Source` chips (All / Codex / OpenCode / Claude with per-source tokens in range) and `Range` chips (Today / 24H / 7D / 30D / Best / All), a compact visual summary (input/output composition ring with cached/reasoning labelled as subsets, stacked source bar, 14-day mini trend), and a clear `Details` expand action plus a one-line updated/notices footer.
+- **Compact (initial, no scroll):** hero token total for the active source/range, estimated cost (estimate only), `Source` chips (All / Codex / OpenCode / Claude with per-source tokens in range) and `Range` chips (Today / 24H / 7D / 30D / Best / All), a compact visual summary (input/output composition ring with cached/reasoning labelled as subsets, stacked source bar, 14-day mini trend), and a clear `Details` expand action plus a one-line updated/notices footer. The dashboard opens on the rolling last 7 days (`7D`); every range chip stays available and token/source math is unchanged.
 - **Expanded (Details, scrollable):** toggles back to compact via `Show less` in the header. Exposes input/output/cached/reasoning cards (cached reads "subset of input", reasoning "subset of output"), a composition card whose ring splits the total into input vs output only with subset percentages in text, an always-visible source breakdown (zero sources stay listed as `no records`) with a stacked distribution bar, top-5 model bars with share tooltips, the full 14-day trend with date range, and sanitized notices.
 - Charts are custom SwiftUI (`DashboardCharts.swift`: ring, stacked bar, model bars, daily bars) fed by `DashboardInsights` shares in `TokenBarCore`. Cached and reasoning tokens never render as extra ring slices.
-- Preserved in both modes: source/range filtering, refresh button + loading state, empty-range states (with one-tap jumps to All sources / Lifetime), sanitized warnings (never paths), the OpenCode combined total plus local vs remote sub-lines when both origins are present, best-month key, and last-updated line.
+- Preserved in both modes: source/range filtering, refresh button + loading state, empty-range states (which name that records may exist outside the selected range, with one-tap jumps to All sources plus the most useful wider range: last 30 days from Today/24H/7D, lifetime from 30D/Best), sanitized warnings (never paths), the OpenCode combined total plus local vs remote sub-lines when both origins are present, best-month key, and last-updated line.
 - **Settings (gear popover):** the gear button in the dashboard header opens `SettingsView` with the launch-at-login toggle, the pricing section (rate-basis status line, user-initiated `Update pricing` catalog GET, cancellable, offline-safe, plus any refresh error), and the remote sync section (enable toggle, SSH host alias, remote snapshot path or exporter command, optional origin label, interval stepper, `Sync Now`, one-line status). All live only in Settings, never as an always-visible dashboard footer. Usage filters and details stay in the dashboard. Pricing refresh and sync never block usage loading.
 - **Startup cache (perceived startup only):** the app shows the last normalized report from `~/Library/Application Support/TokenBar/startup-report.json` immediately, marks it `Showing previous data - updating…` while the full history scan runs in the background, then atomically replaces it with fresh data. Cached values are previous normalized data until the background refresh finishes; the first-ever load with no cache still depends on source size and shows the loading state. Only token counts, model/source/origin labels, counters, and sanitized warnings are cached (no prompts, message bodies, tool I/O, file paths, or credentials).
 
@@ -435,10 +435,11 @@ boundary of the catalog GET, malformed catalog rejection, fixtures under
 
 - `No usage records in this scope`: the filter/preset matched zero records.
   Retry `./scripts/show-usage.sh --preset lifetime --source all`.
-- Codex reads `0` on Today while another source shows usage: the app opens
-  on Today and Codex history may simply hold no records for this calendar
-  day. Switch the range to Lifetime (or 7D/30D) before assuming ingestion
-  loss; per-source chips are per-range totals.
+- Codex reads `0` on a narrow range while another source shows usage: the app opens
+  on the rolling last 7 days and Codex history may simply hold no records
+  inside the selected window (for example a Today view with week-old Codex
+  history). Widen the range (the empty state suggests 30D, then lifetime)
+  before assuming ingestion loss; per-source chips are per-range totals.
 - `Codex sessions not found (...)`: default `~/.codex/sessions/**/*.jsonl`
   is absent. Point testing data with
   `TOKENBAR_CODEX_ROOT=/tmp/fake-codex ./scripts/show-usage.sh`.

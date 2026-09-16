@@ -37,6 +37,28 @@ public struct DashboardSnapshot: Hashable, Sendable {
     /// Fixed chip order, mirrors the menu-bar UI.
     public static let sourceOrder: [SourceFilter] = [.all, .codex, .opencode, .claude]
 
+    /// Initial dashboard range for the menu-bar app: rolling last 7 days.
+    /// A usage tracker that opens on the narrow calendar-day window reads
+    /// as empty most mornings; 7D shows the recent week immediately while
+    /// every range chip (including Today) stays available. CLI default
+    /// stays lifetime; token/source math is unchanged.
+    public static let defaultPreset: DatePreset = .last7Days
+
+    /// One-tap wider range for the empty/source-filter state (`noScopeState`).
+    /// Narrow windows (Today/24H/7D) widen to 30D first; 30D and Best widen
+    /// to lifetime; lifetime has no wider range (`nil`, source switch only).
+    /// Source-agnostic on purpose: no per-source assumptions.
+    public static func suggestedWiderPreset(for preset: DatePreset) -> DatePreset? {
+        switch preset {
+        case .today, .last24Hours, .last7Days:
+            return .last30Days
+        case .last30Days, .bestMonth:
+            return .lifetime
+        case .lifetime:
+            return nil
+        }
+    }
+
     /// Stats for the selected (source, preset) scope. For `.bestMonth`
     /// this is the winning month's stats over the source-filtered lifetime
     /// set, mirroring `ReportFormatter.section` and the old app logic.
