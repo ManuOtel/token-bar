@@ -5,6 +5,8 @@
    action). All reading surfaces (copy, specimen totals, feature cards,
    code/checksum blocks, footer) stay on flat standard surfaces with no
    blur, so text stays legible everywhere.
+   Default theme is a bright macOS-like light palette; a coherent dark
+   variant lives under prefers-color-scheme: dark with the same hierarchy.
    Static CSS only imitates the visual language: backdrop-filter layers
    sit on top of opaque solid fallbacks, so the page remains usable where
    blur is unsupported or Reduce Transparency is on. This is not Apple's
@@ -12,25 +14,87 @@
    external fonts, assets, scripts, or network. */
 
 :root {
-  --canvas: #17181c;
-  --canvas-solid: #17181c;
-  --panel: rgba(255, 255, 255, 0.045);
-  --raised: rgba(255, 255, 255, 0.07);
-  --hairline: rgba(255, 255, 255, 0.12);
-  --glass-hairline: rgba(255, 255, 255, 0.16);
-  --text: #f5f5f7;
-  --muted: #aab3bf;
-  --blue: #0a84ff;
-  --blue-link: #7aa7ff;
-  --codex: #30d158;
-  --opencode: #0a84ff;
-  --claude: #ff9f0a;
-  --focus: #8ab8ff;
+  color-scheme: light dark;
+  --canvas: #f5f5f7;
+  --canvas-solid: #f5f5f7;
+  --topbar-solid: #fbfbfd;
+  --topbar-translucent: rgba(251, 251, 253, 0.78);
+  --panel: #ffffff;
+  --raised: rgba(0, 0, 0, 0.04);
+  --popover-solid: #ffffff;
+  --popover-translucent: rgba(255, 255, 255, 0.96);
+  --hero-fill: rgba(0, 0, 0, 0.03);
+  --code-bg-solid: #ececee;
+  --code-bg: rgba(0, 0, 0, 0.04);
+  --control-solid: #ffffff;
+  --control-translucent: rgba(255, 255, 255, 0.65);
+  --icon-solid: #ececee;
+  --icon-translucent: rgba(0, 0, 0, 0.05);
+  --chip-solid: #ececee;
+  --chip-translucent: rgba(0, 0, 0, 0.05);
+  --details-solid: #0071e3;
+  --hairline: #d2d2d7;
+  --glass-hairline: rgba(0, 0, 0, 0.12);
+  --inset-highlight: rgba(255, 255, 255, 0.6);
+  --text: #1d1d1f;
+  --muted: #515154;
+  --blue: #0071e3;
+  --blue-link: #0066cc;
+  --blue-glow: rgba(0, 113, 227, 0.28);
+  --codex: #1aab4b;
+  --opencode: #0071e3;
+  --claude: #e8820c;
+  --focus: #0071e3;
+  --ring-track: rgba(0, 0, 0, 0.1);
+  --mix-track: rgba(0, 0, 0, 0.08);
+  --shadow-cta: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.14);
   --radius: 12px;
   --max: 68rem;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Helvetica, Arial, sans-serif;
   --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+/* Dark variant: same hierarchy and readability on a charcoal canvas.
+   Product semantics stay fixed: Codex green, OpenCode blue, Claude orange. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #17181c;
+    --canvas-solid: #17181c;
+    --topbar-solid: #1d1e22;
+    --topbar-translucent: rgba(29, 30, 34, 0.78);
+    --panel: rgba(255, 255, 255, 0.045);
+    --raised: rgba(255, 255, 255, 0.07);
+    --popover-solid: #2b2b2e;
+    --popover-translucent: rgba(43, 43, 46, 0.96);
+    --hero-fill: rgba(255, 255, 255, 0.04);
+    --code-bg-solid: #101114;
+    --code-bg: rgba(0, 0, 0, 0.35);
+    --control-solid: #2c2d32;
+    --control-translucent: rgba(255, 255, 255, 0.09);
+    --icon-solid: #3a3a3e;
+    --icon-translucent: rgba(255, 255, 255, 0.09);
+    --chip-solid: #3a3a3d;
+    --chip-translucent: rgba(255, 255, 255, 0.08);
+    --details-solid: #14528f;
+    --hairline: rgba(255, 255, 255, 0.12);
+    --glass-hairline: rgba(255, 255, 255, 0.16);
+    --inset-highlight: rgba(255, 255, 255, 0.12);
+    --text: #f5f5f7;
+    --muted: #aab3bf;
+    --blue: #0071e3;
+    --blue-link: #7aa7ff;
+    --blue-glow: rgba(0, 113, 227, 0.28);
+    --codex: #30d158;
+    --opencode: #0071e3;
+    --claude: #ff9f0a;
+    --focus: #8ab8ff;
+    --ring-track: rgba(255, 255, 255, 0.12);
+    --mix-track: rgba(255, 255, 255, 0.08);
+    --shadow-cta: 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-pop: 0 18px 50px rgba(0, 0, 0, 0.45);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -89,8 +153,8 @@ section[id] { scroll-margin-top: 4.5rem; }
 
 .topbar {
   border-bottom: 1px solid var(--hairline);
-  background-color: #1d1e22;
-  background: rgba(29, 30, 34, 0.78);
+  background-color: var(--topbar-solid);
+  background: var(--topbar-translucent);
   -webkit-backdrop-filter: saturate(1.4) blur(12px);
   backdrop-filter: saturate(1.4) blur(12px);
   position: sticky;
@@ -157,8 +221,8 @@ section[id] { scroll-margin-top: 4.5rem; }
 }
 
 .nav-list a:hover {
-  background-color: #2c2d32;
-  background: rgba(255, 255, 255, 0.08);
+  background-color: var(--chip-solid);
+  background: var(--chip-translucent);
   border-color: var(--glass-hairline);
   -webkit-backdrop-filter: saturate(1.4) blur(10px);
   backdrop-filter: saturate(1.4) blur(10px);
@@ -221,12 +285,12 @@ h1 {
   padding: 0.8rem 1.3rem;
   border-radius: 10px;
   border: 1px solid var(--glass-hairline);
-  background-color: #2c2d32;
-  background: rgba(255, 255, 255, 0.09);
+  background-color: var(--control-solid);
+  background: var(--control-translucent);
   -webkit-backdrop-filter: saturate(1.4) blur(12px);
   backdrop-filter: saturate(1.4) blur(12px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.35);
-  color: #fff;
+  box-shadow: inset 0 1px 0 var(--inset-highlight), var(--shadow-cta);
+  color: var(--text);
   text-decoration: none;
   font-weight: 700;
   font-size: 0.98rem;
@@ -234,11 +298,11 @@ h1 {
 
 .btn.primary {
   background-color: var(--blue);
-  background: linear-gradient(rgba(20, 140, 255, 0.88), rgba(10, 132, 255, 0.78));
+  background: var(--blue);
   -webkit-backdrop-filter: saturate(1.5) blur(12px);
   backdrop-filter: saturate(1.5) blur(12px);
-  border-color: rgba(255, 255, 255, 0.22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 8px 24px rgba(10, 132, 255, 0.28);
+  border-color: var(--glass-hairline);
+  box-shadow: inset 0 1px 0 var(--inset-highlight), 0 8px 24px var(--blue-glow);
   color: #fff;
 }
 .btn:hover { text-decoration: underline; text-underline-offset: 0.2em; }
@@ -261,8 +325,8 @@ h1 {
 
 /* Code/checksum block: flat readable surface, never glass. */
 .verify {
-  background-color: #101114;
-  background: rgba(0, 0, 0, 0.35);
+  background-color: var(--code-bg-solid);
+  background: var(--code-bg);
   border: 1px solid var(--hairline);
   border-radius: 10px;
   padding: 1rem 1.25rem;
@@ -303,12 +367,12 @@ h1 {
 
 .popover {
   position: relative;
-  background-color: #2b2b2e;
-  background: rgba(43, 43, 46, 0.96);
+  background-color: var(--popover-solid);
+  background: var(--popover-translucent);
   border: 1px solid var(--hairline);
   border-radius: 14px;
   padding: 1rem 1.1rem 0.9rem;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-pop);
   font-variant-numeric: tabular-nums;
   max-width: 26rem;
 }
@@ -346,11 +410,11 @@ h1 {
   height: 1.9rem;
   border: 1px solid var(--glass-hairline);
   border-radius: 8px;
-  background-color: #3a3a3e;
-  background: rgba(255, 255, 255, 0.09);
+  background-color: var(--icon-solid);
+  background: var(--icon-translucent);
   -webkit-backdrop-filter: saturate(1.4) blur(10px);
   backdrop-filter: saturate(1.4) blur(10px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 var(--inset-highlight);
   color: var(--text);
 }
 
@@ -381,11 +445,11 @@ h1 {
   align-items: center;
   gap: 0.3rem;
   border: 1px solid var(--glass-hairline);
-  background-color: #3a3a3d;
-  background: rgba(255, 255, 255, 0.08);
+  background-color: var(--chip-solid);
+  background: var(--chip-translucent);
   -webkit-backdrop-filter: saturate(1.4) blur(10px);
   backdrop-filter: saturate(1.4) blur(10px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 var(--inset-highlight);
   border-radius: 9px;
   padding: 0.32rem 0.6rem;
   color: var(--text);
@@ -393,11 +457,11 @@ h1 {
 
 .pop-chips li.on {
   background-color: var(--blue);
-  background: linear-gradient(rgba(20, 140, 255, 0.9), rgba(10, 132, 255, 0.8));
+  background: var(--blue);
   -webkit-backdrop-filter: saturate(1.5) blur(10px);
   backdrop-filter: saturate(1.5) blur(10px);
-  border-color: rgba(255, 255, 255, 0.22);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  border-color: var(--glass-hairline);
+  box-shadow: inset 0 1px 0 var(--inset-highlight);
   color: #fff;
   font-weight: 700;
 }
@@ -414,7 +478,7 @@ h1 {
   align-items: center;
   margin-top: 0.9rem;
   padding: 0.9rem;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hero-fill);
   border: 1px solid var(--hairline);
   border-radius: 12px;
 }
@@ -441,6 +505,12 @@ h1 {
 .pop-meta { font-size: 0.76rem; color: var(--muted); margin: 0.15rem 0 0; }
 
 .pop-ring { text-align: center; }
+
+/* Ring track and segments follow the theme source colors via CSS, so the
+   input/output meaning stays readable on light and dark alike. */
+.ring-track { stroke: var(--ring-track); }
+.ring-seg-output { stroke: var(--claude); }
+.ring-seg-input { stroke: var(--opencode); }
 .pop-ring-caption { font-size: 0.68rem; color: var(--muted); margin: 0.3rem 0 0; }
 
 .pop-mix {
@@ -449,7 +519,7 @@ h1 {
   border-radius: 999px;
   overflow: hidden;
   margin: 0.9rem 0 0.5rem;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--mix-track);
   gap: 2px;
 }
 
@@ -495,12 +565,12 @@ h1 {
 .pop-details {
   margin: 0.7rem 0 0;
   padding: 0.6rem 0.8rem;
-  background-color: #14528f;
-  background: linear-gradient(rgba(20, 140, 255, 0.55), rgba(10, 132, 255, 0.45));
+  background-color: var(--details-solid);
+  background: var(--details-solid);
   -webkit-backdrop-filter: saturate(1.5) blur(10px);
   backdrop-filter: saturate(1.5) blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  border: 1px solid var(--glass-hairline);
+  box-shadow: inset 0 1px 0 var(--inset-highlight);
   border-radius: 9px;
   font-size: 0.85rem;
   font-weight: 600;
@@ -672,17 +742,18 @@ h3 { font-size: 1.02rem; margin: 0 0 0.35rem; }
   .pop-number { font-size: 1.45rem; }
 }
 
-/* Solid fallbacks where backdrop blur is unavailable: opaque surfaces
-   keep every control and the header legible with zero blur. */
+/* Solid fallbacks where backdrop blur is unavailable: opaque theme solids
+   keep every control and the header legible with zero blur, in both
+   light and dark variants. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .topbar { background: #1d1e22; }
-  .nav-list a:hover { background: #2c2d32; }
-  .btn { background: #2c2d32; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
-  .btn.primary { background: var(--blue); box-shadow: 0 8px 24px rgba(10, 132, 255, 0.28); }
-  .pop-icon { background: #3a3a3e; box-shadow: none; }
-  .pop-chips li { background: #3a3a3d; box-shadow: none; }
+  .topbar { background: var(--topbar-solid); }
+  .nav-list a:hover { background: var(--chip-solid); }
+  .btn { background: var(--control-solid); box-shadow: var(--shadow-cta); }
+  .btn.primary { background: var(--blue); box-shadow: 0 8px 24px var(--blue-glow); }
+  .pop-icon { background: var(--icon-solid); box-shadow: none; }
+  .pop-chips li { background: var(--chip-solid); box-shadow: none; }
   .pop-chips li.on { background: var(--blue); box-shadow: none; }
-  .pop-details { background: #14528f; box-shadow: none; }
+  .pop-details { background: var(--details-solid); box-shadow: none; }
   .hero-popover::before { display: none; }
 }
 
