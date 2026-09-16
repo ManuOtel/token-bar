@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Token Bar: a native macOS menu-bar utility that totals your own local Codex, OpenCode, and Claude Code token usage. Local-first, no accounts, no trackers, no cookies. Download the latest macOS build.">
-<meta name="color-scheme" content="dark light">
+<meta name="color-scheme" content="dark">
 <title>Token Bar - local AI token usage in your menu bar</title>
 <link rel="stylesheet" href="styles.css">
 </head>
@@ -12,168 +12,152 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar">
   <div class="wrap topbar-inner">
-    <p class="brand"><span class="brand-mark" aria-hidden="true">▮▮▮</span> Token Bar</p>
+    <p class="brand"><span class="brand-mark" aria-hidden="true">▮▮▮</span> Token Bar <span class="ver">v0.3.4</span></p>
     <nav aria-label="Site">
       <ul class="nav-list">
         <li><a href="#download">Download</a></li>
         <li><a href="#sources">Sources</a></li>
-        <li><a href="#dashboard">Dashboard</a></li>
-        <li><a href="#pricing">Pricing</a></li>
-        <li><a href="#sync">Sync</a></li>
+        <li><a href="#readout">Readout</a></li>
         <li><a href="#install">Install</a></li>
-        <li><a href="#privacy">Privacy</a></li>
-        <li><a href="https://github.com/ManuOtel/token-bar">Repository</a></li>
+        <li><a href="https://github.com/ManuOtel/token-bar">GitHub</a></li>
       </ul>
     </nav>
   </div>
 </header>
 <main id="main" class="wrap">
+
   <section class="hero" aria-labelledby="page-title" id="download">
     <div class="hero-grid">
       <div class="hero-copy">
-        <p class="kicker">Native macOS 14+ menu-bar utility <span class="ver">v0.3.4</span></p>
-        <h1 id="page-title">Your local AI token usage, one glance away.</h1>
-        <p class="lede">Token Bar reads the usage history already on your Mac from Codex, OpenCode, and Claude Code, and totals it in the menu bar. File reads only. No accounts. No usage data upload. Every dollar figure is an estimate only, never a bill.</p>
+        <p class="kicker">Native macOS 14+ menu-bar utility</p>
+        <h1 id="page-title">Token totals for your coding agents, in the menu bar.</h1>
+        <p class="lede">Token Bar reads the usage history already on your Mac from Codex, OpenCode, and Claude Code, and totals it where you can always see it. Read-only file access. No accounts. No usage upload. Every cost figure is an estimate only, never a bill.</p>
         <div class="cta-row">
           <a class="btn primary" href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg">Download for macOS (.dmg)</a>
-          <a class="btn" href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip">Download .zip instead</a>
+          <a class="btn" href="https://github.com/ManuOtel/token-bar">GitHub repository ManuOtel/token-bar</a>
         </div>
+        <p class="cta-meta">DMG disk image &middot; macOS 14 (Sonoma) or later &middot; v0.3.4 &middot; <a href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip">Download .zip instead</a></p>
         <ul class="checksum-list">
           <li><a href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg.sha256">DMG checksum (SHA-256)</a></li>
           <li><a href="https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.zip.sha256">ZIP checksum (SHA-256)</a></li>
-          <li><a href="https://github.com/ManuOtel/token-bar">GitHub repository ManuOtel/token-bar</a></li>
           <li><a href="https://github.com/ManuOtel/token-bar/blob/main/CHANGELOG.md">Release changelog for Token Bar</a></li>
         </ul>
         <pre class="verify"><code>curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg
 curl -LO https://github.com/ManuOtel/token-bar/releases/latest/download/TokenBar-latest-macos.dmg.sha256
 shasum -a 256 -c TokenBar-latest-macos.dmg.sha256</code></pre>
-        <p class="note">Requires macOS 14 (Sonoma) or later. Unsigned and not notarized: macOS Gatekeeper warns on first launch, which is expected. Right-click Open the app once, then launch normally. Each <a href="https://github.com/ManuOtel/token-bar/releases">GitHub release</a> also keeps versioned <span class="mono">TokenBar-&lt;version&gt;-macos.zip</span> and <span class="mono">.dmg</span> assets with checksums.</p>
+        <p class="note">Releases are <strong>unsigned and not notarized</strong>, so macOS Gatekeeper warns on first launch. That is expected: right-click Open the app once, then launch normally. Each <a href="https://github.com/ManuOtel/token-bar/releases">GitHub release</a> also keeps versioned <span class="mono">TokenBar-&lt;version&gt;-macos.zip</span> and <span class="mono">.dmg</span> assets with checksums.</p>
       </div>
-      <div class="hero-mock" role="img" aria-label="Illustrative sample of the Token Bar compact popover: total tokens, estimated cost, source and range chips, composition ring, source bar, and 14-day trend. Figures are layout samples, not your usage.">
-        <div class="mock-window" aria-hidden="true">
-          <p class="mock-eyebrow">Menu bar popover - compact</p>
-          <p class="mock-total">2,512,800 <span>tokens</span></p>
-          <p class="mock-cost">Estimated cost $4.10 <span>(estimate only)</span></p>
-          <ul class="mock-chips">
-            <li class="on">All</li>
-            <li>Codex</li>
-            <li>OpenCode</li>
-            <li>Claude</li>
-          </ul>
-          <ul class="mock-chips ghost">
-            <li>Today</li>
-            <li class="on">7D</li>
-            <li>30D</li>
-            <li>Best</li>
-            <li>All</li>
-          </ul>
-          <div class="mock-mid">
-            <span class="mock-ring"></span>
-            <span class="mock-bars">
-              <span style="--w: 49%"><i>Codex</i></span>
-              <span style="--w: 34%"><i>OpenCode</i></span>
-              <span style="--w: 17%"><i>Claude</i></span>
-            </span>
+      <div class="hero-specimen">
+        <div class="specimen" role="img" aria-label="Illustrative sample of the Token Bar compact popover: token total, estimated cost, source and range selectors, source mix bar, and 14-day trend. All figures are illustrative samples, not your usage.">
+          <div aria-hidden="true">
+            <p class="specimen-bar"><span class="dots"><i></i><i></i><i></i></span> TokenBar &mdash; All &middot; 7D</p>
+            <p class="specimen-total">2,512,800 <span>tokens</span></p>
+            <p class="specimen-cost">est. $4.10 <span>estimate only</span></p>
+            <ul class="specimen-chips">
+              <li class="on">All</li>
+              <li>Codex</li>
+              <li>OpenCode</li>
+              <li>Claude</li>
+            </ul>
+            <ul class="specimen-chips ghost">
+              <li>Today</li>
+              <li class="on">7D</li>
+              <li>30D</li>
+              <li>Best</li>
+              <li>All</li>
+            </ul>
+            <div class="specimen-mix">
+              <span style="--w: 49%"></span><span style="--w: 34%"></span><span style="--w: 17%"></span>
+            </div>
+            <ul class="specimen-legend">
+              <li><i class="sw a"></i>Codex 49%</li>
+              <li><i class="sw b"></i>OpenCode 34%</li>
+              <li><i class="sw c"></i>Claude 17%</li>
+            </ul>
+            <div class="specimen-trend">
+              <span style="--h: 30%"></span><span style="--h: 45%"></span><span style="--h: 38%"></span><span style="--h: 60%"></span><span style="--h: 52%"></span><span style="--h: 74%"></span><span style="--h: 66%"></span><span style="--h: 88%"></span><span style="--h: 70%"></span><span style="--h: 95%"></span><span style="--h: 80%"></span><span style="--h: 58%"></span><span style="--h: 72%"></span><span style="--h: 100%"></span>
+            </div>
+            <p class="specimen-foot">updated just now &middot; Details &rsaquo;</p>
           </div>
-          <div class="mock-trend">
-            <span style="--h: 30%"></span><span style="--h: 45%"></span><span style="--h: 38%"></span><span style="--h: 60%"></span><span style="--h: 52%"></span><span style="--h: 74%"></span><span style="--h: 66%"></span><span style="--h: 88%"></span><span style="--h: 70%"></span><span style="--h: 95%"></span><span style="--h: 80%"></span><span style="--h: 58%"></span><span style="--h: 72%"></span><span style="--h: 100%"></span>
-          </div>
-          <p class="mock-foot">Details expands the full breakdown <span aria-hidden="true">- sample figures</span></p>
         </div>
+        <p class="specimen-note">Illustrative sample figures, not your usage.</p>
       </div>
     </div>
-    <ul class="trust-strip" aria-label="Local-first guarantees">
-      <li><strong>No accounts</strong><span>No sign-in, no provider keys, no subscription hookup.</span></li>
-      <li><strong>Nothing uploaded</strong><span>Usage data never leaves the machine.</span></li>
-      <li><strong>No trackers</strong><span>No analytics, no cookies, no network by default.</span></li>
+    <ul class="trust" aria-label="Local-first guarantees">
+      <li><strong>Local-first</strong><span>Usage data never leaves the machine.</span></li>
+      <li><strong>No accounts</strong><span>No sign-in, no provider keys.</span></li>
+      <li><strong>No upload</strong><span>Local history, read-only.</span></li>
       <li><strong>Estimates only</strong><span>Costs are approximations, never a bill.</span></li>
     </ul>
   </section>
 
-  <div class="paper">
-    <section aria-labelledby="value-title">
-      <h2 id="value-title">Why Token Bar exists</h2>
-      <p>Token usage is scattered across three tools, each with its own history format. Token Bar answers one question without opening three apps: <strong>how much have I used, where, and roughly what does it cost?</strong> It totals your own on-disk history read-only, stays in the menu bar, and gets out of the way. When a source is missing, you get an empty total plus a short sanitized notice, never a crash and never a raw file path.</p>
-    </section>
-    <section aria-labelledby="sources-title" id="sources">
-      <h2 id="sources-title">Three local sources, one total</h2>
-      <ul class="source-cards">
-        <li>
-          <h3>Codex</h3>
-          <p>Local session files, read-only. Per-record token counts with file-sequential model attribution; unknown models stay visible under <span class="mono">unknown</span> at fallback rates.</p>
-        </li>
-        <li>
-          <h3>OpenCode</h3>
-          <p>Local usage database, read-only. Per-message rows are authoritative; per-session rollups fill uncovered sessions only. Second machines join as an opt-in token-only snapshot (see <a href="#sync">Sync</a>).</p>
-        </li>
-        <li>
-          <h3>Claude Code</h3>
-          <p>Local project files, read-only. Assistant usage records with cache read and creation folded into input, matching provider semantics.</p>
-        </li>
-      </ul>
-      <p class="sample-note">Sample layout figures: Codex 1,240,000 input, OpenCode 860,500 input, Claude Code 412,300 input. Layout samples, not your usage. Cached tokens are a subset of input and reasoning a subset of output; neither is ever added on top of the total.</p>
-    </section>
-    <section aria-labelledby="dash-title" id="dashboard">
-      <h2 id="dash-title">Compact first, details on demand</h2>
-      <div class="dash-grid">
-        <div>
-          <h3>Compact (initial, no scroll)</h3>
-          <p>The 400pt popover opens compact: hero token total for the active source and range, estimated cost, <span class="mono">Source</span> chips (All, Codex, OpenCode, Claude with per-source tokens in range) and <span class="mono">Range</span> chips (Today, 24H, 7D, 30D, Best, All), a composition ring, a stacked source bar, and a 14-day mini trend. A <span class="mono">Details</span> action and a one-line updated-or-notices footer finish it.</p>
-        </div>
-        <div>
-          <h3>Details (expanded, scrollable)</h3>
-          <p><span class="mono">Show less</span> collapses back. Details adds input, output, cached, and reasoning cards (cached reads <q>subset of input</q>, reasoning <q>subset of output</q>), a composition card that splits the total into input vs output only, an always-visible source breakdown (empty sources stay listed as <span class="mono">no records</span>), top-5 model bars, the full 14-day trend with date range, sanitized notices, and the OpenCode combined total with local vs remote sub-lines when both are present.</p>
-        </div>
+  <section aria-labelledby="sources-title" id="sources">
+    <p class="sec-kicker">Sources</p>
+    <h2 id="sources-title">Three local sources. One total.</h2>
+    <ul class="source-strip">
+      <li>
+        <h3>Codex</h3>
+        <p>Local session history, read-only. Per-record counts with file-sequential model attribution; unknown models stay listed under <span class="mono">unknown</span> at fallback rates.</p>
+      </li>
+      <li>
+        <h3>OpenCode</h3>
+        <p>Local usage database, read-only. Per-message rows lead; session rollups fill gaps only. A second machine joins as an opt-in token-only snapshot.</p>
+      </li>
+      <li>
+        <h3>Claude Code</h3>
+        <p>Local project history, read-only. Cache reads fold into input, matching provider semantics.</p>
+      </li>
+    </ul>
+    <p class="fine">Cached counts are a subset of input; reasoning is a subset of output. Neither is ever added on top of the total. Missing sources show an empty total plus a short sanitized notice, never a raw file path.</p>
+  </section>
+
+  <section aria-labelledby="readout-title" id="readout">
+    <p class="sec-kicker">Readout</p>
+    <h2 id="readout-title">Compact first. Details on demand.</h2>
+    <div class="proof-grid">
+      <div>
+        <h3>Compact popover</h3>
+        <p>The 400pt popover opens compact and scroll-free on the rolling 7D view: hero token total, estimated cost, <span class="mono">Source</span> chips (All, Codex, OpenCode, Claude) and <span class="mono">Range</span> chips (Today, 24H, 7D, 30D, Best, All), a composition ring, a stacked source bar, and a 14-day mini trend. A <span class="mono">Details</span> action and an updated-or-notices footer finish it.</p>
       </div>
-      <p>Filters, the refresh button with loading state, empty-range shortcuts (jump to All sources or Lifetime), the best-month key, and the last-updated line work identically in both modes.</p>
-    </section>
-    <section aria-labelledby="cost-title" id="pricing">
-      <h2 id="cost-title">Pricing estimates, honestly labelled</h2>
-      <p>Every dollar figure is labelled an estimate from a rate table, not a bill. Subscription use is not an API invoice. The built-in static table works fully offline. One strictly opt-in refresh fetches public model pricing metadata and narrows drift for listed models; without it the app never touches the network. Refreshed runs name their rate basis (<span class="mono">dynamic catalog</span>, <span class="mono">cached catalog</span>, or <span class="mono">static estimates</span> with host, model count, and age). Unknown models never price at zero: they use the fallback rate and stay visible in the report.</p>
-    </section>
-    <section aria-labelledby="sync-title" id="sync">
-      <h2 id="sync-title">Second Mac? Sync is opt-in.</h2>
-      <p>Remote merge ships <strong>disabled</strong>. Two paths, same totals:</p>
-      <ol>
-        <li><strong>Manual copy (offline, no network).</strong> Export a token-only snapshot on the other machine and copy it over by whatever means you already operate. No fetch involved.</li>
-        <li><strong>Auto pull (opt-in).</strong> Enable remote sync in Settings and enter your own host alias plus the remote snapshot path or exporter command, with an optional origin label. The app pulls over your existing SSH setup at startup, on an interval, and on <span class="mono">Sync Now</span>. No passwords or keys are stored, nothing is guessed, prompts are never shown, and no usage data is ever sent (downloads only). Each pull validates before replacing the local cache and keeps the last good cache on any failure.</li>
-      </ol>
-    </section>
-  </div>
+      <div>
+        <h3>Expanded details</h3>
+        <p>Expands in place: input, output, cached, and reasoning cards, an input-vs-output composition split, always-visible source rows (empty sources read <span class="mono">no records</span>), top-5 models, the full 14-day trend, sanitized notices, and OpenCode local-vs-remote sub-lines when both exist. <span class="mono">Show less</span> collapses back. The same totals are also available as terminal reports: lifetime, today, rolling windows, best month, and machine-readable JSON.</p>
+      </div>
+    </div>
+    <div class="proof-grid">
+      <div>
+        <h3>Pricing, honestly labelled</h3>
+        <p>Every dollar figure is an estimate from a rate table, not a bill. Subscription use is not an API invoice. The built-in static table works fully offline; one strictly opt-in refresh narrows drift for listed models, and refreshed runs name their rate basis. Unknown models never price at zero: they use the fallback rate and stay visible.</p>
+      </div>
+      <div>
+        <h3>Second Mac? Sync is opt-in.</h3>
+        <p>Remote merge ships <strong>disabled</strong>. Either copy a token-only snapshot over manually (offline, no fetch), or enable auto-pull over your own SSH setup at startup, on an interval, and on <span class="mono">Sync Now</span>. No credentials stored, downloads only, each pull validated before replacing the cache, last good cache kept on failure.</p>
+      </div>
+    </div>
+  </section>
 
   <section aria-labelledby="install-title" id="install">
-    <h2 id="install-title">Install in two minutes</h2>
+    <p class="sec-kicker">Install</p>
+    <h2 id="install-title">Running in two minutes.</h2>
     <ol class="steps">
-      <li><strong>Download and verify.</strong> Grab the DMG above and check its SHA-256 with the commands shown. The ZIP pair verifies the same way.</li>
-      <li><strong>Move to Applications.</strong> DMG: open it, drag <span class="mono">TokenBar.app</span> onto Applications. ZIP: unzip, drag <span class="mono">TokenBar.app</span> to Applications.</li>
-      <li><strong>Open once past Gatekeeper.</strong> Releases are <strong>unsigned and not notarized</strong>, so macOS Gatekeeper shows a warning on first launch. That is expected: right-click Open the app once, then launch normally.</li>
-      <li><strong>Read your usage.</strong> First launch scans local history only and shows the cached report instantly on later launches while a background refresh recomputes. Toggle launch-at-login from the Settings gear when you want it in every session.</li>
+      <li><strong>Download and verify.</strong> Grab the DMG above; check its SHA-256 with the commands shown. The ZIP pair verifies the same way.</li>
+      <li><strong>Move to Applications.</strong> Open the DMG and drag <span class="mono">TokenBar.app</span> onto Applications. Or unzip the ZIP and drag <span class="mono">TokenBar.app</span> to Applications.</li>
+      <li><strong>Open once past Gatekeeper.</strong> Releases are <strong>unsigned and not notarized</strong>: right-click Open the app once, then launch normally.</li>
+      <li><strong>Read your usage.</strong> First launch scans local history only; later launches show the cached report instantly while a background refresh recomputes. Launch-at-login lives behind the Settings gear, off until you enable it.</li>
     </ol>
   </section>
 
-  <section aria-labelledby="after-title">
-    <h2 id="after-title">What you get after download</h2>
-    <ul class="get-grid">
-      <li><strong>Menu-bar popover</strong><span>Compact dashboard plus expandable Details, with source and range filters that stay where you left them.</span></li>
-      <li><strong>Terminal reports</strong><span>The same totals without the menu bar: lifetime, today, rolling windows, best month, and machine-readable JSON.</span></li>
-      <li><strong>Model and trend views</strong><span>Top-5 models, source splits, per-origin lines for merged hosts, and a daily trend.</span></li>
-      <li><strong>Settings, not surprises</strong><span>Launch at login, pricing refresh, and remote sync live behind the gear button and stay off until you enable them.</span></li>
-    </ul>
-  </section>
-
   <section aria-labelledby="privacy-title" id="privacy">
-    <h2 id="privacy-title">Local-first boundary</h2>
-    <ul>
+    <p class="sec-kicker">Privacy</p>
+    <h2 id="privacy-title">Stays on your Mac.</h2>
+    <ul class="bounds">
       <li>Usage data, prompts, message bodies, paths, and credentials never leave the machine.</li>
       <li>No accounts, no provider APIs, no cookies, no analytics on this page and none in the app.</li>
       <li>Only two network uses exist in the app, both strictly opt-in and disabled by default: the public pricing refresh and the remote snapshot pull over your own SSH setup.</li>
     </ul>
-  </section>
-
-  <section aria-labelledby="more-title">
-    <h2 id="more-title">Source and history</h2>
     <p>Token Bar is open source. Read the code, the <a href="https://github.com/ManuOtel/token-bar/blob/main/CHANGELOG.md">release changelog for Token Bar</a>, and the <a href="https://github.com/ManuOtel/token-bar">GitHub repository ManuOtel/token-bar</a>. Current page release: <span class="mono">v0.3.4</span>.</p>
   </section>
+
 </main>
 <footer class="footer">
   <div class="wrap footer-inner">
