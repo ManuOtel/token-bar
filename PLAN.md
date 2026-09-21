@@ -298,48 +298,88 @@ require all of:
 Acceptance for this milestone is the accepted written plan only: no
 source, CI, packaging, or site-behavior change lands under M11.
 
-### M12 - Configurable chart styles (plan only)
+### M12 - Configurable chart styles implementation release
 
-Status: plan only; do not implement in this milestone. Normative
-product detail lives in `docs/CHART_STYLE_PROPOSAL.md`; this
-milestone tracks acceptance of that plan. M11 stays intact and
+Status: implementation milestone. The written proposal is accepted
+(`docs/CHART_STYLE_PROPOSAL.md`); this milestone tracks the
+implementation feature PR plus its review, CI, and visual gates and
+the eventual minor-version release step. M11 stays intact and
 unchanged.
 
-Acceptance for this milestone is the accepted written proposal only:
+Scope: implement the accepted proposal only: Automatic (default),
+Bars, Line with points, and Area over the existing adaptive
+`TrendModel` and `DashboardSnapshot`, with the Chart style menu in
+expanded Details, a persisted preference, compact kept compact,
+per-range visual rules, zero-filled buckets, linear trend scale with
+the existing log-scaled input/output comparison preserved
+separately, source bar and model rows unchanged, comparison
+annotations, tooltips, keyboard and focus behavior, VoiceOver labels
+with Audio Graph support where the platform provides it, Reduce
+Transparency and Increase Contrast handling, render from snapshot
+only with no extra scans, and privacy and fixture-only evidence
+rules. A calendar heatmap stays explicitly out of scope. Area is
+total-volume shape only, never stacked multi-source content.
 
-- `docs/CHART_STYLE_PROPOSAL.md` defines Automatic (default), Bars,
-  Line with points, and Area over the existing adaptive `TrendModel`
-  and `DashboardSnapshot`, with the Chart style menu in expanded
-  Details, a persisted preference, compact kept compact, per-range
-  visual rules, zero-filled buckets, linear trend scale with the
-  existing log-scaled input/output comparison preserved separately,
-  source bar and model rows unchanged, comparison annotations,
-  tooltips, keyboard and focus behavior, VoiceOver labels with Audio
-  Graph support, Reduce Transparency and Increase Contrast, render
-  from snapshot only with no extra scans, privacy and fixture-only
-  evidence rules, implementation boundaries (shared trend model,
-  view-layer renderer selection, stable color and series semantics,
-  no decorative animation, no extra glass or material surface,
-  macOS 14 availability), and the required test list (renderer
-  selection, accessibility labels, empty and no-baseline states,
-  persistence, bucket coverage, visual geometry contracts).
-- A calendar heatmap is recorded as explicitly out of scope for this
-  release. Area is total-volume shape only, never stacked
-  multi-source content.
+Acceptance:
+
+- Feature PR delivers the style menu, the three renderers plus
+  Automatic with the section 4 mapping from
+  `docs/CHART_STYLE_PROPOSAL.md`, persistence with Automatic
+  fallback, accessibility labels with Audio Graph support where the
+  platform provides it, the privacy evidence rules, and the proposal
+  section 12 tests (renderer selection, accessibility labels, empty
+  and no-baseline states, persistence, bucket coverage, visual
+  geometry contracts), staying inside the proposal boundaries (shared trend
+  model, view-layer renderer selection, stable color and series
+  semantics, no decorative animation, no extra glass or material
+  surface, macOS 14 availability, no new network use, no new
+  subprocess, no new usage persistence).
+- Review, CI, and visual gates before merge: independent review;
+  exact-head verification (reviewed SHA is the SHA CI ran and the
+  SHA merged); green PR CI per `docs/RELEASE_PROCESS.md` step 5
+  (macOS 14 `swift build` + `swift test`, Linux `verify_logic.py`
+  mirror plus shell syntax, privacy gate with `URLSession` confined
+  to `PricingService.swift`, `Process(` confined to
+  `OpenCodeSync.swift`, catalog hosts allowlisted to
+  `openrouter.ai`, no Cookie/Authorization headers, plus
+  `scripts/check-privacy.sh`); contract scripts
+  (`scripts/test-popover.sh` extended in the same PR where the
+  popover contract requires it, plus `test-versioning.sh`,
+  `test-release.sh`, `test-site.sh` as touched) and
+  `git diff --check` clean; Mac render pass over the
+  `docs/SECURITY_AND_VISUAL_QA.md` section 3 matrix (compact and
+  expanded, light and dark, empty, zero, no-comparison, notices,
+  Reduce Transparency, Increase Contrast, accessibility, focus,
+  clipping), built from synthetic fixtures under `Fixtures/` only
+  with privacy-safe handling (no real-data screenshots, no
+  environment dumps, no real paths). A state that was not rendered
+  is a gap, not a pass.
+- Eventual minor-version release step after the feature PR merges:
+  release PR bumps `VERSION` plus `CHANGELOG.md` only (no product
+  or process changes), then the maintainer tags `main` HEAD as
+  exactly `v<VERSION>` and the tag workflow publishes the release,
+  followed by published-asset verification and a verified install
+  with the release-candidate visual smoke per
+  `docs/SECURITY_AND_VISUAL_QA.md` section 5. Feature PRs and
+  release PRs stay separate per `docs/RELEASE_PROCESS.md`. The
+  release mapping lives in `docs/RELEASE_ROADMAP.md`: v0.5.1
+  baseline; next minor release for M12 charts plus Liquid Glass
+  visual QA; following candidate for the Settings-initiated updater
+  (`docs/AUTO_UPDATE_PROPOSAL.md`) only after its security and
+  signing requirements are met.
 
 Non-goals:
 
-- No source, test, CI, VERSION, CHANGELOG, packaging, or website
-  behavior change lands under M12.
 - No per-source or per-model trend series, no stacked areas, no
   heatmap, no per-range style memory, no log-scaled trend axis, no
   new network use, no new subprocess, no new usage persistence.
 - No real-data screenshots in public artifacts; synthetic fixtures
   only.
+- No updater work lands under M12; updater planning lives in M11
+  plus `docs/AUTO_UPDATE_PROPOSAL.md` and stays a candidate until
+  the signing and notarization infrastructure exists.
 
-Release recommendation: docs-only change, so no VERSION bump, no
-CHANGELOG entry, and no release artifact. The implementation ships
-only under a later worker milestone with fixtures, tests, docs, an
-extended `scripts/test-popover.sh` where the popover contract
-requires it, and a Mac render pass, then follows the normal
-version and release path.
+Release recommendation: the planning edits under this milestone are
+docs-only (no VERSION bump, no CHANGELOG entry, no release
+artifact). The M12 implementation ships only through the feature PR
+above, then follows the normal version and release path.
