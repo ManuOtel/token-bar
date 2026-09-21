@@ -7,7 +7,7 @@ tests; docs-only changes need a clean docs gate. Full lifecycle:
 ## What kind of PR is this?
 
 - [ ] Feature/fix PR (one scoped change; merges to `main`; never tags or releases)
-- [ ] Release PR (`VERSION` plus `CHANGELOG.md` only; no product or process changes)
+- [ ] Release PR (`VERSION` plus `CHANGELOG.md` plus synchronized public release markers in `site/index.html` only; no product or process code, no unrelated docs, no assets unless the site contract later requires them; site sync required because `test-release.sh`/`test-site.sh` enforce VERSION freshness)
 - [ ] Docs-only/process-only PR (no `VERSION` bump, no release)
 
 ## Scope and acceptance criteria
