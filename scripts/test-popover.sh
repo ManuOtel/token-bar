@@ -27,6 +27,12 @@
 #     shows details, long notice lists scroll with them) and stay outside
 #     only for the empty/no-scope states; no expanded-outside
 #     `} else { notices }` branch remains
+#   - empty conditional slots are omitted from the hierarchy (no bare
+#     EmptyView spacing gaps): statusBanner/notices/comparison render only
+#     under a parent `if`, so hidden slots leave no bare window-material
+#     strip above/below the content; the compact path keeps exactly one
+#     vertical ScrollView (expanded only) with the root padding + width-400
+#     geometry intact
 #
 # Run: ./scripts/test-popover.sh (from the repo root).
 set -eu
@@ -150,6 +156,63 @@ if grep -q 'scrollContentBackground' Sources/TokenBarApp/*.swift; then
   bad "no ScrollView gutter override in App sources" "found scrollContentBackground in Sources/TokenBarApp"
 else
   ok "no ScrollView gutter override in App sources"
+fi
+
+# --- 9. No empty-slot spacing gaps (top/bottom strip guard) ---
+# A conditional view that renders EmptyView still consumes its parent
+# VStack spacing, leaving a bare window-material gap that reads as a
+# light/translucent strip in light appearance. The parent must omit
+# statusBanner (top slot below the Divider), notices (bottom slots), and
+# the nil comparison line (trend stacks) entirely when they have nothing
+# to show, so the content-sized popover hugs its content. Plain `if`
+# only: no material, height, blur, or animation change.
+if grep -q 'showsStatusBanner' "$DASH" && grep -q 'if showsStatusBanner' "$DASH"; then
+  ok "statusBanner omitted when empty (no top spacing gap)"
+else
+  bad "statusBanner omitted when empty" "missing 'showsStatusBanner' helper + 'if showsStatusBanner' guard in $DASH"
+fi
+if grep -B2 '^[[:space:]]*statusBanner$' "$DASH" | grep -q 'if showsStatusBanner'; then
+  ok "statusBanner placement sits under its parent guard"
+else
+  bad "statusBanner placement sits under its parent guard" "bare statusBanner line is not under 'if showsStatusBanner' in $DASH"
+fi
+if grep -q 'hasNotices' "$DASH"; then
+  HAS_COUNT="$(grep -c 'if hasNotices' "$DASH" || true)"
+  if [ "$HAS_COUNT" -ge 2 ]; then
+    ok "notices omitted when empty (no bottom spacing gap)"
+  else
+    bad "notices omitted when empty" "expected >=2 'if hasNotices' guards in $DASH, found $HAS_COUNT"
+  fi
+else
+  bad "notices omitted when empty" "missing 'hasNotices' helper in $DASH"
+fi
+if grep -B3 '^[[:space:]]*notices$' "$DASH" | grep -q 'if hasNotices'; then
+  GUARDED_NOTICES="$(grep -B3 '^[[:space:]]*notices$' "$DASH" | grep -c 'if hasNotices' || true)"
+  if [ "$GUARDED_NOTICES" -ge 2 ]; then
+    ok "notices placements sit under parent guards"
+  else
+    bad "notices placements sit under parent guards" "expected both notices lines under 'if hasNotices', found $GUARDED_NOTICES"
+  fi
+else
+  bad "notices placements sit under parent guards" "bare notices lines are not under 'if hasNotices' in $DASH"
+fi
+CMP_GUARDS="$(grep -c 'if comparison != nil' "$DASH" || true)"
+CMP_LINES="$(grep -c 'TrendComparisonLine(comparison:' "$DASH" || true)"
+if [ "$CMP_GUARDS" -ge 2 ] && [ "$CMP_LINES" = "2" ]; then
+  ok "nil comparison line omitted (no trend spacing gap)"
+else
+  bad "nil comparison line omitted" "expected >=2 'if comparison != nil' guards with 2 TrendComparisonLine placements (found guards=$CMP_GUARDS lines=$CMP_LINES)"
+fi
+VSCROLL="$(grep -c 'ScrollView {' "$DASH" || true)"
+if [ "$VSCROLL" = "1" ]; then
+  ok "compact path keeps no vertical scroll region (expanded only)"
+else
+  bad "compact path keeps no vertical scroll region" "expected exactly 1 'ScrollView {' in $DASH (expanded only), found $VSCROLL"
+fi
+if grep -q '\.padding(16)' "$DASH" && grep -q '\.frame(width: 400)' "$DASH"; then
+  ok "root popover keeps padding-16 + width-400 content-sized geometry"
+else
+  bad "root popover keeps padding-16 + width-400 content-sized geometry" "missing '.padding(16)' or '.frame(width: 400)' in $DASH"
 fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
