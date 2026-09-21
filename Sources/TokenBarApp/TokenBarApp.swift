@@ -78,7 +78,16 @@ struct TokenBarApp: App {
                 onSyncNow: syncNow,
                 onPollTick: pollTick
             )
-            .frame(width: 400, height: isExpanded ? 660 : nil)
+            // Content-sized popover: fixed width only, never a forced outer
+            // height. The details ScrollView keeps its own 380pt cap (see
+            // DashboardView), so the window grows and shrinks with the
+            // compact/expanded content instead of leaving bare host material
+            // above and below it. One explicit adaptive background owner:
+            // regular material on macOS 14/15, the system Liquid Glass
+            // window material on macOS 26 and later. Content (charts, cards,
+            // text) is never wrapped in custom glass.
+            .frame(width: 400)
+            .containerBackground(.regularMaterial, for: .window)
         }
         .menuBarExtraStyle(.window)
     }

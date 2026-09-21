@@ -90,6 +90,9 @@ struct DashboardView: View {
                         collapseFooter
                     }
                 }
+                // Sole expanded-height owner: caps the details scroll region so
+                // the content-sized window (see TokenBarApp) never grows
+                // unbounded. Compact mode has no scroll region.
                 .frame(maxHeight: 380)
             }
             if report.records.isEmpty || scopedCount == 0 {
