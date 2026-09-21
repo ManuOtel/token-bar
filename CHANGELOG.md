@@ -13,11 +13,13 @@ the deployment target.
   bands above and below the dashboard are gone. The details ScrollView
   keeps its 380pt cap as the sole expanded-height owner; compact mode,
   filters, Details/Show less, and keyboard/Escape behavior are unchanged.
-- The window has one explicit adaptive background owner
-  (`containerBackground(.regularMaterial, for: .window)`): system material
-  on macOS 14/15, the system Liquid Glass window material on macOS 26
-  and later. Charts, metric cards, and text stay off custom glass, as
-  before. No ScrollView gutter override was needed.
+- The window has no explicit background owner: the MenuBarExtra
+  `.window` style keeps its system material, and no `containerBackground`
+  is applied because `ContainerBackgroundPlacement.window` is absent from
+  the macOS 14 SDK (referencing it breaks the macOS 14 CI build). A
+  second material would also compete with the system surface. Charts,
+  metric cards, and text stay off custom glass, as before. No ScrollView
+  gutter override was needed.
 
 ## 0.4.1
 

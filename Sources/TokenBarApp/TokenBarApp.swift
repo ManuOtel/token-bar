@@ -82,12 +82,14 @@ struct TokenBarApp: App {
             // height. The details ScrollView keeps its own 380pt cap (see
             // DashboardView), so the window grows and shrinks with the
             // compact/expanded content instead of leaving bare host material
-            // above and below it. One explicit adaptive background owner:
-            // regular material on macOS 14/15, the system Liquid Glass
-            // window material on macOS 26 and later. Content (charts, cards,
-            // text) is never wrapped in custom glass.
+            // above and below it. No explicit host background: the
+            // MenuBarExtra .window style already owns the system window
+            // material, and ContainerBackgroundPlacement.window is absent
+            // from the macOS 14 SDK, so referencing it breaks the macOS 14
+            // CI build. A second material here would also compete with the
+            // system surface. Content (charts, cards, text) is never
+            // wrapped in custom glass.
             .frame(width: 400)
-            .containerBackground(.regularMaterial, for: .window)
         }
         .menuBarExtraStyle(.window)
     }
