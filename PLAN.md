@@ -297,3 +297,49 @@ require all of:
 
 Acceptance for this milestone is the accepted written plan only: no
 source, CI, packaging, or site-behavior change lands under M11.
+
+### M12 - Configurable chart styles (plan only)
+
+Status: plan only; do not implement in this milestone. Normative
+product detail lives in `docs/CHART_STYLE_PROPOSAL.md`; this
+milestone tracks acceptance of that plan. M11 stays intact and
+unchanged.
+
+Acceptance for this milestone is the accepted written proposal only:
+
+- `docs/CHART_STYLE_PROPOSAL.md` defines Automatic (default), Bars,
+  Line with points, and Area over the existing adaptive `TrendModel`
+  and `DashboardSnapshot`, with the Chart style menu in expanded
+  Details, a persisted preference, compact kept compact, per-range
+  visual rules, zero-filled buckets, linear trend scale with the
+  existing log-scaled input/output comparison preserved separately,
+  source bar and model rows unchanged, comparison annotations,
+  tooltips, keyboard and focus behavior, VoiceOver labels with Audio
+  Graph support, Reduce Transparency and Increase Contrast, render
+  from snapshot only with no extra scans, privacy and fixture-only
+  evidence rules, implementation boundaries (shared trend model,
+  view-layer renderer selection, stable color and series semantics,
+  no decorative animation, no extra glass or material surface,
+  macOS 14 availability), and the required test list (renderer
+  selection, accessibility labels, empty and no-baseline states,
+  persistence, bucket coverage, visual geometry contracts).
+- A calendar heatmap is recorded as explicitly out of scope for this
+  release. Area is total-volume shape only, never stacked
+  multi-source content.
+
+Non-goals:
+
+- No source, test, CI, VERSION, CHANGELOG, packaging, or website
+  behavior change lands under M12.
+- No per-source or per-model trend series, no stacked areas, no
+  heatmap, no per-range style memory, no log-scaled trend axis, no
+  new network use, no new subprocess, no new usage persistence.
+- No real-data screenshots in public artifacts; synthetic fixtures
+  only.
+
+Release recommendation: docs-only change, so no VERSION bump, no
+CHANGELOG entry, and no release artifact. The implementation ships
+only under a later worker milestone with fixtures, tests, docs, an
+extended `scripts/test-popover.sh` where the popover contract
+requires it, and a Mac render pass, then follows the normal
+version and release path.
