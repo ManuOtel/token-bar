@@ -2,6 +2,21 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.5.0
+
+Adaptive per-range trends with previous-period comparisons. No change to
+token math, pricing, source semantics, privacy boundaries, or sync
+behavior. macOS 14 stays the deployment target.
+
+- Trend resolution now follows the selected range: Today and 24H bucket
+  hourly, 7D/30D/Best bucket daily, All time buckets monthly. Empty
+  buckets render as zero, so gaps read as gaps rather than missing data.
+- Each range compares against its previous period under the same source
+  filter, with range-titled charts, sparse ticks, and comparison lines
+  in compact and expanded views.
+- Cost figures remain estimates only (static table, not a bill;
+  subscription use is not an API invoice).
+
 ## 0.4.4
 
 Focused compact input/output visualization fix. No change to token math,
