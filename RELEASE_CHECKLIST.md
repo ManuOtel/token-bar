@@ -45,6 +45,12 @@ config stores no password, key, or token.
       (CI also asserts the scripts are executable).
 - [ ] CI green on the release PR: macOS build+test job, Linux verify job,
       privacy-gate job (`.github/workflows/ci.yml`).
+- [ ] Popover contract: `./scripts/test-popover.sh` passes; visual changes
+      carry Mac render evidence per `docs/SECURITY_AND_VISUAL_QA.md`
+      section 3 (compact/expanded, light/dark, empty/zero/no-comparison,
+      notices, accessibility, focus, clipping), built from synthetic
+      fixtures with privacy-safe handling (no real-data screenshots, no
+      environment dumps).
 
 ## 3. Versioned app build
 
@@ -207,6 +213,10 @@ certificate, done before the final package step of a manual build only:
       no-scope states, sanitized warnings, launch-at-login toggle, sync
       status line in Settings (off by default; enabling with a blank host
       is rejected with a short message, never a subprocess).
+- [ ] Release-candidate visual smoke per `docs/SECURITY_AND_VISUAL_QA.md`
+      section 5: installed build renders compact and expanded popover
+      with no bare-material strip, no clipped text, and no overflow;
+      record the result with the release evidence (step 9).
 - [ ] Missing-data hints point at the `TOKENBAR_*` overrides without
       leaking paths (see README troubleshooting).
 

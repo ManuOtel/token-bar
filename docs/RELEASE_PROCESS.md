@@ -48,10 +48,17 @@ Before any implementation, write down in the issue or PR description:
   `git diff --check`, `./scripts/check-privacy.sh`,
   `PYTHONDONTWRITEBYTECODE=1 python3 -B scripts/verify_logic.py`,
   `bash -n` / `sh -n` on touched scripts, plus the relevant contract
-  scripts (`scripts/test-release.sh`, `scripts/test-site.sh`,
+  scripts (`scripts/test-popover.sh`, `scripts/test-release.sh`,
+  `scripts/test-site.sh`,
   `scripts/test-versioning.sh`).
 - On a Mac, `swift build` and `swift test` are the source of truth;
   `verify_logic.py` is a mirror only.
+- Visual and security evidence follows
+  `docs/SECURITY_AND_VISUAL_QA.md`: popover, Settings, sync, pricing,
+  and release-doc PRs record a Mac render pass over the section 3
+  matrix (built from synthetic fixtures) and keep all evidence
+  privacy-safe (no real-data screenshots, no environment dumps, no
+  real paths).
 
 ## 4. Independent review and exact-head verification
 
@@ -153,6 +160,9 @@ Install only the verified release. In order:
 6. Verify the install: `Info.plist` `CFBundleShortVersionString`
    matches `VERSION`, exactly one TokenBar app process runs, and the
    dashboard loads local history with sanitized warnings only.
+   Release candidates also pass the `docs/SECURITY_AND_VISUAL_QA.md`
+   section 5 smoke (compact and expanded popover with no strip, no
+   clip, and no overflow).
 
 ## 10. Rollback and evidence
 

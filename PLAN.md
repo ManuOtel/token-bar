@@ -237,3 +237,63 @@ Acceptance:
   threading) plus a `verify_logic.py` mirror; no screenshot tests.
   `swift build` + `swift test` green on Mac; existing filtering, token,
   and cost semantics unchanged.
+
+### M10 - Release hardening and visual-regression gate
+
+Status: process-only. Defines the gates that prevent a repeat of the
+PR #65 popover bare-material strip regression. Normative detail lives
+in `docs/SECURITY_AND_VISUAL_QA.md`; this milestone tracks adoption.
+
+Acceptance:
+
+- `docs/SECURITY_AND_VISUAL_QA.md` is the merge and release gate for
+  popover, Settings, sync, pricing, and release-doc changes: threat
+  model and privacy boundary, worker evidence rules (synthetic
+  fixtures for public artifacts, real-data screenshots local only,
+  never dump process environments), section 3 visual matrix, section
+  4 geometry/material contracts, section 5 merge/release gates,
+  section 6 incident response, section 7 security checks.
+- Popover PRs extend `scripts/test-popover.sh` in the same PR when
+  they touch structure, conditional slots, heights, scroll ownership,
+  materials, or glass placement, and record a Mac render pass over
+  compact/expanded, light/dark, empty/zero/no-comparison, notices,
+  accessibility, focus, and clipping states.
+- `docs/RELEASE_PROCESS.md` and `RELEASE_CHECKLIST.md` reference and
+  enforce the gate (render evidence plus release-candidate
+  install/version/one-process smoke). Existing release semantics
+  unchanged: docs-only changes do not bump `VERSION` or create a
+  release.
+- Checks: `verify_logic.py`, `bash -n`/`sh -n`, `check-privacy.sh`,
+  `git diff --check`, plus the contract scripts
+  (`test-popover.sh`, `test-versioning.sh`, `test-release.sh`,
+  `test-site.sh`); on a Mac, `swift build` + `swift test` remain the
+  source of truth.
+
+### M11 - Future Settings-initiated auto-update (plan only)
+
+Status: plan only; do not implement in this milestone. The Non-goals
+entry on auto-updater stands until a dedicated proposal with fixtures,
+tests, and docs is accepted. When that proposal is written, it must
+require all of:
+
+- User initiation from Settings only (ships disabled or explicit
+  opt-in; never silent background install without consent).
+- HTTPS public release metadata only (no arbitrary URLs, no shell
+  commands, no unsigned channels).
+- Signed/notarized or equivalent artifact verification before any
+  replacement; failed verification aborts with no change.
+- Safe atomic replacement with rollback to the previous versioned
+  artifact; never silently overwrite a published or installed asset.
+- Current/latest version display plus release notes with the estimate
+  disclaimer before the user confirms.
+- Cancel/retry/error states that leave the running app intact.
+- Settings preservation across update (sync config, pricing cache,
+  login-item state); no settings reset.
+- No credentials, prompts, message bodies, paths, or usage data
+  leaving the machine during the check or install.
+- Evaluation of Sparkle or another maintained signed updater before
+  any custom mechanism; prefer the maintained option unless the
+  proposal documents why it cannot fit the sandbox and signing path.
+
+Acceptance for this milestone is the accepted written plan only: no
+source, CI, packaging, or site-behavior change lands under M11.
