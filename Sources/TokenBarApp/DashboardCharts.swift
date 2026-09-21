@@ -5,11 +5,127 @@ import TokenBarCore
 ///
 /// All views render `AggregatedStats` via `DashboardInsights` shares.
 /// Cached tokens read as a subset of input and reasoning as a subset of
-/// output: the composition ring splits the total into input vs output only,
-/// and subset ratios appear as captions so charts never imply
-/// double-counting.
+/// output: the expanded composition ring splits the total into input vs
+/// output only, and subset ratios appear as captions so charts never imply
+/// double-counting. The compact summary uses a paired input/output bar
+/// comparison instead of the ring: a linear ring goes blind when one side
+/// dominates (for example 7.2B input vs 19.6M output leaves the output arc
+/// at ~0.3%, effectively invisible), while the paired bars keep exact
+/// counts prominent and use a labeled log scale plus a visibility floor so
+/// the smaller side stays discoverable.
 
-// MARK: - Token composition ring
+// MARK: - Compact input/output comparison (paired bars)
+
+/// Truthful compact replacement for the proportional ring: two labeled
+/// horizontal bars with exact counts, log-scaled widths, and subset
+/// captions. Cached stays a caption on the input row and reasoning on the
+/// output row, never a third bar, so neither reads as additional tokens.
+struct TokenIOComparison: View {
+    var stats: AggregatedStats
+    var compactCount: (Int) -> String
+    var fullCount: (Int) -> String
+
+    var body: some View {
+        let cmp = DashboardInsights.ioComparison(for: stats)
+        let comp = DashboardInsights.composition(for: stats)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("INPUT VS OUTPUT")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityHidden(true)
+            if cmp.isEmpty {
+                Text("No input/output split in this view.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("No input or output tokens in this view")
+            } else {
+                ioRow(
+                    color: .blue,
+                    label: "Input",
+                    value: cmp.inputTokens,
+                    share: comp.inputShare,
+                    display: cmp.inputDisplay
+                )
+                ioRow(
+                    color: .orange,
+                    label: "Output",
+                    value: cmp.outputTokens,
+                    share: comp.outputShare,
+                    display: cmp.outputDisplay
+                )
+                Text("Cached \(compactCount(stats.cachedTokens)) · \(Int(comp.cachedShareOfInput * 100))% of input (subset)")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .accessibilityLabel("Cached \(fullCount(stats.cachedTokens)) tokens, \(Int(comp.cachedShareOfInput * 100)) percent of input, a subset")
+                Text("Reasoning \(compactCount(stats.reasoningTokens)) · \(Int(comp.reasoningShareOfOutput * 100))% of output (subset)")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .accessibilityLabel("Reasoning \(fullCount(stats.reasoningTokens)) tokens, \(Int(comp.reasoningShareOfOutput * 100)) percent of output, a subset")
+                Text(scaleFootnote(floored: cmp.smallerIsFloored))
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .accessibilityLabel(scaleFootnote(floored: cmp.smallerIsFloored))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Input versus output comparison")
+    }
+
+    private func ioRow(color: Color, label: String, value: Int, share: Double, display: Double) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            Text(label)
+                .font(.callout)
+                .lineLimit(1)
+                .frame(width: 46, alignment: .leading)
+                .accessibilityHidden(true)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.primary.opacity(0.12))
+                        .frame(height: 8)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(color.opacity(0.9))
+                        .frame(width: max(value > 0 ? 2.0 : 0.0, proxy.size.width * CGFloat(display)), height: 8)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+            .frame(height: 10)
+            .accessibilityHidden(true)
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(fullCount(value))
+                    .font(.callout)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text("\(Int(share * 100))%")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 92, alignment: .trailing)
+            .accessibilityHidden(true)
+        }
+        .help("\(label): \(fullCount(value)) tokens, \(Int(share * 100))% of total")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label) \(fullCount(value)) tokens, \(Int(share * 100)) percent of total")
+        .accessibilityHint("Bar length uses a log scale so small values stay visible")
+    }
+
+    private func scaleFootnote(floored: Bool) -> String {
+        if floored {
+            return "Bars use a log scale with a minimum width, so the smaller side stays visible. Counts and % are exact."
+        }
+        return "Bars use a log scale so small values stay visible; counts and % are exact."
+    }
+}
+
+// MARK: - Token composition ring (expanded Details only)
 
 struct TokenCompositionRing: View {
     var stats: AggregatedStats
