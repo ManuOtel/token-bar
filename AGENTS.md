@@ -98,9 +98,9 @@ git diff --check
 ## Release and package commands
 
 ```sh
-./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION, currently 0.3.3)
+./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION)
 ./scripts/package-release.sh --format zip
-(cd dist && shasum -a 256 -c TokenBar-0.3.3-macos.zip.sha256)
+VERSION="$(tr -d ' \t\r\n' < VERSION)"; (cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.zip.sha256")
 ```
 
 Sign, notarize, and staple before packaging. Full path: `docs/MACOS_PACKAGING.md`, `RELEASE_CHECKLIST.md`.

@@ -78,7 +78,18 @@ struct TokenBarApp: App {
                 onSyncNow: syncNow,
                 onPollTick: pollTick
             )
-            .frame(width: 400, height: isExpanded ? 660 : nil)
+            // Content-sized popover: fixed width only, never a forced outer
+            // height. The details ScrollView keeps its own 380pt cap (see
+            // DashboardView), so the window grows and shrinks with the
+            // compact/expanded content instead of leaving bare host material
+            // above and below it. No explicit host background: the
+            // MenuBarExtra .window style already owns the system window
+            // material, and ContainerBackgroundPlacement.window is absent
+            // from the macOS 14 SDK, so referencing it breaks the macOS 14
+            // CI build. A second material here would also compete with the
+            // system surface. Content (charts, cards, text) is never
+            // wrapped in custom glass.
+            .frame(width: 400)
         }
         .menuBarExtraStyle(.window)
     }

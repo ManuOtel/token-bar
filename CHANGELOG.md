@@ -2,6 +2,25 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.4.2
+
+Focused popover-window fix. No change to token math, source semantics,
+privacy boundaries, sync behavior, or pricing behavior. macOS 14 stays
+the deployment target.
+
+- The menu-bar popover no longer forces a fixed expanded height: the
+  window sizes to its compact/expanded content, so the thin transparent
+  bands above and below the dashboard are gone. The details ScrollView
+  keeps its 380pt cap as the sole expanded-height owner; compact mode,
+  filters, Details/Show less, and keyboard/Escape behavior are unchanged.
+- The window has no explicit background owner: the MenuBarExtra
+  `.window` style keeps its system material, and no `containerBackground`
+  is applied because `ContainerBackgroundPlacement.window` is absent from
+  the macOS 14 SDK (referencing it breaks the macOS 14 CI build). A
+  second material would also compete with the system surface. Charts,
+  metric cards, and text stay off custom glass, as before. No ScrollView
+  gutter override was needed.
+
 ## 0.4.1
 
 Adaptive system appearance for the menu-bar app. No change to token

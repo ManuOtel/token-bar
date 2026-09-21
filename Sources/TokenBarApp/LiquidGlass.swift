@@ -27,8 +27,11 @@ import SwiftUI
 /// header icon actions, the source/range chip rows, and the primary
 /// Details/collapse actions. Everything else stays on standard content
 /// surfaces: charts, metric cards, hero totals, and explanatory text never
-/// sit inside glass, and the `MenuBarExtra` window keeps its system
-/// material (no whole-popover glass). No morphing `glassEffectID` is used:
+/// sit inside glass. The `MenuBarExtra` window keeps its system
+/// material with no explicit background owner (no `containerBackground`
+/// on the popover content: `ContainerBackgroundPlacement.window` is
+/// absent from the macOS 14 SDK, and a second material would compete
+/// with the system surface). No morphing `glassEffectID` is used:
 /// chip selection changes tint only, never the view hierarchy, and no
 /// continuous or decorative animation was added.
 enum LiquidGlass {
