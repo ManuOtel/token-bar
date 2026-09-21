@@ -87,20 +87,26 @@ struct DashboardView: View {
                         sourceBreakdown
                         modelBreakdown
                         trendFull
+                        notices
                         collapseFooter
                     }
                 }
-                // Sole expanded-height owner: caps the details scroll region so
-                // the content-sized window (see TokenBarApp) never grows
-                // unbounded. Compact mode has no scroll region.
-                .frame(maxHeight: 380)
+                // Sole expanded-height owner: nonzero viewport for the details
+                // scroll region so the content-sized window (see TokenBarApp)
+                // never grows unbounded. The minHeight is load-bearing: a
+                // ScrollView has no intrinsic vertical size, so in the
+                // content-sized MenuBarExtra window a maxHeight-only cap
+                // resolves to ~0pt and Details renders only the outside
+                // notices card. Plain frame, macOS 14-safe. Notices live
+                // inside the scroll content so the first viewport shows
+                // details and long notice lists scroll with them. Compact
+                // mode has no scroll region.
+                .frame(minHeight: 280, maxHeight: 380)
             }
             if report.records.isEmpty || scopedCount == 0 {
                 notices
             } else if !isExpanded {
                 compactFooter
-            } else {
-                notices
             }
         }
         .padding(16)
