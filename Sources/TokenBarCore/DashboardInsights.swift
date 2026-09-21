@@ -215,13 +215,24 @@ public enum DashboardInsights {
     /// Empty input yields an empty array. A uniform floor keeps zero-token
     /// buckets visible as a hairline when `visibleMinimum` > 0.
     public static func trendFractions(for buckets: [DailyBucket], visibleMinimum: Double = 0.04) -> [Double] {
-        guard !buckets.isEmpty else { return [] }
-        let peak = buckets.map(\.totalTokens).max() ?? 0
-        guard peak > 0 else { return buckets.map { _ in 0 } }
+        trendFractions(totals: buckets.map(\.totalTokens), visibleMinimum: visibleMinimum)
+    }
+
+    /// Adaptive-trend variant over `TrendBucket` (same peak scaling, same
+    /// floor). Zero-token buckets stay at zero so empty hours/days read as
+    /// gaps, not hairlines.
+    public static func trendFractions(for buckets: [TrendBucket], visibleMinimum: Double = 0.04) -> [Double] {
+        trendFractions(totals: buckets.map(\.totalTokens), visibleMinimum: visibleMinimum)
+    }
+
+    private static func trendFractions(totals: [Int], visibleMinimum: Double) -> [Double] {
+        guard !totals.isEmpty else { return [] }
+        let peak = totals.max() ?? 0
+        guard peak > 0 else { return totals.map { _ in 0 } }
         let floor = min(max(visibleMinimum, 0), 1)
-        return buckets.map { bucket in
-            if bucket.totalTokens <= 0 { return 0 }
-            let raw = Double(bucket.totalTokens) / Double(peak)
+        return totals.map { total in
+            if total <= 0 { return 0 }
+            let raw = Double(total) / Double(peak)
             return min(max(raw, floor), 1)
         }
     }

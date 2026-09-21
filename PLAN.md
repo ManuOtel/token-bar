@@ -195,3 +195,45 @@ Acceptance:
   refresh integration proving a synced recent row lands in 24 h) plus
   `verify_logic.py` mirror; fixtures synthetic under `Fixtures/`. No real
   server access. `swift build` + `swift test` green on Mac.
+
+### M9 - Adaptive trend with previous-period comparison
+
+Status: in progress on `feat/adaptive-trend-comparison`. Replaces the
+hard-coded LAST 14 DAYS chart (which rendered only non-empty daily buckets
+from the selected stats, so Today showed one bar) with an adaptive trend
+covering the selected range plus a small previous-period comparison.
+
+Acceptance:
+
+- `TrendModel` in `TokenBarCore` (pure, explicit `now` + `Calendar`):
+  Today buckets by hour from the local calendar-day start through the
+  current hour; Last 24H uses 24 rolling hourly buckets; Last 7D / Last
+  30D use daily buckets over the selected range; Best month uses daily
+  buckets for the winning month; Lifetime uses monthly buckets. Every
+  range returns full zero-filled coverage (empty hours/days/months read
+  as gaps). Each bucket carries a stable start, a short label, an exact
+  token count, and a request count; totals sum `totalTokens` only, never
+  cached/reasoning on top. Documented filtering math is unchanged:
+  display buckets are calendar-aligned while the selected record
+  predicate stays the existing rolling predicate, so rolling-window edge
+  days may be partial by design.
+- `DashboardSnapshot` threads the adaptive trend plus comparison with no
+  extra file scans (same in-memory scope as the hero total, two linear
+  passes); chart views render stored values only. Titles name the range
+  and grain: TODAY BY HOUR, LAST 24H BY HOUR, LAST 7D BY DAY,
+  LAST 30D BY DAY, BEST MONTH BY DAY, ALL TIME BY MONTH. The compact
+  chart fits the 400pt popover (adaptive bar sizing, bounded horizontal
+  scroll only for long lifetimes); Details stays readable with a grain
+  caption.
+- Comparison for chronological ranges only (Today vs yesterday, 24H vs
+  the preceding rolling 24H, 7D/30D vs the preceding window; Best and
+  Lifetime omit it): same source filter, local/offline, total tokens
+  plus requests. Empty baseline reads "No prior-period data" with no
+  direction and no percent, never a fabricated 0 percent; exact current
+  totals are unchanged.
+- Tests: `TrendModelTests` (all grains, zero-filled coverage, local
+  calendar behavior, rolling 24H bounds, up/down/flat/no-baseline
+  deltas, source filtering, lifetime monthly aggregation, snapshot
+  threading) plus a `verify_logic.py` mirror; no screenshot tests.
+  `swift build` + `swift test` green on Mac; existing filtering, token,
+  and cost semantics unchanged.

@@ -41,10 +41,11 @@ struct TokenBarApp: App {
 
     var body: some Scene {
         // One explicit clock per render: the snapshot reuses it for the
-        // selected stats, chip totals, best-month key, and menu title, so
-        // one render costs one sorted scope + one aggregate + one unsorted
-        // chip pass instead of ~8 filter sorts + a second Date() for stale
-        // menu titles. The snapshot stays a pure value with no cache:
+        // selected stats, chip totals, best-month key, menu title, adaptive
+        // trend, and previous-period comparison, so one render costs one
+        // sorted scope + one aggregate + three linear in-memory passes
+        // instead of ~8 filter sorts + a second Date() for stale menu
+        // titles. The snapshot stays a pure value with no cache:
         // report/source/preset/pricing changes are inputs, so nothing can
         // go stale. The startup disk cache only seeds `report` once at
         // launch; every render still derives from the current report.
@@ -67,6 +68,9 @@ struct TokenBarApp: App {
                     )
                 },
                 bestMonthKey: dash.bestMonthKey,
+                trendBuckets: dash.trendBuckets,
+                trendTitle: dash.trendTitle,
+                comparison: dash.comparison,
                 isLoading: $isLoading,
                 isExpanded: $isExpanded,
                 isStaleCache: isShowingStaleCache && isLoading && !report.records.isEmpty,

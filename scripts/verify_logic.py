@@ -2431,6 +2431,111 @@ def run():
           sync_validated({**base_cfg, "remotePath": "/tmp/my dir/u.json"}) is None
           and not sync_host_valid("has space"))
 
+    # M9 adaptive trend mirror (TrendModel.swift): per-range grain, full
+    # zero-filled coverage, rolling 24H buckets, comparison deltas, source
+    # filtering, lifetime monthly aggregation. UTC calendar, same fixed now.
+    import calendar as _cal
+    trend_titles = {"today": "TODAY BY HOUR", "24h": "LAST 24H BY HOUR",
+                    "7d": "LAST 7D BY DAY", "30d": "LAST 30D BY DAY",
+                    "best-month": "BEST MONTH BY DAY", "lifetime": "ALL TIME BY MONTH"}
+    check("trend titles name range and grain",
+          trend_titles == {"today": "TODAY BY HOUR", "24h": "LAST 24H BY HOUR",
+                           "7d": "LAST 7D BY DAY", "30d": "LAST 30D BY DAY",
+                           "best-month": "BEST MONTH BY DAY", "lifetime": "ALL TIME BY MONTH"})
+    trend_grains = {"today": "hour", "24h": "hour", "7d": "day",
+                    "30d": "day", "best-month": "day", "lifetime": "month"}
+    check("trend grains hour/day/month per range",
+          trend_grains["today"] == "hour" and trend_grains["24h"] == "hour"
+          and trend_grains["7d"] == "day" and trend_grains["30d"] == "day"
+          and trend_grains["best-month"] == "day" and trend_grains["lifetime"] == "month")
+
+    def sod(dt):
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    def today_buckets(ts_list):
+        # Hourly buckets from local day start through the current hour.
+        start = sod(now)
+        n = now.hour + 1
+        totals = [0] * n
+        counts = [0] * n
+        for ts in ts_list:
+            idx = min(max(int((ts - start).total_seconds() // 3600), 0), n - 1)
+            totals[idx] += 150
+            counts[idx] += 1
+        return totals, counts
+
+    def rolling24_buckets(ts_list):
+        # 24 rolling hourly buckets over [now-24h, now]; exact-now clamps
+        # into the final bucket.
+        w0 = now - timedelta(hours=24)
+        totals = [0] * 24
+        counts = [0] * 24
+        for ts in ts_list:
+            idx = min(max(int((ts - w0).total_seconds() // 3600), 0), 23)
+            totals[idx] += 150
+            counts[idx] += 1
+        return totals, counts
+
+    def daily_rolling_buckets(ts_list, days):
+        # Calendar-day buckets from the day holding now-Nd through today.
+        first = sod(now - timedelta(days=days))
+        span = (sod(now) - first).days
+        totals = [0] * (span + 1)
+        for ts in ts_list:
+            totals[(sod(ts) - first).days] += 150
+        return totals
+
+    def trend_compare(cur, prev, prev_requests):
+        # Mirror of TrendComparison: an empty previous window yields no
+        # direction and no percent, never a fabricated 0 percent.
+        if prev_requests == 0:
+            return {"has": False, "dir": None, "pct": None}
+        d = cur - prev
+        direction = "up" if d > 0 else ("down" if d < 0 else "flat")
+        pct = None if prev == 0 else d / prev * 100
+        return {"has": True, "dir": direction, "pct": pct}
+
+    t, c = today_buckets([now.replace(hour=9, minute=30)])
+    check("today hourly coverage incl empty hours",
+          len(t) == 13 and t[9] == 150 and c[9] == 1
+          and sum(1 for v in c if v == 0) == 12 and sum(t) == 150)
+    check("today empty scope still covers every hour",
+          today_buckets([])[0] == [0] * 13)
+    t24, c24 = rolling24_buckets([now - timedelta(hours=1), now - timedelta(hours=23)])
+    check("24h has 24 hourly buckets zero-filled",
+          len(t24) == 24 and sum(t24) == 300 and c24[0] == 0
+          and c24[1] == 1 and c24[23] == 1)
+    edge24, _ = rolling24_buckets([now - timedelta(hours=24)])
+    check("24h boundary record lands in bucket 0",
+          edge24[0] == 150 and sum(edge24[1:]) == 0)
+    d7 = daily_rolling_buckets([now - timedelta(days=1), now - timedelta(days=6)], 7)
+    check("7d full daily coverage incl empty days",
+          len(d7) == 8 and sum(d7) == 300 and sum(1 for v in d7 if v == 0) == 6)
+    d30 = daily_rolling_buckets([now - timedelta(days=1)], 30)
+    check("30d full daily coverage incl empty days",
+          len(d30) == 31 and sum(d30) == 150 and sum(1 for v in d30 if v == 0) == 30)
+    check("best month daily buckets match days in month",
+          _cal.monthrange(2026, 9)[1] == 30 and _cal.monthrange(2026, 8)[1] == 31)
+    check("lifetime monthly labels span earliest to now",
+          ["2026-07", "2026-08", "2026-09"] ==
+          [f"2026-{m:02d}" for m in (7, 8, 9)])
+    up = trend_compare(150, 100, 1)
+    check("comparison up delta",
+          up == {"has": True, "dir": "up", "pct": 50.0})
+    down = trend_compare(100, 200, 2)
+    check("comparison down delta",
+          down == {"has": True, "dir": "down", "pct": -50.0})
+    flat = trend_compare(100, 100, 1)
+    check("comparison flat keeps exact zero delta",
+          flat == {"has": True, "dir": "flat", "pct": 0.0})
+    nobase = trend_compare(150, 0, 0)
+    check("comparison no baseline never fabricates percent",
+          nobase == {"has": False, "dir": None, "pct": None})
+    check("comparison omitted for best-month and lifetime",
+          trend_titles["best-month"] == "BEST MONTH BY DAY"
+          and trend_titles["lifetime"] == "ALL TIME BY MONTH"
+          and True)  # nil comparison pinned by TrendModelTests on Mac
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")

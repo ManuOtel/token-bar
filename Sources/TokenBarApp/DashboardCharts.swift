@@ -288,45 +288,190 @@ struct ModelDistributionBars: View {
     }
 }
 
-// MARK: - Daily trend chart
+// MARK: - Adaptive trend chart
 
-struct DailyTrendChart: View {
-    var stats: AggregatedStats
+/// Trend bars for the active range and grain (see `TrendModel`).
+///
+/// Renders the full selected coverage, not a 14-day suffix: hourly buckets
+/// for Today/24H (including zero-token hours), daily buckets for 7D/30D/
+/// Best (including empty days), monthly buckets for Lifetime. Bars size
+/// down to fit the 400pt popover; histories wider than `maxInlineBars`
+/// (long lifetimes) use a bounded horizontal scroll instead of shrinking
+/// into illegibility. X labels render sparsely (every kth bucket plus the
+/// last) with the full first-last range below; every bar keeps its own
+/// tooltip and accessibility label with the exact count.
+struct AdaptiveTrendChart: View {
+    var buckets: [TrendBucket]
+    var grain: TrendGrain
     var fullCount: (Int) -> String
-    var maxBars: Int = 14
-    var barHeight: CGFloat = 64
+    var barHeight: CGFloat = 36
+
+    /// Max bars that fit the 400pt popover without scrolling.
+    private static let maxInlineBars = 32
 
     var body: some View {
-        let buckets = Array(stats.dailyTrend.suffix(maxBars))
         if buckets.isEmpty {
-            Text("No daily buckets in this view.")
+            Text("No trend buckets in this view.")
                 .font(.callout).foregroundStyle(.secondary)
         } else {
             let fractions = DashboardInsights.trendFractions(for: buckets)
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .bottom, spacing: 4) {
-                    ForEach(buckets.indices, id: \.self) { index in
-                        let bucket = buckets[index]
-                        let fraction = fractions[index]
-                        VStack(spacing: 3) {
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.accentColor.opacity(bucket.totalTokens > 0 ? 0.85 : 0.25))
-                                .frame(width: 14, height: max(3, fraction * barHeight))
-                            Text(String(bucket.dayLabel.suffix(2)))
-                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                        .help("\(bucket.dayLabel): \(fullCount(bucket.totalTokens)) tokens, \(bucket.requests) requests")
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(bucket.dayLabel), \(bucket.totalTokens) tokens")
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if let first = buckets.first?.dayLabel, let last = buckets.last?.dayLabel, first != last {
+                chartContent(fractions: fractions)
+                if let first = buckets.first?.label, let last = buckets.last?.label, first != last {
                     Text("\(first) - \(last)")
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         .accessibilityHidden(true)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func chartContent(fractions: [Double]) -> some View {
+        if buckets.count > Self.maxInlineBars {
+            ScrollView(.horizontal, showsIndicators: false) {
+                bars(fractions: fractions, width: 8)
+            }
+            .frame(maxHeight: barHeight + 22)
+        } else {
+            bars(fractions: fractions, width: barWidth(for: buckets.count))
+        }
+    }
+
+    private func bars(fractions: [Double], width: CGFloat) -> some View {
+        // Sparse ticks: at most ~8 labels plus the last bucket, so hourly
+        // and 30-day charts stay legible at 400pt.
+        let stride = max(1, Int(ceil(Double(buckets.count) / 8.0)))
+        return HStack(alignment: .bottom, spacing: 4) {
+            ForEach(buckets.indices, id: \.self) { index in
+                let bucket = buckets[index]
+                let fraction = fractions[index]
+                let showTick = index % stride == 0 || index == buckets.count - 1
+                VStack(spacing: 3) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.accentColor.opacity(bucket.totalTokens > 0 ? 0.85 : 0.25))
+                        .frame(width: width, height: max(3, fraction * barHeight))
+                    if showTick {
+                        Text(shortTick(for: bucket))
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    } else {
+                        Text(" ")
+                            .font(.caption2).lineLimit(1)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .help("\(bucket.label): \(fullCount(bucket.totalTokens)) tokens, \(bucket.requests) requests")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(spokenTick(for: bucket)), \(bucket.totalTokens) tokens")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Bar width that fits `count` bars in the ~344pt inner card width
+    /// (400pt popover minus outer + card padding), 14pt max, 4pt min.
+    private func barWidth(for count: Int) -> CGFloat {
+        let inner: CGFloat = 344
+        let spacing: CGFloat = 4
+        let fit = (inner - spacing * CGFloat(max(count - 1, 0))) / CGFloat(max(count, 1))
+        return min(14, max(4, floor(fit)))
+    }
+
+    private func shortTick(for bucket: TrendBucket) -> String {
+        switch grain {
+        case .hour:
+            return bucket.label
+        case .day, .month:
+            return String(bucket.label.suffix(2))
+        }
+    }
+
+    private func spokenTick(for bucket: TrendBucket) -> String {
+        switch grain {
+        case .hour:
+            return "hour \(bucket.label)"
+        case .day, .month:
+            return bucket.label
+        }
+    }
+}
+
+// MARK: - Previous-period comparison line
+
+/// Compact comparison readout under the trend chart.
+///
+/// Nil (Best/Lifetime, not one fixed period) renders nothing. A comparison
+/// without baseline reads "No prior-period data", never a fabricated 0
+/// percent. Otherwise "Up/Down X% vs <period>" (or "No change"), with exact
+/// current-vs-previous counts in the tooltip and accessibility label.
+struct TrendComparisonLine: View {
+    var comparison: TrendComparison?
+    var fullCount: (Int) -> String
+
+    @ViewBuilder
+    var body: some View {
+        if let comparison {
+            if !comparison.hasBaseline {
+                Text("No prior-period data")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .help("No \(comparison.previousLabel) records to compare against")
+                    .accessibilityLabel("No prior-period data")
+                    .accessibilityHint("No \(comparison.previousLabel) records to compare against")
+            } else {
+                HStack(spacing: 4) {
+                    Image(systemName: iconName(for: comparison.direction))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text(lineText(for: comparison))
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .help("\(fullCount(comparison.currentTotalTokens)) vs \(fullCount(comparison.previousTotalTokens)) tokens against \(comparison.previousLabel)")
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(accessibilityText(for: comparison))
+            }
+        }
+    }
+
+    private func lineText(for comparison: TrendComparison) -> String {
+        switch comparison.direction {
+        case .up:
+            if let pct = comparison.percentChange {
+                return "Up \(DashboardInsights.percentLabel(for: abs(pct) / 100)) vs \(comparison.previousLabel)"
+            }
+            return "Up vs \(comparison.previousLabel)"
+        case .down:
+            if let pct = comparison.percentChange {
+                return "Down \(DashboardInsights.percentLabel(for: abs(pct) / 100)) vs \(comparison.previousLabel)"
+            }
+            return "Down vs \(comparison.previousLabel)"
+        case .flat, .none:
+            return "No change vs \(comparison.previousLabel)"
+        }
+    }
+
+    private func accessibilityText(for comparison: TrendComparison) -> String {
+        switch comparison.direction {
+        case .up:
+            if let pct = comparison.percentChange {
+                return "Up \(DashboardInsights.percentSpoken(for: abs(pct) / 100)) versus \(comparison.previousLabel)"
+            }
+            return "Up versus \(comparison.previousLabel)"
+        case .down:
+            if let pct = comparison.percentChange {
+                return "Down \(DashboardInsights.percentSpoken(for: abs(pct) / 100)) versus \(comparison.previousLabel)"
+            }
+            return "Down versus \(comparison.previousLabel)"
+        case .flat, .none:
+            return "No change versus \(comparison.previousLabel)"
+        }
+    }
+
+    private func iconName(for direction: TrendComparison.Direction?) -> String {
+        switch direction {
+        case .up: return "arrow.up.right"
+        case .down: return "arrow.down.right"
+        case .flat, .none: return "minus"
         }
     }
 }

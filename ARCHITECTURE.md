@@ -29,6 +29,9 @@ Sources/TokenBarCore/   # pure logic, Foundation only (no auth; network
                          # validate-before-replace, atomic cache write,
                          # last-good-cache fallback (pure + tested)
    Aggregator.swift      # filter / aggregate / bestMonth / dailyTrend (pure, clock-injected)
+   TrendModel.swift      # adaptive dashboard trend: per-range grain
+                         # (hour/day/month), zero-filled buckets, previous-period
+                         # comparison (pure, clock-injected; filtering math unchanged)
    Store.swift           # orchestrates adapters, env overrides, deterministic dedupe
                           # (file reads only; the sync pull runs before load,
                           # never inside it; sync cache loads as one more
@@ -58,10 +61,11 @@ Sources/TokenBarApp/    # SwiftUI + AppKit menu bar shell (macOS 14+)
                         # offline cache at startup, cancellable Task refresh,
                         # usage loading never blocks on pricing
   DashboardView.swift   # dark cockpit: header with refresh + settings gear,
-                        # source/range chips, hero total, metric cards,
-                        # always-visible source rows, models, trend,
-                        # empty/notice states (display only); Settings gear
-                        # opens the SettingsView popover
+                         # source/range chips, hero total, metric cards,
+                         # always-visible source rows, models, adaptive trend
+                         # (range-titled, grain-captioned, with comparison line),
+                         # empty/notice states (display only); Settings gear
+                         # opens the SettingsView popover
   SettingsView.swift    # secondary settings surface (~300pt popover):
                          # launch-at-login toggle + pricing refresh group
                          # (status line, user-initiated refresh, error) +
@@ -213,6 +217,8 @@ files/db/snapshots --CodexParser/ClaudeParser/OpenCodeStore--> [NormalizedUsage]
   --TokenBarStore.dedupe (max-total wins, earliest tiebreak, id-less by id)
   --> LoadReport --Aggregator.filter--> scoped
   --Aggregator.aggregate / .bestMonth--> AggregatedStats (+ byOrigin)
+  --TrendModel.buckets/.comparison (same in-memory scope, no file rescan)-->
+    adaptive trend + previous-period comparison
   --> DashboardView (combined OpenCode row + local/remote sub-lines)
   --ReportFormatter.section/render--> TokenBarCLI terminal report
     (+ By origin when >1 origin; JSON carries byOrigin)

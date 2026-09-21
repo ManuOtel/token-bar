@@ -27,8 +27,9 @@ public struct DashboardSourceTotal: Codable, Hashable, Sendable {
 /// of the four source chips, plus another filter + reduce with a *second*
 /// `Date()` for the menu title. This type computes one explicit `now`,
 /// one sorted selected scope, one `aggregate` (which itself reuses one
-/// `PricingContext` per PR #16), and one unsorted single pass for the four
-/// chip totals.
+/// `PricingContext` per PR #16), one unsorted single pass for the four
+/// chip totals, one linear pass for the adaptive trend buckets, and one
+/// linear pass for the previous-period comparison.
 ///
 /// Pure value type, no caching, no shared state: callers pass a fresh `now`
 /// per render, so results can never go stale. Pricing changes are an input
@@ -76,24 +77,50 @@ public struct DashboardSnapshot: Hashable, Sendable {
     public var sourceTotals: [DashboardSourceTotal]
     /// Winning month key, set only for `.bestMonth` with a non-empty scope.
     public var bestMonthKey: String?
+    /// Adaptive trend buckets for the selected scope (zero-filled over the
+    /// full selected range; see `TrendModel`). Derived from the same
+    /// in-memory scope as `stats`, never a second file scan.
+    public var trendBuckets: [TrendBucket]
+    /// Adaptive chart title naming the active range and grain
+    /// ("TODAY BY HOUR", "LAST 7D BY DAY", ...).
+    public var trendTitle: String
+    /// Bucket grain behind `trendBuckets` (hour, day, or month).
+    public var trendGrain: TrendGrain
+    /// Previous-period comparison for chronological ranges; nil for
+    /// `.bestMonth` and `.lifetime`, which are not one fixed period.
+    public var comparison: TrendComparison?
 
     public init(
         stats: AggregatedStats,
         scopedCount: Int,
         menuTotalTokens: Int,
         sourceTotals: [DashboardSourceTotal],
-        bestMonthKey: String? = nil
+        bestMonthKey: String? = nil,
+        trendBuckets: [TrendBucket] = [],
+        trendTitle: String = TrendModel.title(for: .lifetime),
+        trendGrain: TrendGrain = .month,
+        comparison: TrendComparison? = nil
     ) {
         self.stats = stats
         self.scopedCount = scopedCount
         self.menuTotalTokens = menuTotalTokens
         self.sourceTotals = sourceTotals
         self.bestMonthKey = bestMonthKey
+        self.trendBuckets = trendBuckets
+        self.trendTitle = trendTitle
+        self.trendGrain = trendGrain
+        self.comparison = comparison
     }
 
     /// Builds the full snapshot in: one sorted selected-scope filter, one
-    /// aggregate (one `PricingContext`, per PR #16), and one unsorted pass
-    /// for the four chip totals. Chip totals need no sorted arrays.
+    /// aggregate (one `PricingContext`, per PR #16), one unsorted pass for
+    /// the four chip totals, one linear pass for the adaptive trend buckets
+    /// (index math per record, no per-bucket scan), and one linear pass for
+    /// the previous-period comparison. Chip totals, trend, and comparison
+    /// need no sorted arrays and read no files: they work over the
+    /// in-memory records handed in, so one render costs no extra history
+    /// scans. SwiftUI callers compute `make` once per render and pass the
+    /// stored trend/comparison down; the chart views do no derivation.
     public static func make(
         records: [NormalizedUsage],
         source: SourceFilter,
@@ -103,6 +130,8 @@ public struct DashboardSnapshot: Hashable, Sendable {
         calendar: Calendar = .current
     ) -> DashboardSnapshot {
         let chips = chipTotals(records: records, preset: preset, now: now, calendar: calendar)
+        let title = TrendModel.title(for: preset)
+        let grain = TrendModel.grain(for: preset)
         if preset == .bestMonth {
             let lifetime = Aggregator.filter(
                 records, source: source, preset: .lifetime, now: now, calendar: calendar)
@@ -110,18 +139,31 @@ public struct DashboardSnapshot: Hashable, Sendable {
             guard let best = Aggregator.bestMonth(lifetime, snapshot: snapshot, calendar: calendar) else {
                 return DashboardSnapshot(
                     stats: .empty, scopedCount: lifetime.count,
-                    menuTotalTokens: menuTotal, sourceTotals: chips, bestMonthKey: nil)
+                    menuTotalTokens: menuTotal, sourceTotals: chips, bestMonthKey: nil,
+                    trendBuckets: [], trendTitle: title, trendGrain: grain, comparison: nil)
+            }
+            let monthRecords = lifetime.filter {
+                Aggregator.monthKey(for: $0.timestamp, calendar: calendar) == best.monthKey
             }
             return DashboardSnapshot(
                 stats: best.stats, scopedCount: lifetime.count,
-                menuTotalTokens: menuTotal, sourceTotals: chips, bestMonthKey: best.monthKey)
+                menuTotalTokens: menuTotal, sourceTotals: chips, bestMonthKey: best.monthKey,
+                trendBuckets: TrendModel.buckets(
+                    scoped: monthRecords, preset: preset, now: now,
+                    calendar: calendar, bestMonthKey: best.monthKey),
+                trendTitle: title, trendGrain: grain, comparison: nil)
         }
         let scoped = Aggregator.filter(
             records, source: source, preset: preset, now: now, calendar: calendar)
         let stats = Aggregator.aggregate(scoped, snapshot: snapshot, calendar: calendar)
         return DashboardSnapshot(
             stats: stats, scopedCount: scoped.count,
-            menuTotalTokens: stats.totalTokens, sourceTotals: chips, bestMonthKey: nil)
+            menuTotalTokens: stats.totalTokens, sourceTotals: chips, bestMonthKey: nil,
+            trendBuckets: TrendModel.buckets(
+                scoped: scoped, preset: preset, now: now, calendar: calendar),
+            trendTitle: title, trendGrain: grain,
+            comparison: TrendModel.comparison(
+                records: records, source: source, preset: preset, now: now, calendar: calendar))
     }
 
     /// Menu-bar title formatting. Delegates to the shared
