@@ -12,8 +12,13 @@ Two PR kinds, kept separate:
 - Feature PR: implements one scoped change (product fix/feature or
   docs-only change). Merges to `main` after review and green checks.
   It never creates a tag or a release.
-- Release PR: bumps `VERSION` plus `CHANGELOG.md` only (no product or
-  process changes). After it merges to `main`, the maintainer tags
+- Release PR: bumps `VERSION` plus `CHANGELOG.md` plus the synchronized
+  public release markers in `site/index.html` only (no product or process
+  code, no unrelated docs, no assets unless the site contract later
+  requires them). `site/index.html` is a required synchronized release
+  surface because `scripts/test-release.sh` runs `scripts/test-site.sh`,
+  which enforces VERSION freshness (`v<VERSION>` plus JSON-LD
+  `softwareVersion`). After it merges to `main`, the maintainer tags
   `main` HEAD and the tag workflow publishes the release.
 
 ## 1. Scope and acceptance criteria first
@@ -98,8 +103,12 @@ Merge feature PRs first; decide the version only when cutting a release.
 - Docs-only and process-only changes do not bump `VERSION` and do not
   create a release. `VERSION` moves only for product changes intended
   for a release (per the policy above).
-- The release PR updates `VERSION` and `CHANGELOG.md` together, in the
-  same PR, and nothing else. Every dollar figure in release notes
+- The release PR updates `VERSION` and `CHANGELOG.md` together, plus the
+  synchronized public release markers in `site/index.html` only, in the
+  same PR. No product or process code, no unrelated docs, and no assets
+  unless the site contract later requires them. The site sync is required
+  because `scripts/test-release.sh` runs `scripts/test-site.sh`, which
+  fails a version bump whose page still names the old VERSION. Every dollar figure in release notes
   carries the estimate disclaimer (estimate only; static table, not a
   bill; subscription use is not an API invoice).
 

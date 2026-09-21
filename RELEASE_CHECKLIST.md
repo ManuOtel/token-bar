@@ -63,8 +63,12 @@ back to the built app's `Info.plist`, then to it.
 - [ ] Pick the release version per the SemVer policy below and write it to
       `VERSION` (`x.y.z` only, no prefixes). Update `CHANGELOG.md` in the
       same release PR (new version section plus the estimate disclaimer
-      on every dollar figure); the release PR touches `VERSION` and
-      `CHANGELOG.md` only, never product or process code.
+      on every dollar figure); the release PR touches `VERSION`,
+      `CHANGELOG.md`, plus the synchronized public release markers in
+      `site/index.html` only, never product or process code, unrelated
+      docs, or assets unless the site contract later requires them. The
+      site sync is required because `scripts/test-release.sh` runs
+      `scripts/test-site.sh`, which enforces VERSION freshness.
 - [ ] Every release PR updates `VERSION` and passes a bumped build number
       (`--build` / env `TOKENBAR_BUILD`); never reuse a build number.
       Note the split: a manual `--build` value is for local verification

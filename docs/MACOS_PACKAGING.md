@@ -39,7 +39,12 @@ then launch normally.
 Ordered public release sequence (full lifecycle: `docs/RELEASE_PROCESS.md`):
 
 1. Land the feature PRs on `main` (reviewed, green PR CI).
-2. Land the release PR on `main` (`VERSION` plus `CHANGELOG.md` only).
+2. Land the release PR on `main` (`VERSION` plus `CHANGELOG.md` plus the
+   synchronized public release markers in `site/index.html` only; no
+   product or process code, no unrelated docs, no assets unless the site
+   contract later requires them; the site sync is required because
+   `scripts/test-release.sh`/`scripts/test-site.sh` enforce VERSION
+   freshness).
 3. Verify `main` HEAD, then push the exact tag (`v$VERSION`, below).
 4. Wait for the tag workflow to go green and publish all eight assets.
 5. Verify the release assets and latest URLs, then install only the
