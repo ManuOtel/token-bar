@@ -2,6 +2,16 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.5.1
+
+Focused popover fix. No change to token math, pricing, source semantics,
+privacy boundaries, or sync behavior. macOS 14 stays the deployment
+target.
+
+- Empty popover slots stay out of the layout instead of rendering blank
+  gaps, so hidden status, notice, and comparison rows no longer leave
+  bare strips above or below the content.
+
 ## 0.5.0
 
 Adaptive per-range trends with previous-period comparisons. No change to
