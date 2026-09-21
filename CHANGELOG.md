@@ -2,6 +2,19 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.4.4
+
+Focused compact input/output visualization fix. No change to token math,
+pricing, source semantics, privacy boundaries, or sync behavior. macOS 14
+stays the deployment target.
+
+- The compact dashboard now uses paired input/output bars with a labeled
+  log scale and a 6% visibility floor, so output remains discoverable
+  when input dominates.
+- Exact input/output counts remain visible, and sub-1% shares show one
+  decimal. Cached and reasoning tokens remain subsets of input/output,
+  and expanded Details keeps the composition ring.
+
 ## 0.4.3
 
 Focused Details-popover fix. No change to token math, source semantics,
