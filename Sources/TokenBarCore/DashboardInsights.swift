@@ -91,6 +91,31 @@ public struct ChartShare: Hashable, Sendable {
 }
 
 public enum DashboardInsights {
+    private static let posix = Locale(identifier: "en_US_POSIX")
+
+    /// Compact share label for dashboard percentages.
+    ///
+    /// Whole percent rounded for shares >= 1% (so 60.4% reads "60%"), one
+    /// decimal for nonzero shares under 1% (so 0.27% reads "0.3%", never
+    /// "0%"), and "<0.1%" for nonzero shares that would round to zero at
+    /// one decimal. Zero and negative shares read "0%". Counts stay exact
+    /// elsewhere; only this label rounds.
+    public static func percentLabel(for share: Double) -> String {
+        guard share > 0 else { return "0%" }
+        let pct = share * 100
+        if pct < 0.05 { return "<0.1%" }
+        if pct < 1 {
+            return String(format: "%.1f%%", locale: posix, pct)
+        }
+        return "\(Int(pct.rounded()))%"
+    }
+
+    /// Spoken variant of `percentLabel(for:)` for accessibility labels
+    /// ("0.3 percent", "60 percent").
+    public static func percentSpoken(for share: Double) -> String {
+        percentLabel(for: share).replacingOccurrences(of: "%", with: " percent")
+    }
+
     /// Input vs output split of the token total plus subset ratios.
     ///
     /// `totalTokens` is authoritative; when it is zero (empty scope) all

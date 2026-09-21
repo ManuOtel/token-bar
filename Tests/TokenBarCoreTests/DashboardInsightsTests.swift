@@ -146,4 +146,17 @@ final class DashboardInsightsTests: XCTestCase {
         XCTAssertEqual(outputOnly.inputDisplay, 0)
         XCTAssertFalse(outputOnly.smallerIsFloored)
     }
+
+    func testPercentLabelNeverRendersNonzeroAsZero() {
+        // The reported footnote bug: 19.6M/7.2B (~0.27%) truncated to "0%".
+        // Sub-1% nonzero shares keep one decimal; tiny nonzero shares floor
+        // at "<0.1%"; zero stays "0%".
+        XCTAssertEqual(DashboardInsights.percentLabel(for: 0), "0%")
+        XCTAssertEqual(DashboardInsights.percentLabel(for: -0.01), "0%")
+        XCTAssertEqual(DashboardInsights.percentLabel(for: 19_600_000.0 / 7_219_600_000.0), "0.3%")
+        XCTAssertEqual(DashboardInsights.percentLabel(for: 0.0001), "<0.1%")
+        XCTAssertEqual(DashboardInsights.percentLabel(for: 0.6), "60%")
+        XCTAssertEqual(DashboardInsights.percentLabel(for: 0.604), "60%")
+        XCTAssertEqual(DashboardInsights.percentSpoken(for: 0.0027), "0.3 percent")
+    }
 }

@@ -11,8 +11,12 @@ import TokenBarCore
 /// comparison instead of the ring: a linear ring goes blind when one side
 /// dominates (for example 7.2B input vs 19.6M output leaves the output arc
 /// at ~0.3%, effectively invisible), while the paired bars keep exact
-/// counts prominent and use a labeled log scale plus a visibility floor so
-/// the smaller side stays discoverable.
+/// counts prominent and use a labeled log scale plus a single 6%
+/// visibility floor so the smaller side stays discoverable. Bar widths are
+/// log-scaled, never shares; shares render via
+/// `DashboardInsights.percentLabel` (whole percent rounded, one decimal
+/// under 1%, so a small nonzero share never reads "0%"). Zero stays zero:
+/// a zero side renders no bar and never trips the floor.
 
 // MARK: - Compact input/output comparison (paired bars)
 
@@ -20,6 +24,8 @@ import TokenBarCore
 /// horizontal bars with exact counts, log-scaled widths, and subset
 /// captions. Cached stays a caption on the input row and reasoning on the
 /// output row, never a third bar, so neither reads as additional tokens.
+/// Widths use the single `DashboardInsights.ioComparison` 6% floor (zero
+/// stays zero); there is no extra point floor in this view.
 struct TokenIOComparison: View {
     var stats: AggregatedStats
     var compactCount: (Int) -> String
@@ -28,7 +34,7 @@ struct TokenIOComparison: View {
     var body: some View {
         let cmp = DashboardInsights.ioComparison(for: stats)
         let comp = DashboardInsights.composition(for: stats)
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("INPUT VS OUTPUT")
                 .font(.caption2)
                 .fontWeight(.semibold)
@@ -56,14 +62,15 @@ struct TokenIOComparison: View {
                     share: comp.outputShare,
                     display: cmp.outputDisplay
                 )
-                Text("Cached \(compactCount(stats.cachedTokens)) · \(Int(comp.cachedShareOfInput * 100))% of input (subset)")
+                Text("Cached \(compactCount(stats.cachedTokens)) · \(DashboardInsights.percentLabel(for: comp.cachedShareOfInput)) of input (subset)")
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    .accessibilityLabel("Cached \(fullCount(stats.cachedTokens)) tokens, \(Int(comp.cachedShareOfInput * 100)) percent of input, a subset")
-                Text("Reasoning \(compactCount(stats.reasoningTokens)) · \(Int(comp.reasoningShareOfOutput * 100))% of output (subset)")
+                    .accessibilityLabel("Cached \(fullCount(stats.cachedTokens)) tokens, \(DashboardInsights.percentSpoken(for: comp.cachedShareOfInput)) of input, a subset")
+                Text("Reasoning \(compactCount(stats.reasoningTokens)) · \(DashboardInsights.percentLabel(for: comp.reasoningShareOfOutput)) of output (subset)")
                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    .accessibilityLabel("Reasoning \(fullCount(stats.reasoningTokens)) tokens, \(Int(comp.reasoningShareOfOutput * 100)) percent of output, a subset")
+                    .accessibilityLabel("Reasoning \(fullCount(stats.reasoningTokens)) tokens, \(DashboardInsights.percentSpoken(for: comp.reasoningShareOfOutput)) of output, a subset")
                 Text(scaleFootnote(floored: cmp.smallerIsFloored))
                     .font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(2)
                     .accessibilityLabel(scaleFootnote(floored: cmp.smallerIsFloored))
             }
         }
@@ -90,7 +97,7 @@ struct TokenIOComparison: View {
                         .frame(height: 8)
                     RoundedRectangle(cornerRadius: 3)
                         .fill(color.opacity(0.9))
-                        .frame(width: max(value > 0 ? 2.0 : 0.0, proxy.size.width * CGFloat(display)), height: 8)
+                        .frame(width: proxy.size.width * CGFloat(display), height: 8)
                 }
                 .frame(maxHeight: .infinity, alignment: .center)
             }
@@ -102,7 +109,7 @@ struct TokenIOComparison: View {
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                Text("\(Int(share * 100))%")
+                Text(DashboardInsights.percentLabel(for: share))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -111,17 +118,17 @@ struct TokenIOComparison: View {
             .frame(minWidth: 92, alignment: .trailing)
             .accessibilityHidden(true)
         }
-        .help("\(label): \(fullCount(value)) tokens, \(Int(share * 100))% of total")
+        .help("\(label): \(fullCount(value)) tokens, \(DashboardInsights.percentLabel(for: share)) of total")
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label) \(fullCount(value)) tokens, \(Int(share * 100)) percent of total")
+        .accessibilityLabel("\(label) \(fullCount(value)) tokens, \(DashboardInsights.percentSpoken(for: share)) of total")
         .accessibilityHint("Bar length uses a log scale so small values stay visible")
     }
 
     private func scaleFootnote(floored: Bool) -> String {
         if floored {
-            return "Bars use a log scale with a minimum width, so the smaller side stays visible. Counts and % are exact."
+            return "Log-scale bars (widths are not shares); 6% minimum keeps the smaller side visible. Counts exact; % rounded, one decimal under 1%."
         }
-        return "Bars use a log scale so small values stay visible; counts and % are exact."
+        return "Log-scale bars so small values stay visible; widths are not shares. Counts exact; % rounded, one decimal under 1%."
     }
 }
 
@@ -151,8 +158,8 @@ struct TokenCompositionRing: View {
             .frame(width: 64, height: 64)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Token composition")
-            .accessibilityValue("Input \(Int(comp.inputShare * 100)) percent, output \(Int(comp.outputShare * 100)) percent")
-            .help("Input \(Int(comp.inputShare * 100))% / output \(Int(comp.outputShare * 100))% of total")
+            .accessibilityValue("Input \(DashboardInsights.percentSpoken(for: comp.inputShare)), output \(DashboardInsights.percentSpoken(for: comp.outputShare))")
+            .help("Input \(DashboardInsights.percentLabel(for: comp.inputShare)) / output \(DashboardInsights.percentLabel(for: comp.outputShare)) of total")
             VStack(alignment: .leading, spacing: 3) {
                 legendDot(color: .blue, label: "Input \(compactCount(stats.inputTokens))")
                 legendDot(color: .orange, label: "Output \(compactCount(stats.outputTokens))")
@@ -198,7 +205,7 @@ struct SourceStackedBar: View {
             .frame(height: 8)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Source distribution")
-            .accessibilityValue(shares.map { "\($0.key) \(Int($0.share * 100)) percent" }.joined(separator: ", "))
+            .accessibilityValue(shares.map { "\($0.key) \(DashboardInsights.percentSpoken(for: $0.share))" }.joined(separator: ", "))
             HStack(spacing: 10) {
                 ForEach(Self.order, id: \.self) { key in
                     let entry = byKey[key]
@@ -272,9 +279,9 @@ struct ModelDistributionBars: View {
                             .font(.callout).monospacedDigit().lineLimit(1)
                             .frame(width: 52, alignment: .trailing)
                     }
-                    .help("\(item.key): \(fullCount(item.totalTokens)) tokens, \(item.requests) requests, \(Int(item.share * 100))% of total")
+                    .help("\(item.key): \(fullCount(item.totalTokens)) tokens, \(item.requests) requests, \(DashboardInsights.percentLabel(for: item.share)) of total")
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(item.key), \(Int(item.share * 100)) percent of total")
+                    .accessibilityLabel("\(item.key), \(DashboardInsights.percentSpoken(for: item.share)) of total")
                 }
             }
         }

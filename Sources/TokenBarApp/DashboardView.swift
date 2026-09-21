@@ -345,7 +345,7 @@ struct DashboardView: View {
     // MARK: - Compact summary (no scroll)
 
     private var compactSummary: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("TOTAL IN VIEW")
                     .font(.caption2)
@@ -615,7 +615,7 @@ struct DashboardView: View {
                 .accessibilityLabel("Composition, input versus output split")
             TokenCompositionRing(stats: stats, compactCount: compactCount)
             let comp = DashboardInsights.composition(for: stats)
-            Text("Ring splits the total into input (\(Int(comp.inputShare * 100))%) vs output (\(Int(comp.outputShare * 100))%). Cached (\(Int(comp.cachedShareOfInput * 100))% of input) and reasoning (\(Int(comp.reasoningShareOfOutput * 100))% of output) are subsets, never added on top.")
+            Text("Ring splits the total into input (\(DashboardInsights.percentLabel(for: comp.inputShare))) vs output (\(DashboardInsights.percentLabel(for: comp.outputShare))). Cached (\(DashboardInsights.percentLabel(for: comp.cachedShareOfInput)) of input) and reasoning (\(DashboardInsights.percentLabel(for: comp.reasoningShareOfOutput)) of output) are subsets, never added on top.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
