@@ -98,12 +98,17 @@ git diff --check
 ## Release and package commands
 
 ```sh
-./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION)
+./scripts/build-app.sh                  # dist/TokenBar.app (version defaults to VERSION; read it with: tr -d ' \t\r\n' < VERSION)
 ./scripts/package-release.sh --format zip
 VERSION="$(tr -d ' \t\r\n' < VERSION)"; (cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.zip.sha256")
 ```
 
 Sign, notarize, and staple before packaging. Full path: `docs/MACOS_PACKAGING.md`, `RELEASE_CHECKLIST.md`.
+Ordered feature-to-release lifecycle: `docs/RELEASE_PROCESS.md` (scope first,
+worker branch/worktree, review, validation, merge to main, then
+version/changelog decision, exact `v<VERSION>` tag from `main` HEAD,
+published-asset verification, verified install). Docs-only/process-only
+changes do not bump `VERSION` and do not create a release.
 
 ## Worker contribution rules
 

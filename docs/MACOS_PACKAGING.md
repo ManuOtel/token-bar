@@ -36,11 +36,24 @@ then launch normally.
 
 ## Public release steps (tag-driven, maintainer)
 
+Ordered public release sequence (full lifecycle: `docs/RELEASE_PROCESS.md`):
+
+1. Land the feature PRs on `main` (reviewed, green PR CI).
+2. Land the release PR on `main` (`VERSION` plus `CHANGELOG.md` only).
+3. Verify `main` HEAD, then push the exact tag (`v$VERSION`, below).
+4. Wait for the tag workflow to go green and publish all eight assets.
+5. Verify the release assets and latest URLs, then install only the
+   verified release (`docs/RELEASE_PROCESS.md` step 9).
+
 The `VERSION` file at the repo root is the single source of truth (SemVer
 `x.y.z`, never bumped for release infrastructure). To cut a public release,
-push a tag exactly matching it (`v$VERSION`):
+push a tag exactly matching it (`v$VERSION`) from verified `main` HEAD:
 
 ```sh
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+git log --oneline -3   # confirm the release PR merge is HEAD
 VERSION="$(tr -d ' \t\r\n' < VERSION)"
 git tag "v$VERSION"
 git push origin "v$VERSION"
@@ -75,8 +88,8 @@ provider credentials are used; the only auth is the automatic
 On a Mac with Xcode 15+ (macOS 14 SDK):
 
 ```sh
-./scripts/build-app.sh                                   # version defaults to VERSION (currently 0.4.3)
-./scripts/build-app.sh --version 0.4.3 --build 29        # explicit release version + bumped build
+./scripts/build-app.sh                                   # version defaults to VERSION (read it with: tr -d ' \t\r\n' < VERSION)
+VERSION="$(tr -d ' \t\r\n' < VERSION)"; ./scripts/build-app.sh --version "$VERSION" --build <bumped-build-number>   # explicit version + bumped build for local verification
 ./scripts/build-app.sh --bundle-id com.example.TokenBar  # bundle id override only
 ```
 
@@ -104,19 +117,20 @@ hosts the UI. Dev loop needs no bundle:
 ## Package (zip default, DMG optional) + checksum
 
 ```sh
-./scripts/package-release.sh --format zip            # version defaults to the built app, then VERSION (currently 0.4.3)
-./scripts/package-release.sh --version 0.4.3 --format dmg   # macOS only, drag-and-drop layout
+./scripts/package-release.sh --format zip            # version defaults to the built app, then VERSION (read it with: tr -d ' \t\r\n' < VERSION)
+VERSION="$(tr -d ' \t\r\n' < VERSION)"; ./scripts/package-release.sh --version "$VERSION" --format dmg   # macOS only, drag-and-drop layout
 ```
 
 This writes `dist/TokenBar-<version>-macos.zip` (or `.dmg`) plus
 `dist/TokenBar-<version>-macos.<zip|dmg>.sha256`. Publish all files. Users verify
-with:
+with (substitute the release version for `<version>`):
 
 ```sh
-(cd dist && shasum -a 256 -c TokenBar-0.4.3-macos.zip.sha256)
-(cd dist && shasum -a 256 -c TokenBar-0.4.3-macos.dmg.sha256)
+VERSION="$(tr -d ' \t\r\n' < VERSION)"
+(cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.zip.sha256")
+(cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.dmg.sha256")
 # DMG layout check (macOS only, mounts read-only then detaches):
-./scripts/verify-dmg.sh --dmg dist/TokenBar-0.4.3-macos.dmg
+./scripts/verify-dmg.sh --dmg "dist/TokenBar-$VERSION-macos.dmg"
 ```
 
 Zip uses `ditto -c -k --sequesterRsrc --keepParent` on macOS (falls back to
@@ -172,6 +186,7 @@ Application certificate and an App Store Connect API key (or Apple ID):
 
 ```sh
 # 1. Build, then sign the bundle (replace TEAMID / identity name).
+VERSION="$(tr -d ' \t\r\n' < VERSION)"
 codesign --deep --force --verify --verbose \
   --sign "Developer ID Application: Your Name (TEAMID)" \
   dist/TokenBar.app
@@ -179,16 +194,16 @@ codesign --verify --deep --strict dist/TokenBar.app
 spctl -a -vvv -t install dist/TokenBar.app   # local Gatekeeper check
 
 # 2. Zip the signed app, submit to Apple, wait, staple.
-ditto -c -k --sequesterRsrc --keepParent dist/TokenBar.app dist/TokenBar-0.4.3-macos.zip
-xcrun notarytool submit dist/TokenBar-0.4.3-macos.zip \
+ditto -c -k --sequesterRsrc --keepParent dist/TokenBar.app "dist/TokenBar-$VERSION-macos.zip"
+xcrun notarytool submit "dist/TokenBar-$VERSION-macos.zip" \
   --keychain-profile "TOKENBAR-NOTARY" --wait
 xcrun stapler staple dist/TokenBar.app
 xcrun stapler validate dist/TokenBar.app
 spctl -a -vvv -t install dist/TokenBar.app
 
 # 3. Re-package the stapled app and publish the checksums.
-./scripts/package-release.sh --version 0.4.3 --format zip
-./scripts/package-release.sh --version 0.4.3 --format dmg
+./scripts/package-release.sh --version "$VERSION" --format zip
+./scripts/package-release.sh --version "$VERSION" --format dmg
 ```
 
 Notes: `notarytool` stores credentials in the local keychain profile; never
