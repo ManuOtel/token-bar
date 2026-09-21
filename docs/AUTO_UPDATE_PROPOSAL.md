@@ -21,7 +21,7 @@ notarized (no credentials in CI), so Gatekeeper warns on first
 launch and that is expected. There is no background check, no
 background download, and no silent install in any current release.
 
-## 2. Proposal: maintained signed updater, Settings-initiated only
+## 2. Proposal: GitHub Releases updater with safe automatic checks
 
 Evaluate Sparkle 2 (or an equivalent maintained signed updater)
 before any custom mechanism, and prefer the maintained option unless
@@ -31,15 +31,23 @@ this proposal.
 
 Requirements (all must hold in any implementation PR):
 
-- Explicit user initiation from Settings only. The updater ships
-  disabled or explicit opt-in; it never performs a silent background
-  install without consent. Checking, downloading, and installing each
-  require user action, and the running app stays intact until the
-  user confirms replacement.
-- HTTPS public release metadata only. The update feed is served over
-  HTTPS from the existing public release hosting (for example the
-  published release assets) with no arbitrary URLs, no shell
-  commands, and no unsigned channels.
+- GitHub Releases is the sole update channel. The app reads the
+  stable latest-release metadata for the public Token Bar repository
+  over HTTPS; draft and pre-release entries are ignored. The endpoint
+  and asset names are fixed in the app; users cannot configure an
+  arbitrary feed or download host.
+- The updater supports both an explicit Settings `Check for Updates`
+  action and an opt-in automatic metadata check. The automatic check
+  only discovers and reports an available version. Download and
+  installation always require a separate explicit user action, and the
+  running app stays intact until the user confirms replacement.
+- HTTPS public release metadata only, with conditional requests and
+  bounded retry/backoff. No shell commands, cookies, credentials,
+  authorization headers, private repository access, or unsigned
+  channels.
+- Version comparison uses the repository SemVer value. A same or newer
+  installed version is a no-op, and a draft or pre-release never becomes
+  an update candidate.
 - Signature and notarization verification before any replacement.
   Every downloaded artifact is verified (maintained-updater
   signature check plus Apple notarization and Gatekeeper standing
@@ -73,6 +81,9 @@ Requirements (all must hold in any implementation PR):
   existing privacy boundaries stay unchanged: the pricing GET stays
   owned by `PricingService.swift` and subprocess use stays owned by
   `OpenCodeSync.swift`.
+- The Settings view shows the installed version, latest stable version,
+  release title and notes, verification status, and `Update` action.
+  When current, it shows `Up to date` and does not download an artifact.
 
 Non-goals for this proposal: no silent auto-install mode, no
 Windows or Linux updater target, no provider auth or account APIs,
@@ -132,10 +143,9 @@ Infrastructure that must change first (all required, in order):
    steps 1 to 5 are done, the roadmap candidate stays a candidate
    and releases stay download-only.
 
-Generic example shapes only: a Settings updater row names a feed
-(such as the public releases feed over HTTPS) and a version pair
-(such as installed version and available version) with redacted
-values; it never prints file contents, environment values, host
-names, credentials, or usage data.
+Generic example shapes only: a Settings updater row names the fixed
+GitHub Releases channel and a version pair (such as installed version
+and available version) with redacted values; it never prints file
+contents, environment values, host names, credentials, or usage data.
 
 (End of file)
