@@ -2,6 +2,24 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.4.3
+
+Focused Details-popover fix. No change to token math, source semantics,
+privacy boundaries, sync behavior, or pricing behavior. macOS 14 stays
+the deployment target.
+
+- Pressing Show details renders the full breakdown again instead of only
+  the notices card: the expanded ScrollView now owns a nonzero viewport
+  (280pt minimum, 380pt maximum, plain frame, macOS 14-safe) because a
+  ScrollView has no intrinsic vertical size and a maxHeight-only cap
+  resolves to approximately 0pt in the content-sized MenuBarExtra window.
+  No forced outer window height is reintroduced.
+- Notices moved inside the expanded scroll content, so the first viewport
+  shows details and long notice lists scroll with them. Notices stay
+  outside the scroll region only for the empty and no-scope states.
+  Compact mode, filters, Details/Show less, keyboard/Escape behavior,
+  accessibility labels, and sanitized warning rendering are unchanged.
+
 ## 0.4.2
 
 Focused popover-window fix. No change to token math, source semantics,

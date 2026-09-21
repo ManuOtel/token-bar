@@ -1,9 +1,12 @@
 #!/bin/sh
 # test-popover.sh - contract checks for the MenuBarExtra popover layout.
 #
-# Pins the transparent-bands fix (0.4.2): the popover window must size to
-# its content instead of forcing a fixed expanded height that leaves bare
-# host material above and below the dashboard. Asserts (POSIX sh + grep):
+# Pins the transparent-bands fix (0.4.2) plus the empty-Details fix (0.4.3):
+# the popover window must size to its content instead of forcing a fixed
+# expanded height that leaves bare host material above and below the
+# dashboard, and the expanded Details view must actually render (a
+# ScrollView has no intrinsic vertical size, so a maxHeight-only cap
+# resolves to ~0pt in the content-sized window). Asserts (POSIX sh + grep):
 #   - TokenBarApp.swift sets a fixed content width (400) with no forced
 #     outer height (no `height:`/`maxHeight` on the MenuBarExtra frame, no
 #     660 literal in TokenBarApp sources), so the details ScrollView cap is
@@ -16,9 +19,14 @@
 #   - no custom glassEffect on the MenuBarExtra content itself (charts,
 #     cards, and text stay off custom glass; glass lives only on the
 #     functional chip/action surfaces in LiquidGlass.swift)
-#   - the details ScrollView keeps its 380pt cap (sole expanded-height
-#     owner), and no macOS 14-incompatible ScrollView gutter override was
-#     added (no scrollContentBackground in App sources)
+#   - the details ScrollView keeps a nonzero viewport (minHeight) with its
+#     380pt maxHeight cap (sole expanded-height owner), and no macOS
+#     14-incompatible ScrollView gutter override was added (no
+#     scrollContentBackground in App sources)
+#   - notices live inside the expanded ScrollView content (first viewport
+#     shows details, long notice lists scroll with them) and stay outside
+#     only for the empty/no-scope states; no expanded-outside
+#     `} else { notices }` branch remains
 #
 # Run: ./scripts/test-popover.sh (from the repo root).
 set -eu
@@ -88,11 +96,21 @@ else
   ok "no custom glassEffect on popover content"
 fi
 
-# --- 6. Details ScrollView keeps its 380pt cap (sole expanded-height owner) ---
-if grep -Fq '.frame(maxHeight: 380)' "$DASH"; then
-  ok "details ScrollView keeps the 380pt cap"
+# --- 6. Details ScrollView keeps a nonzero viewport with the 380pt cap ---
+# The ScrollView is the sole expanded-height owner. The minHeight is
+# load-bearing: a ScrollView has no intrinsic vertical size, so in the
+# content-sized MenuBarExtra window a maxHeight-only cap resolves to ~0pt
+# and Details renders only the outside notices card. Plain frame, macOS
+# 14-safe; no forced outer height is reintroduced.
+if grep -Fq '.frame(minHeight: 280, maxHeight: 380)' "$DASH"; then
+  ok "details ScrollView keeps the nonzero 280pt viewport with the 380pt cap"
 else
-  bad "details ScrollView keeps the 380pt cap" "missing '.frame(maxHeight: 380)' in $DASH"
+  bad "details ScrollView keeps the nonzero 280pt viewport with the 380pt cap" "missing '.frame(minHeight: 280, maxHeight: 380)' in $DASH"
+fi
+if grep -Eq '\.frame\(height: [0-9]{3}' Sources/TokenBarApp/*.swift; then
+  bad "no popover-scale fixed height in App sources" "found a 100pt+ '.frame(height:' in Sources/TokenBarApp; small fixed bar heights (8/10pt) are fine, the ScrollView viewport must stay a min/max range"
+else
+  ok "no popover-scale fixed height in App sources"
 fi
 if grep -q 'maxHeight' "$APP"; then
   bad "no competing height cap in TokenBarApp" "found 'maxHeight' in $APP; the Dashboard ScrollView must be the sole expanded-height owner"
@@ -100,7 +118,34 @@ else
   ok "no competing height cap in TokenBarApp"
 fi
 
-# --- 7. No ScrollView gutter override (none is macOS 14-safe and needed) ---
+# --- 7. Notices scroll with the expanded details (0.4.3) ---
+# The expanded notices card must live inside the ScrollView content so the
+# first viewport shows details and long notice lists scroll with them.
+# Notices stay outside only for the empty/no-scope states. Statically:
+# exactly two bare `notices` placements exist, the first inside the
+# ScrollView region (between ScrollView and its viewport frame), the
+# second after it, and no `} else { notices }` expanded-outside branch
+# remains.
+SCROLL_LINE="$(grep -n 'ScrollView {' "$DASH" | head -1 | cut -d: -f1)"
+FRAME_LINE="$(grep -n 'minHeight: 280, maxHeight: 380' "$DASH" | head -1 | cut -d: -f1)"
+NOTICES_LINES="$(grep -n '^[[:space:]]*notices$' "$DASH" | cut -d: -f1)"
+NOTICES_COUNT="$(printf '%s\n' "$NOTICES_LINES" | grep -c '[0-9]' || true)"
+FIRST_NOTICES="$(printf '%s\n' "$NOTICES_LINES" | head -1)"
+LAST_NOTICES="$(printf '%s\n' "$NOTICES_LINES" | tail -1)"
+if [ "$NOTICES_COUNT" = "2" ] && [ -n "$SCROLL_LINE" ] && [ -n "$FRAME_LINE" ] \
+  && [ "$FIRST_NOTICES" -gt "$SCROLL_LINE" ] && [ "$FIRST_NOTICES" -lt "$FRAME_LINE" ] \
+  && [ "$LAST_NOTICES" -gt "$FRAME_LINE" ]; then
+  ok "notices live inside the expanded ScrollView, outside only for empty/no-scope states"
+else
+  bad "notices live inside the expanded ScrollView" "expected exactly 2 placements (scroll=$SCROLL_LINE frame=$FRAME_LINE notices='$(printf '%s' "$NOTICES_LINES" | tr '\n' ' ')')"
+fi
+if grep -A1 '} else {' "$DASH" | grep -q '^[[:space:]]*notices$'; then
+  bad "no expanded-outside notices branch" "found a '} else {' branch rendering notices outside the ScrollView"
+else
+  ok "no expanded-outside notices branch"
+fi
+
+# --- 8. No ScrollView gutter override (none is macOS 14-safe and needed) ---
 if grep -q 'scrollContentBackground' Sources/TokenBarApp/*.swift; then
   bad "no ScrollView gutter override in App sources" "found scrollContentBackground in Sources/TokenBarApp"
 else
