@@ -4,7 +4,11 @@ Docs-only gate for cutting a Token Bar release. No product behavior changes
 here; the app stays local-first (file reads only, no accounts, no provider
 APIs). The only network uses are strictly opt-in and user-initiated: the
 pricing catalog GET and the remote SSH snapshot pull (both disabled by
-default). Work through top to bottom on a Mac for the build/sign steps;
+default). This checklist is the per-release gate; the full ordered
+feature-to-release lifecycle lives in `docs/RELEASE_PROCESS.md` (plan
+feature, scoped worker branch, review, validation, merge to main,
+version/changelog decision, exact tag, published-asset verification,
+verified install). Work through top to bottom on a Mac for the build/sign steps;
 the Linux mirror covers logic only.
 
 ## 1. Data sources and permissions
@@ -44,16 +48,24 @@ config stores no password, key, or token.
 
 ## 3. Versioned app build
 
-Version source of truth: the `VERSION` file at the repo root (currently
-`0.3.3`; the 0.2.0 line accumulated user-visible remote-sync and Settings
-UI functionality, hence the minor bump). `scripts/build-app.sh` defaults
-to it; `scripts/package-release.sh` falls back to the built app's
-`Info.plist`, then to it.
+Version source of truth: the `VERSION` file at the repo root (`x.y.z`
+only, no prefixes; read it with `VERSION="$(tr -d ' \t\r\n' < VERSION)"`
+so docs and commands never hardcode a release number).
+`scripts/build-app.sh` defaults to it; `scripts/package-release.sh` falls
+back to the built app's `Info.plist`, then to it.
 
 - [ ] Pick the release version per the SemVer policy below and write it to
-      `VERSION` (`x.y.z` only, no prefixes). Every release PR updates
-      `VERSION` and passes a bumped build number (`--build` / env
-      `TOKENBAR_BUILD`); never reuse a build number.
+      `VERSION` (`x.y.z` only, no prefixes). Update `CHANGELOG.md` in the
+      same release PR (new version section plus the estimate disclaimer
+      on every dollar figure); the release PR touches `VERSION` and
+      `CHANGELOG.md` only, never product or process code.
+- [ ] Every release PR updates `VERSION` and passes a bumped build number
+      (`--build` / env `TOKENBAR_BUILD`); never reuse a build number.
+      Note the split: a manual `--build` value is for local verification
+      only. The published release build number comes from the tag
+      workflow, which passes `GITHUB_RUN_NUMBER` as the build
+      (`CFBundleVersion`); see `docs/RELEASE_PROCESS.md` step 8 and
+      `docs/MACOS_PACKAGING.md`.
 - [ ] Build with `./scripts/build-app.sh` (explicit `--version` /
       `TOKENBAR_VERSION` still override the file; optional `--bundle-id` /
       `TOKENBAR_BUNDLE_ID`).
@@ -72,15 +84,48 @@ to it; `scripts/package-release.sh` falls back to the built app's
   (new filters, views, settings, sync behavior, pricing coverage).
 - Major (`X.0.0`): breaking changes (storage paths, CLI output shape,
   dropped OS support, removed flags).
-- Docs and examples never hardcode an old release as the default: use the
-  bare scripts (they read `VERSION`) or name the current release
-  explicitly. Historical records (for example the 0.1.0 evidence log in
-  `RELEASE_EXECUTION_PLAN.md`) stay untouched.
+- Docs-only and process-only changes do not bump `VERSION` and do not
+  create a release. `VERSION` moves only for user-visible product
+  fixes/features per the policy above.
+- Docs and examples never hardcode a release number as the default: use
+  the bare scripts (they read `VERSION`) or derive it with
+  `VERSION="$(tr -d ' \t\r\n' < VERSION)"`. Historical records (for
+  example the 0.1.0 evidence log in `RELEASE_EXECUTION_PLAN.md`) stay
+  untouched.
+
+## 3b. Merge, tag from main, publish (release PR only)
+
+- [ ] Merge the release PR to `main` only after independent review and
+      green PR CI (macOS build+test, Linux verify, privacy gate).
+      Feature PRs merge first; the release PR carries the version
+      decision last.
+- [ ] After merge, verify `main` HEAD (`git fetch origin`, `git log`,
+      confirm the release merge is HEAD), then create and push the exact
+      tag from `main`: `git tag "v$VERSION"` plus
+      `git push origin "v$VERSION"`. Never tag a worker branch or a
+      stale HEAD. Full order: `docs/RELEASE_PROCESS.md` steps 7-8.
+- [ ] Confirm the tag workflow (`.github/workflows/release.yml`) is green
+      for that exact tag. It re-runs `swift build` + `swift test`,
+      builds with `VERSION` plus `GITHUB_RUN_NUMBER`, packages zip and
+      dmg plus checksums, verifies the DMG layout, and publishes all
+      eight assets (versioned plus latest aliases). PR CI stays the full
+      pre-tag gate; the tag run is the publish step.
+- [ ] Post-publish checks before any install: the GitHub Release holds
+      all eight files (`TokenBar-<version>-macos.zip`/`.dmg` plus their
+      `.sha256` files plus the `TokenBar-latest-macos.zip`/`.dmg` aliases
+      plus their `.sha256` files); the stable latest download URLs
+      resolve and their checksums verify with `shasum -a 256 -c`.
+      Install only the verified release: stop the previous app first,
+      then verify the installed `Info.plist` version and exactly one
+      running app (ordered steps in `docs/RELEASE_PROCESS.md` step 9).
 
 ## 4. Optional signing and notarization (Developer ID, Mac only, manual)
 
-CI never signs (no credentials). Only on a release Mac with a
-Developer ID Application certificate:
+The automated tag workflow never signs: CI carries no credentials, so
+published GitHub Release artifacts are unsigned and not notarized
+(Gatekeeper warns on first launch; that is expected). Signing is an
+optional manual path on a release Mac with a Developer ID Application
+certificate, done before the final package step of a manual build only:
 
 - [ ] `codesign --deep --force --verify --verbose --sign "Developer ID Application: Your Name (TEAMID)" dist/TokenBar.app`,
       then `codesign --verify --deep --strict` and `spctl -a -vvv -t install`.
@@ -93,14 +138,18 @@ Developer ID Application certificate:
 ## 5. Package checksum / DMG
 
 - [ ] Package *after* signing/stapling so the checksum covers the final
-      artifact: `./scripts/package-release.sh --version <x.y.z> --format zip`
-      plus `./scripts/package-release.sh --version <x.y.z> --format dmg`
+      artifact (manual path): derive the version, never hardcode it:
+      `VERSION="$(tr -d ' \t\r\n' < VERSION)"`,
+      then `./scripts/package-release.sh --version "$VERSION" --format zip`
+      plus `./scripts/package-release.sh --version "$VERSION" --format dmg`
       (macOS only, drag-and-drop layout with the Applications shortcut).
 - [ ] Publish each artifact plus its `.sha256`; verify with
-      `(cd dist && shasum -a 256 -c TokenBar-<x.y.z>-macos.zip.sha256)` and
-      `(cd dist && shasum -a 256 -c TokenBar-<x.y.z>-macos.dmg.sha256)`,
-      then `./scripts/verify-dmg.sh --dmg dist/TokenBar-<x.y.z>-macos.dmg`
-      (macOS only).
+      `(cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.zip.sha256")` and
+      `(cd dist && shasum -a 256 -c "TokenBar-$VERSION-macos.dmg.sha256")`,
+      then `./scripts/verify-dmg.sh --dmg "dist/TokenBar-$VERSION-macos.dmg"`
+      (macOS only). For tag-driven releases this packaging and
+      verification runs inside `release.yml`; the manual commands here
+      are for local verification and optional signed builds.
 
 ## 6. Launch-at-login validation
 
@@ -171,7 +220,10 @@ Developer ID Application certificate:
       legacy `opencode-homeserver.json` if present from an older version).
 - [ ] Release rollback: re-tag/re-publish the previous versioned artifact
       + checksum; note that a bundle-id change resets the login item
-      (toggle off/on once).
+      (toggle off/on once). Never silently overwrite a published asset.
+- [ ] Record the release evidence (release PR number, tagged `main` HEAD
+      SHA, tag name, green tag workflow run, asset/URL check results,
+      installed version verification) in the release PR or issue thread.
 
 ## 10. Future sources (tracked, not built)
 
