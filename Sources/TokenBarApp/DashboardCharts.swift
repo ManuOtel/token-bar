@@ -290,24 +290,43 @@ struct ModelDistributionBars: View {
 
 // MARK: - Adaptive trend chart
 
-/// Trend bars for the active range and grain (see `TrendModel`).
+/// Trend bars, lines, and areas for the active range and grain (see
+/// `TrendModel` and `ChartStyle`).
 ///
 /// Renders the full selected coverage, not a 14-day suffix: hourly buckets
 /// for Today/24H (including zero-token hours), daily buckets for 7D/30D/
 /// Best (including empty days), monthly buckets for Lifetime. Bars size
 /// down to fit the 400pt popover; histories wider than `maxInlineBars`
 /// (long lifetimes) use a bounded horizontal scroll instead of shrinking
-/// into illegibility. X labels render sparsely (every kth bucket plus the
-/// last) with the full first-last range below; every bar keeps its own
-/// tooltip and accessibility label with the exact count.
+/// into illegibility. Line and area compress to the card width instead
+/// (no scroll: continuity reads across the full range). X labels render
+/// sparsely (every kth bucket plus the last) with the full first-last
+/// range below; every bucket keeps its own tooltip and accessibility
+/// label with the exact count. All styles share one series color, one
+/// zero-based linear scale (`trendFractions`: zero stays zero, peak is 1),
+/// and the thin `TrendComparisonLine` readout below the chart; the
+/// comparison never becomes bars or area, and area is one unstacked
+/// total-token series only.
 struct AdaptiveTrendChart: View {
     var buckets: [TrendBucket]
     var grain: TrendGrain
+    /// Active range: picks the Automatic renderer with the buckets.
+    /// Compact always passes `.automatic` at mini size with no control.
+    var preset: DatePreset
+    /// User style selection; resolved per range via
+    /// `ChartStyle.resolved(for:buckets:)`.
+    var style: ChartStyle
     var fullCount: (Int) -> String
     var barHeight: CGFloat = 36
 
     /// Max bars that fit the 400pt popover without scrolling.
     private static let maxInlineBars = 32
+
+    /// Resolved renderer for the stored snapshot (constant time over the
+    /// stored buckets; no re-derivation).
+    private var resolved: ResolvedTrendStyle {
+        style.resolved(for: preset, buckets: buckets)
+    }
 
     var body: some View {
         if buckets.isEmpty {
@@ -316,7 +335,28 @@ struct AdaptiveTrendChart: View {
         } else {
             let fractions = DashboardInsights.trendFractions(for: buckets)
             VStack(alignment: .leading, spacing: 4) {
-                chartContent(fractions: fractions)
+                switch resolved {
+                case .bars:
+                    chartContent(fractions: fractions)
+                case .linePoints:
+                    TrendSeriesPlot(
+                        buckets: buckets,
+                        grain: grain,
+                        fractions: fractions,
+                        fullCount: fullCount,
+                        isArea: false,
+                        plotHeight: barHeight)
+                    tickRow
+                case .area:
+                    TrendSeriesPlot(
+                        buckets: buckets,
+                        grain: grain,
+                        fractions: fractions,
+                        fullCount: fullCount,
+                        isArea: true,
+                        plotHeight: barHeight)
+                    tickRow
+                }
                 if let first = buckets.first?.label, let last = buckets.last?.label, first != last {
                     Text("\(first) - \(last)")
                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
@@ -368,6 +408,24 @@ struct AdaptiveTrendChart: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Sparse tick row under the line/area plot: at most ~8 labels plus
+    /// the last bucket, the same stride rule as the bar ticks, so hourly
+    /// and 30-day charts stay legible at 400pt. Ticks are display only;
+    /// exact counts live in the per-bucket tooltips and labels above.
+    private var tickRow: some View {
+        let stride = max(1, Int(ceil(Double(buckets.count) / 8.0)))
+        return HStack(spacing: 0) {
+            ForEach(buckets.indices, id: \.self) { index in
+                let bucket = buckets[index]
+                let showTick = index % stride == 0 || index == buckets.count - 1
+                Text(showTick ? shortTick(for: bucket) : " ")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
     /// Bar width that fits `count` bars in the ~344pt inner card width
     /// (400pt popover minus outer + card padding), 14pt max, 4pt min.
     private func barWidth(for count: Int) -> CGFloat {
@@ -384,6 +442,125 @@ struct AdaptiveTrendChart: View {
         case .day, .month:
             return String(bucket.label.suffix(2))
         }
+    }
+
+    private func spokenTick(for bucket: TrendBucket) -> String {
+        switch grain {
+        case .hour:
+            return "hour \(bucket.label)"
+        case .day, .month:
+            return bucket.label
+        }
+    }
+}
+
+// MARK: - Trend line / area plot
+
+/// Zero-based linear plot behind the Line-with-points and Area renderers.
+///
+/// Same stored buckets, same peak scaling, same sparse ticks as Bars, one
+/// series color throughout. Y maps 0...peak onto the plot height (no
+/// truncated axis) with a hairline zero baseline; zero-token buckets sit
+/// on the baseline, never hidden. Area is one unstacked total-token fill
+/// with the line edge in the same series color: no stacked areas, no
+/// per-source areas, no input/output split areas. The fill keeps a
+/// contrast-safe opacity with a visible line edge under Increase Contrast.
+/// The previous-period comparison stays the thin `TrendComparisonLine`
+/// readout below the chart in all styles.
+///
+/// Standard content surface only: no material, no blur, no glass, no
+/// animation. Style switches render the new marks immediately with no
+/// transition that changes popover size.
+struct TrendSeriesPlot: View {
+    var buckets: [TrendBucket]
+    var grain: TrendGrain
+    /// Peak-scaled 0...1 heights (`trendFractions`: zero stays zero).
+    var fractions: [Double]
+    var fullCount: (Int) -> String
+    /// True for the Area fill; false draws the line with visible points.
+    var isArea: Bool
+    var plotHeight: CGFloat
+    @Environment(\.colorSchemeContrast) private var colorContrast
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+            ZStack {
+                if isArea {
+                    areaPath(width: width, height: height)
+                        .fill(Color.accentColor.opacity(colorContrast == .increased ? 0.4 : 0.25))
+                }
+                seriesPath(width: width, height: height)
+                    .stroke(Color.accentColor.opacity(0.9), lineWidth: 2)
+                // Zero baseline so the linear zero-based scale reads.
+                Path { path in
+                    path.move(to: CGPoint(x: 0, y: height - 0.5))
+                    path.addLine(to: CGPoint(x: width, y: height - 0.5))
+                }
+                .stroke(Color.primary.opacity(0.25), lineWidth: 1)
+                if !isArea {
+                    ForEach(buckets.indices, id: \.self) { index in
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 6, height: 6)
+                            .position(
+                                x: xPosition(index: index, width: width),
+                                y: yPosition(fraction: fractions[index], height: height))
+                            .accessibilityHidden(true)
+                    }
+                }
+                // Per-bucket hover + VoiceOver slots: transparent
+                // full-height strips so every bucket keeps its exact-count
+                // tooltip and label in all styles (area draws no markers).
+                HStack(spacing: 0) {
+                    ForEach(buckets.indices, id: \.self) { index in
+                        let bucket = buckets[index]
+                        Color.clear
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                            .help("\(bucket.label): \(fullCount(bucket.totalTokens)) tokens, \(bucket.requests) requests")
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("\(spokenTick(for: bucket)), \(bucket.totalTokens) tokens")
+                    }
+                }
+            }
+        }
+        .frame(height: plotHeight)
+    }
+
+    private func xPosition(index: Int, width: CGFloat) -> CGFloat {
+        guard buckets.count > 1 else { return width / 2 }
+        return width * CGFloat(index) / CGFloat(buckets.count - 1)
+    }
+
+    private func yPosition(fraction: Double, height: CGFloat) -> CGFloat {
+        let clamped = min(max(fraction, 0), 1)
+        return height - CGFloat(clamped) * height
+    }
+
+    private func seriesPath(width: CGFloat, height: CGFloat) -> Path {
+        Path { path in
+            for index in buckets.indices {
+                let point = CGPoint(
+                    x: xPosition(index: index, width: width),
+                    y: yPosition(fraction: fractions[index], height: height))
+                if index == 0 {
+                    path.move(to: point)
+                } else {
+                    path.addLine(to: point)
+                }
+            }
+        }
+    }
+
+    private func areaPath(width: CGFloat, height: CGFloat) -> Path {
+        var path = seriesPath(width: width, height: height)
+        guard !buckets.isEmpty else { return path }
+        path.addLine(to: CGPoint(x: xPosition(index: buckets.count - 1, width: width), y: height))
+        path.addLine(to: CGPoint(x: xPosition(index: 0, width: width), y: height))
+        path.closeSubpath()
+        return path
     }
 
     private func spokenTick(for bucket: TrendBucket) -> String {
