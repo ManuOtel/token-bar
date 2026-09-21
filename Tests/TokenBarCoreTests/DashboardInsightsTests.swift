@@ -18,7 +18,7 @@ final class DashboardInsightsTests: XCTestCase {
         XCTAssertEqual(comp.cachedShareOfInput, 0)
         XCTAssertEqual(comp.reasoningShareOfOutput, 0)
         XCTAssertTrue(DashboardInsights.shares(for: [], totalTokens: 0).isEmpty)
-        XCTAssertTrue(DashboardInsights.trendFractions(for: []).isEmpty)
+        XCTAssertTrue(DashboardInsights.trendFractions(for: [DailyBucket]()).isEmpty)
     }
 
     func testCompositionSplitsTotalAndLabelsSubsets() {

@@ -9,14 +9,15 @@ import TokenBarCore
 ///
 /// - Compact (initial): hero total, estimated cost, source/range controls,
 ///   a compact visual summary (paired input/output comparison, source bar,
-///   mini trend), and a clear Details action. Fits a ~400pt popover without
-///   scrolling. The comparison is a dual-bar view, not a proportional ring:
+///   adaptive mini trend plus a previous-period comparison line), and a
+///   clear Details action. Fits a ~400pt popover without scrolling. The
+///   comparison is a dual-bar view, not a proportional ring:
 ///   exact input/output counts stay prominent and log-scaled bars keep a
 ///   much smaller side discoverable.
 /// - Expanded (Details): the full readable breakdown (section header with
 ///   a Show less action, metric cards, composition, source rows with
-///   OpenCode origin split, model bars, 14-day trend, notices, plus a
-///   bottom Show less action), scrollable.
+///   OpenCode origin split, model bars, adaptive trend with grain caption,
+///   notices, plus a bottom Show less action), scrollable.
 ///
 /// Launch at login, pricing, and remote sync live behind the gear button
 /// in the header (a small settings popover), never as always-visible footer
@@ -43,6 +44,16 @@ struct DashboardView: View {
     /// ("OpenCode 0") instead of a dead control.
     var sourceTotals: [SourceChipData]
     var bestMonthKey: String?
+    /// Adaptive trend for the selected scope, computed once per render in
+    /// `TokenBarApp` via `DashboardSnapshot` (zero-filled buckets over the
+    /// full selected range). Chart views render these values only; they do
+    /// no record scanning, so renders stay cheap.
+    var trendBuckets: [TrendBucket]
+    /// Chart title naming the active range and grain ("TODAY BY HOUR"...).
+    var trendTitle: String
+    /// Previous-period comparison for chronological ranges; nil for Best
+    /// and Lifetime, which are not one fixed period.
+    var comparison: TrendComparison?
     @Binding var isLoading: Bool
     @Binding var isExpanded: Bool
     /// True while the on-screen report is previous cached data and the
@@ -375,15 +386,22 @@ struct DashboardView: View {
             TokenIOComparison(stats: stats, compactCount: compactCount, fullCount: fullCount)
             SourceStackedBar(stats: stats, compactCount: compactCount)
             VStack(alignment: .leading, spacing: 4) {
-                Text("LAST 14 DAYS")
+                Text(trendTitle)
                     .font(.caption2)
                     .fontWeight(.semibold)
                     .tracking(0.8)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .accessibilityHidden(true)
-                DailyTrendChart(stats: stats, fullCount: fullCount, maxBars: 14, barHeight: 36)
+                AdaptiveTrendChart(
+                    buckets: trendBuckets,
+                    grain: TrendModel.grain(for: preset),
+                    fullCount: fullCount,
+                    barHeight: 36)
+                TrendComparisonLine(comparison: comparison, fullCount: fullCount)
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Trend, \(trendAccessibilityLabel)")
             Button(action: { isExpanded.toggle() }) {
                 HStack {
                     Text("Show details: sources, models, trend")
@@ -718,9 +736,17 @@ struct DashboardView: View {
 
     private var trendFull: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionEyebrow("DAILY TREND")
-                .accessibilityLabel("Daily trend, last 14 days")
-            DailyTrendChart(stats: stats, fullCount: fullCount, maxBars: 14, barHeight: 64)
+            sectionEyebrow(trendTitle)
+                .accessibilityLabel("Trend, \(trendAccessibilityLabel)")
+            AdaptiveTrendChart(
+                buckets: trendBuckets,
+                grain: TrendModel.grain(for: preset),
+                fullCount: fullCount,
+                barHeight: 64)
+            TrendComparisonLine(comparison: comparison, fullCount: fullCount)
+            Text(trendCaption)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -951,6 +977,51 @@ struct DashboardView: View {
         case .last30Days: return "Range: rolling last 30 days"
         case .bestMonth: return "Range: calendar month with most tokens"
         case .lifetime: return "Range: everything, no date filter"
+        }
+    }
+
+    /// VoiceOver summary of the adaptive trend: grain plus comparison.
+    private var trendAccessibilityLabel: String {
+        var parts = [trendCaptionShort]
+        if let comparison {
+            if comparison.hasBaseline {
+                parts.append("compared with \(comparison.previousLabel)")
+            } else {
+                parts.append("no prior-period data")
+            }
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    private var trendCaptionShort: String {
+        switch preset {
+        case .today: return "hourly trend for today, including empty hours"
+        case .last24Hours: return "hourly trend for the last 24 hours, including empty hours"
+        case .last7Days: return "daily trend for the last 7 days, including empty days"
+        case .last30Days: return "daily trend for the last 30 days, including empty days"
+        case .bestMonth: return "daily trend for the best month"
+        case .lifetime: return "monthly trend for all time"
+        }
+    }
+
+    /// Expanded caption naming the bucket grain and the comparison period.
+    /// Rolling ranges note the calendar-aligned display: buckets follow
+    /// calendar days while the record window stays rolling, so edge days
+    /// may be partial by design.
+    private var trendCaption: String {
+        switch preset {
+        case .today:
+            return "Hourly buckets for the local calendar day, including empty hours. Compared with yesterday."
+        case .last24Hours:
+            return "Hourly buckets for the rolling 24-hour window, including empty hours. Compared with the previous 24 hours."
+        case .last7Days:
+            return "Daily buckets for the rolling 7-day window, including empty days. Compared with the previous 7 days. Buckets are calendar-aligned; the record window stays rolling."
+        case .last30Days:
+            return "Daily buckets for the rolling 30-day window, including empty days. Compared with the previous 30 days. Buckets are calendar-aligned; the record window stays rolling."
+        case .bestMonth:
+            return "Daily buckets for the best month. No previous-period comparison: it is not one fixed chronological period."
+        case .lifetime:
+            return "Monthly buckets for the full history. No previous-period comparison: it is not one fixed chronological period."
         }
     }
 

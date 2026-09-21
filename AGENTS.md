@@ -10,7 +10,7 @@ Costs are estimates only, never a bill. Subscription use is not an API invoice.
 
 ## Current product scope
 
-In scope: local token totals, source/range filters, per-source and per-model breakdowns, daily trend, best-month, sanitized warnings, startup cache, launch-at-login toggle, opt-in pricing refresh with offline static fallback, opt-in remote-host SSH snapshot pull (user-configured alias, remote path/command, optional origin label) with validate-before-replace and last-good-cache fallback.
+In scope: local token totals, source/range filters, per-source and per-model breakdowns, adaptive trend (hourly/daily/monthly per range, zero-filled) with previous-period comparison, best-month, sanitized warnings, startup cache, launch-at-login toggle, opt-in pricing refresh with offline static fallback, opt-in remote-host SSH snapshot pull (user-configured alias, remote path/command, optional origin label) with validate-before-replace and last-good-cache fallback.
 
 Out of scope: cloud dashboard, provider auth, prompt/message storage, auto-updater, Windows/Linux app target, new agent sources without a dedicated proposal plus fixtures plus tests plus docs.
 
@@ -21,12 +21,12 @@ Do not invent integrations, pricing sources, or product scope.
 ```
 Package.swift
 Sources/TokenBarCore/   # pure logic, Foundation only (key files, non-exhaustive)
-  Models, CodexParser, ClaudeParser, OpenCodeStore, Aggregator,
+  Models, CodexParser, ClaudeParser, OpenCodeStore, Aggregator, TrendModel,
   Pricing, PricingCatalog, PricingService, OpenCodeSync, Store, StartupReportCache, Report
 Sources/TokenBarCLI/    # thin --preset/--source/--all-presets/--json/--refresh-pricing/--sync-now front end
 Sources/TokenBarApp/    # SwiftUI menu-bar shell (macOS 14+, key files, non-exhaustive)
   TokenBarApp, DashboardView, SettingsView, PricingController, OpenCodeSyncController, LaunchAtLoginController
-Tests/TokenBarCoreTests/  # key areas, non-exhaustive: parsers, aggregator, report, pricing catalog, opencode sync
+Tests/TokenBarCoreTests/  # key areas, non-exhaustive: parsers, aggregator, trend model, report, pricing catalog, opencode sync
 Fixtures/               # synthetic samples only
 scripts/                # key scripts, non-exhaustive: show-usage, run-token-bar, build-app,
                         # package-release, export-opencode-usage, verify_logic, check-privacy
@@ -37,9 +37,9 @@ Rules: all semantics live in `TokenBarCore`. App and CLI are thin renderers. `Pr
 
 ## Current UI behavior
 
-Dashboard popover is 400pt, dark, compact first, no scroll. Compact shows hero total, estimated cost, Source chips (All/Codex/OpenCode/Claude), Range chips (Today/24H/7D/30D/Best/All), paired input/output comparison (log-scaled bars with exact counts, never a composition ring), source bar, 14-day mini trend, Details action, and an updated/notices footer.
+Dashboard popover is 400pt, dark, compact first, no scroll. Compact shows hero total, estimated cost, Source chips (All/Codex/OpenCode/Claude), Range chips (Today/24H/7D/30D/Best/All), paired input/output comparison (log-scaled bars with exact counts, never a composition ring), source bar, adaptive mini trend (hourly for Today/24H, daily for 7D/30D/Best, monthly for All, zero-filled) with previous-period comparison line, Details action, and an updated/notices footer.
 
-Expanded Details is scrollable: metric cards, composition card with input-vs-output ring, source rows with OpenCode local/remote sub-lines, top-5 models, full trend, notices, Show less to collapse.
+Expanded Details is scrollable: metric cards, composition card with input-vs-output ring, source rows with OpenCode local/remote sub-lines, top-5 models, full adaptive trend with grain caption and comparison, notices, Show less to collapse.
 
 Launch-at-login, pricing, and remote sync controls are behind Settings: the gear button in the dashboard header opens the Settings popover (`SettingsView`). Usage filters and details remain in the dashboard, never in Settings.
 
