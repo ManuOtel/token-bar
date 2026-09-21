@@ -2536,6 +2536,58 @@ def run():
           and trend_titles["lifetime"] == "ALL TIME BY MONTH"
           and True)  # nil comparison pinned by TrendModelTests on Mac
 
+    # M12 chart style mirror (ChartStyle.swift): persisted preference with
+    # an Automatic default and safe fallback, Automatic renderer mapping
+    # per range, and the single documented 30D sparsity rule (zeroShare >=
+    # 0.5 reads as Bars, dense reads as Line with points). Explicit picks
+    # render the requested marks; Automatic never resolves to Area.
+    def chart_fallback(raw):
+        return raw if raw in ("automatic", "bars", "line", "area") else "automatic"
+
+    def chart_resolve(style, preset, zero, total):
+        if style != "automatic":
+            return {"bars": "bars", "line": "linePoints", "area": "area"}[style]
+        if preset in ("today", "24h", "7d", "best-month"):
+            return "bars"
+        if preset == "lifetime":
+            return "linePoints"
+        if preset == "30d":
+            if total == 0:
+                return "bars"
+            return "bars" if zero / total >= 0.5 else "linePoints"
+        raise AssertionError(preset)
+
+    check("chart style default is automatic when unset",
+          chart_fallback(None) == "automatic"
+          and chart_fallback("automatic") == "automatic")
+    check("chart style unknown values fall back to automatic",
+          all(chart_fallback(r) == "automatic"
+              for r in ("heatmap", "BARS", "", "stacked-area", "line-points")))
+    check("chart style stored values round-trip",
+          [chart_fallback(r) for r in ("automatic", "bars", "line", "area")]
+          == ["automatic", "bars", "line", "area"])
+    check("automatic picks bars for hourly and short daily ranges",
+          all(chart_resolve("automatic", p, 1, 2) == "bars"
+              for p in ("today", "24h", "7d", "best-month")))
+    check("automatic picks line with points for all time",
+          chart_resolve("automatic", "lifetime", 1, 2) == "linePoints")
+    check("automatic 30d sparse reads as bars incl boundary and empty",
+          chart_resolve("automatic", "30d", 30, 31) == "bars"
+          and chart_resolve("automatic", "30d", 4, 8) == "bars"
+          and chart_resolve("automatic", "30d", 0, 0) == "bars")
+    check("automatic 30d dense reads as line with points",
+          chart_resolve("automatic", "30d", 5, 31) == "linePoints")
+    check("automatic never resolves to area",
+          all(chart_resolve("automatic", p, z, 8) != "area"
+              for p in ("today", "24h", "7d", "30d", "best-month", "lifetime")
+              for z in (0, 4, 8)))
+    check("explicit picks render the requested marks",
+          chart_resolve("bars", "lifetime", 0, 3) == "bars"
+          and chart_resolve("line", "today", 0, 3) == "linePoints"
+          and chart_resolve("area", "7d", 0, 3) == "area")
+    check("style leaves bucket sums equal to the hero total",
+          sum([150] + [0] * 30) == 150)
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")

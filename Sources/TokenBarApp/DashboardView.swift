@@ -69,6 +69,14 @@ struct DashboardView: View {
     var onSyncNow: () -> Void
     var onPollTick: () -> Void
     @State private var showSettings = false
+    // Trend chart style preference (M12): one persisted string, Automatic
+    // default, unknown values fall back to Automatic. Read through
+    // AppStorage so it applies at launch before first render; reset is
+    // explicit only (the Reset control below), never a silent migration.
+    // Compact always renders the Automatic mapping; the picker lives in
+    // expanded Details only.
+    @AppStorage(ChartStyle.storageKey) private var chartStyleRaw: String = ChartStyle.defaultStyle.rawValue
+    private var chartStyle: ChartStyle { ChartStyle(storedRawValue: chartStyleRaw) }
     // Liquid Glass inputs, read once per render: custom glass surfaces are
     // skipped under Reduce Transparency, and fallback strokes strengthen
     // under Increase Contrast. See LiquidGlass.swift.
@@ -415,6 +423,10 @@ struct DashboardView: View {
                 AdaptiveTrendChart(
                     buckets: trendBuckets,
                     grain: TrendModel.grain(for: preset),
+                    preset: preset,
+                    // Compact stays compact: always the Automatic mapping
+                    // at mini size, no style control, no added height.
+                    style: .automatic,
                     fullCount: fullCount,
                     barHeight: 36)
                 // Omitted (not EmptyView) when there is no previous period
@@ -425,7 +437,7 @@ struct DashboardView: View {
                 }
             }
             .accessibilityElement(children: .contain)
-            .accessibilityLabel("Trend, \(trendAccessibilityLabel)")
+            .accessibilityLabel("Trend, \(trendAccessibilityLabel(for: .automatic))")
             Button(action: { isExpanded.toggle() }) {
                 HStack {
                     Text("Show details: sources, models, trend")
@@ -760,11 +772,38 @@ struct DashboardView: View {
 
     private var trendFull: some View {
         VStack(alignment: .leading, spacing: 6) {
-            sectionEyebrow(trendTitle)
-                .accessibilityLabel("Trend, \(trendAccessibilityLabel)")
+            // Chart style menu: expanded Details only, next to the full
+            // trend title and grain caption. Native menu control (Tab
+            // reachable, visible focus ring); standard surface, no glass
+            // on the chart or the menu. One selection applies to all
+            // ranges; compact keeps the Automatic mapping.
+            HStack(spacing: 8) {
+                sectionEyebrow(trendTitle)
+                    .accessibilityLabel("Trend, \(trendAccessibilityLabel(for: chartStyle))")
+                Spacer()
+                Picker("Chart style", selection: $chartStyleRaw) {
+                    ForEach(ChartStyle.allCases, id: \.self) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                .help("Choose the trend chart style for all ranges")
+                .accessibilityLabel("Chart style")
+                .accessibilityHint("Automatic picks bars or a line from the range; Bars, Line with points, and Area apply to all ranges")
+                if chartStyle != .automatic {
+                    Button("Reset") { chartStyleRaw = ChartStyle.defaultStyle.rawValue }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Reset the chart style to Automatic")
+                        .accessibilityLabel("Reset chart style")
+                        .accessibilityHint("Returns the trend chart style to Automatic")
+                }
+            }
             AdaptiveTrendChart(
                 buckets: trendBuckets,
                 grain: TrendModel.grain(for: preset),
+                preset: preset,
+                style: chartStyle,
                 fullCount: fullCount,
                 barHeight: 64)
             // Same empty-gap guard as the compact trend: nil (Best/
@@ -1008,9 +1047,12 @@ struct DashboardView: View {
         }
     }
 
-    /// VoiceOver summary of the adaptive trend: grain plus comparison.
-    private var trendAccessibilityLabel: String {
-        var parts = [trendCaptionShort]
+    /// VoiceOver summary of the adaptive trend: resolved style, grain,
+    /// range, and comparison. Every style exposes this series summary;
+    /// empty and no-baseline states read their explicit copy.
+    private func trendAccessibilityLabel(for style: ChartStyle) -> String {
+        let resolved = style.resolved(for: preset, buckets: trendBuckets)
+        var parts = ["\(resolved.displayName) chart", trendCaptionShort]
         if let comparison {
             if comparison.hasBaseline {
                 parts.append("compared with \(comparison.previousLabel)")
