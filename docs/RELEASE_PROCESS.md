@@ -25,7 +25,8 @@ Before any implementation, write down in the issue or PR description:
   which checks prove it (Swift tests, `verify_logic.py`, shell syntax,
   privacy scan, contract scripts).
 - Whether it is docs-only/process-only (no `VERSION` bump, no release)
-  or user-visible (needs a version decision; see step 6).
+  or a product change intended for a release (needs a version decision;
+  see step 6).
 
 ## 2. Worker branch and worktree
 
@@ -81,14 +82,15 @@ reviewed, green PR merge.
 
 Merge feature PRs first; decide the version only when cutting a release.
 
-- Patch (`x.y.Z`): fixes only, no user-visible behavior change.
+- Patch (`x.y.Z`): product fixes, including fixes without user-visible
+  behavior change.
 - Minor (`x.Y.0`): backward-compatible user-visible features (new
   filters, views, settings, sync behavior, pricing coverage).
 - Major (`X.0.0`): breaking changes (storage paths, CLI output shape,
   dropped OS support, removed flags).
 - Docs-only and process-only changes do not bump `VERSION` and do not
-  create a release. `VERSION` moves only for user-visible product
-  fixes/features (per the policy above).
+  create a release. `VERSION` moves only for product changes intended
+  for a release (per the policy above).
 - The release PR updates `VERSION` and `CHANGELOG.md` together, in the
   same PR, and nothing else. Every dollar figure in release notes
   carries the estimate disclaimer (estimate only; static table, not a
