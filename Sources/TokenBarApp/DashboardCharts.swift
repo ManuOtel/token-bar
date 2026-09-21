@@ -5,11 +5,134 @@ import TokenBarCore
 ///
 /// All views render `AggregatedStats` via `DashboardInsights` shares.
 /// Cached tokens read as a subset of input and reasoning as a subset of
-/// output: the composition ring splits the total into input vs output only,
-/// and subset ratios appear as captions so charts never imply
-/// double-counting.
+/// output: the expanded composition ring splits the total into input vs
+/// output only, and subset ratios appear as captions so charts never imply
+/// double-counting. The compact summary uses a paired input/output bar
+/// comparison instead of the ring: a linear ring goes blind when one side
+/// dominates (for example 7.2B input vs 19.6M output leaves the output arc
+/// at ~0.3%, effectively invisible), while the paired bars keep exact
+/// counts prominent and use a labeled log scale plus a single 6%
+/// visibility floor so the smaller side stays discoverable. Bar widths are
+/// log-scaled, never shares; shares render via
+/// `DashboardInsights.percentLabel` (whole percent rounded, one decimal
+/// under 1%, so a small nonzero share never reads "0%"). Zero stays zero:
+/// a zero side renders no bar and never trips the floor.
 
-// MARK: - Token composition ring
+// MARK: - Compact input/output comparison (paired bars)
+
+/// Truthful compact replacement for the proportional ring: two labeled
+/// horizontal bars with exact counts, log-scaled widths, and subset
+/// captions. Cached stays a caption on the input row and reasoning on the
+/// output row, never a third bar, so neither reads as additional tokens.
+/// Widths use the single `DashboardInsights.ioComparison` 6% floor (zero
+/// stays zero); there is no extra point floor in this view.
+struct TokenIOComparison: View {
+    var stats: AggregatedStats
+    var compactCount: (Int) -> String
+    var fullCount: (Int) -> String
+
+    var body: some View {
+        let cmp = DashboardInsights.ioComparison(for: stats)
+        let comp = DashboardInsights.composition(for: stats)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("INPUT VS OUTPUT")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .tracking(0.8)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityHidden(true)
+            if cmp.isEmpty {
+                Text("No input/output split in this view.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("No input or output tokens in this view")
+            } else {
+                ioRow(
+                    color: .blue,
+                    label: "Input",
+                    value: cmp.inputTokens,
+                    share: comp.inputShare,
+                    display: cmp.inputDisplay
+                )
+                ioRow(
+                    color: .orange,
+                    label: "Output",
+                    value: cmp.outputTokens,
+                    share: comp.outputShare,
+                    display: cmp.outputDisplay
+                )
+                Text("Cached \(compactCount(stats.cachedTokens)) · \(DashboardInsights.percentLabel(for: comp.cachedShareOfInput)) of input (subset)")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .accessibilityLabel("Cached \(fullCount(stats.cachedTokens)) tokens, \(DashboardInsights.percentSpoken(for: comp.cachedShareOfInput)) of input, a subset")
+                Text("Reasoning \(compactCount(stats.reasoningTokens)) · \(DashboardInsights.percentLabel(for: comp.reasoningShareOfOutput)) of output (subset)")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .accessibilityLabel("Reasoning \(fullCount(stats.reasoningTokens)) tokens, \(DashboardInsights.percentSpoken(for: comp.reasoningShareOfOutput)) of output, a subset")
+                Text(scaleFootnote(floored: cmp.smallerIsFloored))
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .accessibilityLabel(scaleFootnote(floored: cmp.smallerIsFloored))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Input versus output comparison")
+    }
+
+    private func ioRow(color: Color, label: String, value: Int, share: Double, display: Double) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            Text(label)
+                .font(.callout)
+                .lineLimit(1)
+                .frame(width: 46, alignment: .leading)
+                .accessibilityHidden(true)
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.primary.opacity(0.12))
+                        .frame(height: 8)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(color.opacity(0.9))
+                        .frame(width: proxy.size.width * CGFloat(display), height: 8)
+                }
+                .frame(maxHeight: .infinity, alignment: .center)
+            }
+            .frame(height: 10)
+            .accessibilityHidden(true)
+            VStack(alignment: .trailing, spacing: 0) {
+                Text(fullCount(value))
+                    .font(.callout)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(DashboardInsights.percentLabel(for: share))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 92, alignment: .trailing)
+            .accessibilityHidden(true)
+        }
+        .help("\(label): \(fullCount(value)) tokens, \(DashboardInsights.percentLabel(for: share)) of total")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label) \(fullCount(value)) tokens, \(DashboardInsights.percentSpoken(for: share)) of total")
+        .accessibilityHint("Bar length uses a log scale so small values stay visible")
+    }
+
+    private func scaleFootnote(floored: Bool) -> String {
+        if floored {
+            return "Log-scale bars (widths are not shares); 6% minimum keeps the smaller side visible. Counts exact; % rounded, one decimal under 1%."
+        }
+        return "Log-scale bars so small values stay visible; widths are not shares. Counts exact; % rounded, one decimal under 1%."
+    }
+}
+
+// MARK: - Token composition ring (expanded Details only)
 
 struct TokenCompositionRing: View {
     var stats: AggregatedStats
@@ -35,8 +158,8 @@ struct TokenCompositionRing: View {
             .frame(width: 64, height: 64)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Token composition")
-            .accessibilityValue("Input \(Int(comp.inputShare * 100)) percent, output \(Int(comp.outputShare * 100)) percent")
-            .help("Input \(Int(comp.inputShare * 100))% / output \(Int(comp.outputShare * 100))% of total")
+            .accessibilityValue("Input \(DashboardInsights.percentSpoken(for: comp.inputShare)), output \(DashboardInsights.percentSpoken(for: comp.outputShare))")
+            .help("Input \(DashboardInsights.percentLabel(for: comp.inputShare)) / output \(DashboardInsights.percentLabel(for: comp.outputShare)) of total")
             VStack(alignment: .leading, spacing: 3) {
                 legendDot(color: .blue, label: "Input \(compactCount(stats.inputTokens))")
                 legendDot(color: .orange, label: "Output \(compactCount(stats.outputTokens))")
@@ -82,7 +205,7 @@ struct SourceStackedBar: View {
             .frame(height: 8)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Source distribution")
-            .accessibilityValue(shares.map { "\($0.key) \(Int($0.share * 100)) percent" }.joined(separator: ", "))
+            .accessibilityValue(shares.map { "\($0.key) \(DashboardInsights.percentSpoken(for: $0.share))" }.joined(separator: ", "))
             HStack(spacing: 10) {
                 ForEach(Self.order, id: \.self) { key in
                     let entry = byKey[key]
@@ -156,9 +279,9 @@ struct ModelDistributionBars: View {
                             .font(.callout).monospacedDigit().lineLimit(1)
                             .frame(width: 52, alignment: .trailing)
                     }
-                    .help("\(item.key): \(fullCount(item.totalTokens)) tokens, \(item.requests) requests, \(Int(item.share * 100))% of total")
+                    .help("\(item.key): \(fullCount(item.totalTokens)) tokens, \(item.requests) requests, \(DashboardInsights.percentLabel(for: item.share)) of total")
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("\(item.key), \(Int(item.share * 100)) percent of total")
+                    .accessibilityLabel("\(item.key), \(DashboardInsights.percentSpoken(for: item.share)) of total")
                 }
             }
         }

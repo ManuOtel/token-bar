@@ -37,9 +37,9 @@ Rules: all semantics live in `TokenBarCore`. App and CLI are thin renderers. `Pr
 
 ## Current UI behavior
 
-Dashboard popover is 400pt, dark, compact first, no scroll. Compact shows hero total, estimated cost, Source chips (All/Codex/OpenCode/Claude), Range chips (Today/24H/7D/30D/Best/All), composition ring, source bar, 14-day mini trend, Details action, and an updated/notices footer.
+Dashboard popover is 400pt, dark, compact first, no scroll. Compact shows hero total, estimated cost, Source chips (All/Codex/OpenCode/Claude), Range chips (Today/24H/7D/30D/Best/All), paired input/output comparison (log-scaled bars with exact counts, never a composition ring), source bar, 14-day mini trend, Details action, and an updated/notices footer.
 
-Expanded Details is scrollable: metric cards, composition card, source rows with OpenCode local/remote sub-lines, top-5 models, full trend, notices, Show less to collapse.
+Expanded Details is scrollable: metric cards, composition card with input-vs-output ring, source rows with OpenCode local/remote sub-lines, top-5 models, full trend, notices, Show less to collapse.
 
 Launch-at-login, pricing, and remote sync controls are behind Settings: the gear button in the dashboard header opens the Settings popover (`SettingsView`). Usage filters and details remain in the dashboard, never in Settings.
 

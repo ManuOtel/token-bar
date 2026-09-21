@@ -125,9 +125,9 @@ public struct DashboardSnapshot: Hashable, Sendable {
     }
 
     /// Menu-bar title formatting. Delegates to the shared
-    /// `TokenCountFormat.compact` so the menu title, source chips/rows, ring
-    /// legends, model bars, and every other compact count share one unit
-    /// contract (raw, k, M, B, T with rounding promotion at each boundary).
+    /// `TokenCountFormat.compact` so the menu title, source chips/rows,
+    /// composition legends, model bars, and every other compact count share
+    /// one unit contract (raw, k, M, B, T with rounding promotion at each boundary).
     public static func menuTitle(forTotal total: Int) -> String {
         TokenCountFormat.compact(total)
     }

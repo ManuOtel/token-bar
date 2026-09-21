@@ -2,8 +2,8 @@ import Foundation
 
 /// Shared compact token-count formatter for menu-bar and dashboard display.
 ///
-/// Single unit threshold source so the menu title, source chips/rows, ring
-/// legends, model bars, and any other compact count read identically for the
+/// Single unit threshold source so the menu title, source chips/rows,
+/// composition legends, model bars, and any other compact count read identically for the
 /// same value. Full counts, tooltips, and accessibility values stay exact and
 /// are unaffected.
 ///

@@ -8,8 +8,11 @@ import TokenBarCore
 /// variants stay legible.
 ///
 /// - Compact (initial): hero total, estimated cost, source/range controls,
-///   a compact visual summary (composition ring, source bar, mini trend),
-///   and a clear Details action. Fits a ~400pt popover without scrolling.
+///   a compact visual summary (paired input/output comparison, source bar,
+///   mini trend), and a clear Details action. Fits a ~400pt popover without
+///   scrolling. The comparison is a dual-bar view, not a proportional ring:
+///   exact input/output counts stay prominent and log-scaled bars keep a
+///   much smaller side discoverable.
 /// - Expanded (Details): the full readable breakdown (section header with
 ///   a Show less action, metric cards, composition, source rows with
 ///   OpenCode origin split, model bars, 14-day trend, notices, plus a
@@ -342,37 +345,34 @@ struct DashboardView: View {
     // MARK: - Compact summary (no scroll)
 
     private var compactSummary: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("TOTAL IN VIEW")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .tracking(0.8)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .accessibilityHidden(true)
-                    Text(fullCount(stats.totalTokens))
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .accessibilityLabel("\(fullCount(stats.totalTokens)) tokens in \(rangeLongLabel), \(sourceLongLabel(source))")
-                    Text("≈ \(costString(stats.estimatedCostUSD)) est.")
-                        .font(.callout)
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                    Text("\(stats.requests) req · \(stats.sessions) sess · \(rangeShortLabel(preset))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                TokenCompositionRing(stats: stats, compactCount: compactCount)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("TOTAL IN VIEW")
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .accessibilityHidden(true)
+                Text(fullCount(stats.totalTokens))
+                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .accessibilityLabel("\(fullCount(stats.totalTokens)) tokens in \(rangeLongLabel), \(sourceLongLabel(source))")
+                Text("≈ \(costString(stats.estimatedCostUSD)) est.")
+                    .font(.callout)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                Text("\(stats.requests) req · \(stats.sessions) sess · \(rangeShortLabel(preset))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            TokenIOComparison(stats: stats, compactCount: compactCount, fullCount: fullCount)
             SourceStackedBar(stats: stats, compactCount: compactCount)
             VStack(alignment: .leading, spacing: 4) {
                 Text("LAST 14 DAYS")
@@ -615,7 +615,7 @@ struct DashboardView: View {
                 .accessibilityLabel("Composition, input versus output split")
             TokenCompositionRing(stats: stats, compactCount: compactCount)
             let comp = DashboardInsights.composition(for: stats)
-            Text("Ring splits the total into input (\(Int(comp.inputShare * 100))%) vs output (\(Int(comp.outputShare * 100))%). Cached (\(Int(comp.cachedShareOfInput * 100))% of input) and reasoning (\(Int(comp.reasoningShareOfOutput * 100))% of output) are subsets, never added on top.")
+            Text("Ring splits the total into input (\(DashboardInsights.percentLabel(for: comp.inputShare))) vs output (\(DashboardInsights.percentLabel(for: comp.outputShare))). Cached (\(DashboardInsights.percentLabel(for: comp.cachedShareOfInput)) of input) and reasoning (\(DashboardInsights.percentLabel(for: comp.reasoningShareOfOutput)) of output) are subsets, never added on top.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
