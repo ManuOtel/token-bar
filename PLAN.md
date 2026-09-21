@@ -298,13 +298,12 @@ require all of:
 Acceptance for this milestone is the accepted written plan only: no
 source, CI, packaging, or site-behavior change lands under M11.
 
-### M12 - Configurable chart styles implementation release
+### M12 - Configurable chart styles (shipped as v0.6.0)
 
-Status: implementation milestone. The written proposal is accepted
-(`docs/CHART_STYLE_PROPOSAL.md`); this milestone tracks the
-implementation feature PR plus its review, CI, and visual gates and
-the eventual minor-version release step. M11 stays intact and
-unchanged.
+Status: completed and released as v0.6.0. The written proposal is
+accepted (`docs/CHART_STYLE_PROPOSAL.md`); the implementation feature
+PR and the minor-version release step below both landed. M11 stays
+intact and unchanged as plan only.
 
 Scope: implement the accepted proposal only: Automatic (default),
 Bars, Line with points, and Area over the existing adaptive
@@ -320,9 +319,32 @@ only with no extra scans, and privacy and fixture-only evidence
 rules. A calendar heatmap stays explicitly out of scope. Area is
 total-volume shape only, never stacked multi-source content.
 
-Acceptance:
+Shipped evidence:
 
-- Feature PR delivers the style menu, the three renderers plus
+- Feature PR #70 merged at
+  `7b00d39993e19b6e7b5d90e467964940c055c478`
+  (`feat/configurable-chart-styles`).
+- Release PR #71 merged at
+  `0f6d83dd0dbddbd3ea4111faa364c1d3561a9ddc`
+  (`chore/release-0.6.0`; `VERSION` plus `CHANGELOG.md` plus the
+  site version sync only, no product or process changes).
+- Tag `v0.6.0` on `main` HEAD; release workflow `35620597510`
+  success; Pages workflow `35620449707` success; local verified
+  install of `0.6.0`.
+- Visual evidence, stated exactly with no full-matrix claim: the
+  synthetic macOS 26 local candidate showed the compiler/runtime
+  Liquid Glass path; the public macOS 14 CI artifact and the
+  installed release used the documented adaptive fallback. Compact
+  and expanded light release smoke passed with no
+  clipping/overflow/extra in-popover bands. The chart-style menu
+  exposed Automatic/Bars/Line with points/Area and persistence was
+  exercised. Dark appearance, Reduce Transparency, and Increase
+  Contrast states not rendered in the release smoke are explicit
+  follow-up gaps, not passes.
+
+Acceptance (as shipped):
+
+- Feature PR delivered the style menu, the three renderers plus
   Automatic with the section 4 mapping from
   `docs/CHART_STYLE_PROPOSAL.md`, persistence with Automatic
   fallback, accessibility labels with Audio Graph support where the
@@ -346,27 +368,24 @@ Acceptance:
   (`scripts/test-popover.sh` extended in the same PR where the
   popover contract requires it, plus `test-versioning.sh`,
   `test-release.sh`, `test-site.sh` as touched) and
-  `git diff --check` clean; Mac render pass over the
-  `docs/SECURITY_AND_VISUAL_QA.md` section 3 matrix (compact and
-  expanded, light and dark, empty, zero, no-comparison, notices,
-  Reduce Transparency, Increase Contrast, accessibility, focus,
-  clipping), built from synthetic fixtures under `Fixtures/` only
-  with privacy-safe handling (no real-data screenshots, no
-  environment dumps, no real paths). A state that was not rendered
-  is a gap, not a pass.
-- Eventual minor-version release step after the feature PR merges:
-  release PR bumps `VERSION` plus `CHANGELOG.md` only (no product
-  or process changes), then the maintainer tags `main` HEAD as
-  exactly `v<VERSION>` and the tag workflow publishes the release,
+  `git diff --check` clean; Mac render evidence recorded exactly as
+  the shipped-evidence list above, built from synthetic fixtures
+  under `Fixtures/` only with privacy-safe handling (no
+  real-data screenshots, no environment dumps, no real paths). A
+  state that was not rendered is a gap, not a pass.
+- Minor-version release step landed after the feature PR merged:
+  release PR bumped `VERSION` plus `CHANGELOG.md` only (no product
+  or process changes), then the maintainer tagged `main` HEAD as
+  exactly `v<VERSION>` and the tag workflow published the release,
   followed by published-asset verification and a verified install
   with the release-candidate visual smoke per
   `docs/SECURITY_AND_VISUAL_QA.md` section 5. Feature PRs and
-  release PRs stay separate per `docs/RELEASE_PROCESS.md`. The
+  release PRs stayed separate per `docs/RELEASE_PROCESS.md`. The
   release mapping lives in `docs/RELEASE_ROADMAP.md`: v0.5.1
-  baseline; next minor release for M12 charts plus Liquid Glass
-  visual QA; following candidate for the Settings-initiated updater
-  (`docs/AUTO_UPDATE_PROPOSAL.md`) only after its security and
-  signing requirements are met.
+  baseline; v0.6.0 shipped for M12 charts plus Liquid Glass visual
+  QA evidence; following v0.7.0 candidate for the
+  Settings-initiated updater (`docs/AUTO_UPDATE_PROPOSAL.md`) only
+  after its security and signing requirements are met.
 
 Non-goals:
 
@@ -379,7 +398,7 @@ Non-goals:
   plus `docs/AUTO_UPDATE_PROPOSAL.md` and stays a candidate until
   the signing and notarization infrastructure exists.
 
-Release recommendation: the planning edits under this milestone are
+Release record: the M12 implementation shipped as v0.6.0 through
+the feature PR plus release PR above. This planning edit is
 docs-only (no VERSION bump, no CHANGELOG entry, no release
-artifact). The M12 implementation ships only through the feature PR
-above, then follows the normal version and release path.
+artifact, no source or site behavior change).

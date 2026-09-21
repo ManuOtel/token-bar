@@ -21,31 +21,44 @@ lifecycle (feature PR then release PR, exact `v<VERSION>` tag from
   strips. No change to token math, pricing, source semantics, privacy
   boundaries, or sync behavior. macOS 14 stays the deployment target.
   See `CHANGELOG.md` section 0.5.1.
-- Next minor release (planned, for example v0.6.0): M12 configurable
-  chart styles implementation plus Liquid Glass visual QA. Scope is
-  the accepted `docs/CHART_STYLE_PROPOSAL.md` only: Automatic
-  (default), Bars, Line with points, and Area over the existing
-  adaptive `TrendModel` and `DashboardSnapshot`, with the Chart style
-  menu in expanded Details, a persisted preference, compact kept
-  compact, per-range visual rules, zero-filled buckets, linear trend
-  scale, comparison annotations, tooltips, keyboard and focus
-  behavior, VoiceOver labels with Audio Graph support where the
-  platform provides it, Reduce Transparency and Increase Contrast
-  handling, render from snapshot only with no extra scans, and the
-  proposal test list. Calendar heatmap, per-source and per-model
-  trend series, stacked areas, per-range style memory, and log-scaled
-  trend axis stay out of scope. The release ships only after the M12
-  feature PR lands reviewed and green (see PLAN.md M12), then follows
-  the normal version and release path: release PR (`VERSION` plus
-  `CHANGELOG.md` only), exact tag, published-asset verification,
-  verified install.
-- Following candidate (candidate only, later minor such as v0.7.0):
-  Settings-initiated updater after security and signing requirements
-  are met. Scope is the dedicated `docs/AUTO_UPDATE_PROPOSAL.md`
-  only, and only after its acceptance plus the signing and
-  notarization infrastructure it requires. There is no updater work
-  in the next minor release. Until that infrastructure exists, all
-  releases stay download-only (see the proposal section 1).
+- v0.6.0 (shipped): M12 configurable chart styles plus Liquid
+  Glass QA evidence. Scope is the accepted
+  `docs/CHART_STYLE_PROPOSAL.md` only: Automatic (default), Bars,
+  Line with points, and Area over the existing adaptive
+  `TrendModel` and `DashboardSnapshot`, with the Chart style menu
+  in expanded Details, a persisted preference, compact kept
+  compact, per-range visual rules, zero-filled buckets, linear
+  trend scale, comparison annotations, tooltips, keyboard and
+  focus behavior, VoiceOver labels with Audio Graph support where
+  the platform provides it, Reduce Transparency and Increase
+  Contrast handling, render from snapshot only with no extra
+  scans, and the proposal test list. Calendar heatmap,
+  per-source and per-model trend series, stacked areas, per-range
+  style memory, and log-scaled trend axis stayed out of scope. No
+  updater work shipped in this release. Shipped through feature
+  PR #70 merged at
+  `7b00d39993e19b6e7b5d90e467964940c055c478` and release PR #71
+  merged at `0f6d83dd0dbddbd3ea4111faa364c1d3561a9ddc`, tag
+  `v0.6.0`, release workflow `35620597510` success, Pages
+  workflow `35620449707` success, and a local verified install of
+  `0.6.0`. Visual evidence, stated exactly with no full-matrix
+  claim: the synthetic macOS 26 local candidate showed the
+  compiler/runtime Liquid Glass path; the public macOS 14 CI
+  artifact and the installed release used the documented adaptive
+  fallback. Compact and expanded light release smoke passed with
+  no clipping/overflow/extra in-popover bands. The chart-style
+  menu exposed Automatic/Bars/Line with points/Area and
+  persistence was exercised. Dark appearance, Reduce
+  Transparency, and Increase Contrast states not rendered in the
+  release smoke are explicit follow-up gaps, not passes. See
+  `CHANGELOG.md` section 0.6.0 and `PLAN.md` M12.
+- Following candidate (candidate only, v0.7.0): Settings-initiated
+  updater after security and signing requirements are met. Scope
+  is the dedicated `docs/AUTO_UPDATE_PROPOSAL.md` only, and only
+  after its acceptance plus the signing and notarization
+  infrastructure it requires. There was no updater work in v0.6.0.
+  Until that infrastructure exists, all releases stay
+  download-only (see the proposal section 1).
 
 Feature and release PRs stay separate: a feature PR implements one
 scoped change and merges to `main` after review and green checks; it
