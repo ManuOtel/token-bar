@@ -79,14 +79,15 @@ back to the built app's `Info.plist`, then to it.
 
 ### Version policy (SemVer)
 
-- Patch (`x.y.Z`): fixes only, no user-visible behavior change.
+- Patch (`x.y.Z`): product fixes, including fixes without user-visible
+  behavior change.
 - Minor (`x.Y.0`): backward-compatible user-visible features
   (new filters, views, settings, sync behavior, pricing coverage).
 - Major (`X.0.0`): breaking changes (storage paths, CLI output shape,
   dropped OS support, removed flags).
 - Docs-only and process-only changes do not bump `VERSION` and do not
-  create a release. `VERSION` moves only for user-visible product
-  fixes/features per the policy above.
+  create a release. `VERSION` moves only for product changes intended
+  for a release per the policy above.
 - Docs and examples never hardcode a release number as the default: use
   the bare scripts (they read `VERSION`) or derive it with
   `VERSION="$(tr -d ' \t\r\n' < VERSION)"`. Historical records (for
