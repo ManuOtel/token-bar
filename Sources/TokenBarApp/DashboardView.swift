@@ -75,6 +75,19 @@ struct DashboardView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var colorContrast
     private var increaseContrast: Bool { colorContrast == .increased }
+    // Layout guards: these mirror the internal conditions of statusBanner
+    // and notices so the parent omits them entirely when they would render
+    // EmptyView. A bare EmptyView child still consumes VStack spacing,
+    // leaving a bare window-material gap (a light/translucent strip in
+    // light appearance) where content should hug. Hoisting the condition
+    // keeps the content-sized popover tight with no behavior change when
+    // content is present. Plain `if`, macOS 14-safe.
+    private var showsStatusBanner: Bool {
+        isStaleCache || (isLoading && !report.records.isEmpty && scopedCount > 0)
+    }
+    private var hasNotices: Bool {
+        !ReportFormatter.sanitizeWarnings(report.warnings).isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -82,7 +95,9 @@ struct DashboardView: View {
             Divider()
                 .padding(.vertical, -2)
                 .accessibilityHidden(true)
-            statusBanner
+            if showsStatusBanner {
+                statusBanner
+            }
             sourceSection
             rangeSection
             if report.records.isEmpty {
@@ -101,7 +116,9 @@ struct DashboardView: View {
                         sourceBreakdown
                         modelBreakdown
                         trendFull
-                        notices
+                        if hasNotices {
+                            notices
+                        }
                         collapseFooter
                     }
                 }
@@ -118,7 +135,9 @@ struct DashboardView: View {
                 .frame(minHeight: 280, maxHeight: 380)
             }
             if report.records.isEmpty || scopedCount == 0 {
-                notices
+                if hasNotices {
+                    notices
+                }
             } else if !isExpanded {
                 compactFooter
             }
@@ -398,7 +417,12 @@ struct DashboardView: View {
                     grain: TrendModel.grain(for: preset),
                     fullCount: fullCount,
                     barHeight: 36)
-                TrendComparisonLine(comparison: comparison, fullCount: fullCount)
+                // Omitted (not EmptyView) when there is no previous period
+                // (Best/Lifetime): keeps the trend stack tight instead of
+                // leaving a bare-material spacing gap.
+                if comparison != nil {
+                    TrendComparisonLine(comparison: comparison, fullCount: fullCount)
+                }
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Trend, \(trendAccessibilityLabel)")
@@ -743,7 +767,11 @@ struct DashboardView: View {
                 grain: TrendModel.grain(for: preset),
                 fullCount: fullCount,
                 barHeight: 64)
-            TrendComparisonLine(comparison: comparison, fullCount: fullCount)
+            // Same empty-gap guard as the compact trend: nil (Best/
+            // Lifetime) stays out of the hierarchy entirely.
+            if comparison != nil {
+                TrendComparisonLine(comparison: comparison, fullCount: fullCount)
+            }
             Text(trendCaption)
                 .font(.caption)
                 .foregroundStyle(.secondary)
