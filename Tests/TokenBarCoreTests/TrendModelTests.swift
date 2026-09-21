@@ -102,11 +102,13 @@ final class TrendModelTests: XCTestCase {
         XCTAssertEqual(buckets.count, 24)
         XCTAssertEqual(buckets.reduce(0) { $0 + $1.totalTokens }, 300)
         XCTAssertEqual(buckets.reduce(0) { $0 + $1.requests }, 2)
-        // Bucket 0 covers [now-24h, now-23h); the 23h-ago record lands at
-        // the far end, the 1h-ago record in the final bucket.
-        XCTAssertEqual(buckets[0].requests, 1)
+        // Half-open rolling hourly buckets: bucket 0 is [now-24h, now-23h),
+        // so the 23h-ago record belongs to bucket 1 and the 1h-ago record
+        // belongs to bucket 23.
+        XCTAssertEqual(buckets[1].requests, 1)
         XCTAssertEqual(buckets[23].requests, 1)
-        XCTAssertEqual(buckets[1..<23].reduce(0) { $0 + $1.requests }, 0)
+        XCTAssertEqual(buckets[0].requests, 0)
+        XCTAssertEqual(buckets[2..<23].reduce(0) { $0 + $1.requests }, 0)
     }
 
     func testLast24HoursBoundaryRecordCountsOnce() {
