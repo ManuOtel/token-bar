@@ -68,8 +68,10 @@ public enum ChartStyle: String, Hashable, Sendable, CaseIterable {
     ///   months visible).
     ///
     /// Automatic never resolves to Area: area is a manual pick for the
-    /// total-volume shape only. An empty bucket list resolves to Bars; the
-    /// views render the empty copy with no chart frame regardless of style.
+    /// total-volume shape only. An empty bucket list follows the same
+    /// per-range mapping (Bars except lifetime, which stays Line with
+    /// points); the views render the empty copy with no chart frame
+    /// regardless of style.
     /// Constant time over the stored buckets (count plus zero-bucket
     /// share): no sorting, no re-aggregation.
     public func resolved(for preset: DatePreset, buckets: [TrendBucket]) -> ResolvedTrendStyle {

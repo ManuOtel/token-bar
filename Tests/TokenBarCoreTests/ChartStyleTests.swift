@@ -71,10 +71,18 @@ final class ChartStyleTests: XCTestCase {
     }
 
     func testResetReturnsToAutomatic() {
-        for style in ChartStyle.allCases {
+        // Model a stored non-default value, then an explicit reset to the
+        // default raw value; the result must read back as Automatic.
+        for style in ChartStyle.allCases where style != .automatic {
+            XCTAssertEqual(
+                ChartStyle(storedRawValue: style.rawValue), style,
+                "stores \(style)")
             let reset = ChartStyle(storedRawValue: ChartStyle.defaultStyle.rawValue)
             XCTAssertEqual(reset, .automatic, "reset from \(style)")
         }
+        XCTAssertEqual(ChartStyle.defaultStyle, .automatic)
+        XCTAssertEqual(
+            ChartStyle(storedRawValue: ChartStyle.defaultStyle.rawValue), .automatic)
     }
 
     func testDisplayNames() {
@@ -128,9 +136,11 @@ final class ChartStyleTests: XCTestCase {
         }
     }
 
-    func testEmptyBucketsResolveToBars() {
-        // The views render the empty copy with no chart frame regardless of
-        // style; resolution itself stays total (no crash, no area).
+    func testEmptyBucketsFollowAutomaticMapping() {
+        // Resolution never crashes and never picks Area; an empty bucket
+        // list follows the same per-range Automatic mapping (Bars except
+        // lifetime, which stays Line with points). The views render the
+        // empty copy with no chart frame regardless of style.
         for preset in DatePreset.allCases {
             let resolved = ChartStyle.automatic.resolved(for: preset, buckets: [])
             if preset == .lifetime {
@@ -161,16 +171,48 @@ final class ChartStyleTests: XCTestCase {
     // MARK: - Empty and no-baseline states
 
     func testEmptyStoreKeepsEmptyBucketsAndNilComparisonInEveryStyle() {
+        // Real contract for an empty 7D scope: zero-filled daily coverage
+        // stays present, the bucket total is zero and matches the hero
+        // total, and the comparison slot reports no baseline (never a
+        // fabricated percent). Resolution only selects a renderer over the
+        // stored buckets; it never mutates buckets or comparison.
         let dash = DashboardSnapshot.make(
             records: [], source: .all, preset: .last7Days,
             now: now, snapshot: nil, calendar: calendar)
+        XCTAssertFalse(dash.trendBuckets.isEmpty, "zero-filled coverage stays present")
+        XCTAssertEqual(dash.trendBuckets.count, 8, "7D rolling coverage is 8 daily buckets")
         XCTAssertTrue(dash.trendBuckets.allSatisfy { $0.totalTokens == 0 })
-        for style in ChartStyle.allCases {
-            let resolved = style.resolved(for: .last7Days, buckets: dash.trendBuckets)
-            // Resolution is total over the zero-filled coverage; the empty
-            // copy decision stays with the views, not the style.
-            XCTAssertTrue([ResolvedTrendStyle.bars, .linePoints, .area].contains(resolved), "\(style)")
-        }
+        XCTAssertTrue(dash.trendBuckets.allSatisfy { $0.requests == 0 })
+        XCTAssertEqual(dash.trendBuckets.reduce(0) { $0 + $1.totalTokens }, 0)
+        XCTAssertEqual(dash.stats.totalTokens, 0)
+        XCTAssertNotNil(dash.comparison, "7D keeps the comparison slot with no baseline")
+        XCTAssertEqual(dash.comparison?.hasBaseline, false)
+        XCTAssertNil(dash.comparison?.direction)
+        XCTAssertNil(dash.comparison?.percentChange)
+        XCTAssertEqual(
+            ChartStyle.automatic.resolved(for: .last7Days, buckets: dash.trendBuckets), .bars)
+        XCTAssertEqual(
+            ChartStyle.bars.resolved(for: .last7Days, buckets: dash.trendBuckets), .bars)
+        XCTAssertEqual(
+            ChartStyle.line.resolved(for: .last7Days, buckets: dash.trendBuckets), .linePoints)
+        XCTAssertEqual(
+            ChartStyle.area.resolved(for: .last7Days, buckets: dash.trendBuckets), .area)
+        // View empty-copy boundary without a UI test: an empty lifetime or
+        // best-month scope yields no buckets, which is exactly the
+        // `buckets.isEmpty` condition behind the "No trend buckets" copy in
+        // `AdaptiveTrendChart`; 7D above stays non-empty and renders
+        // zero-height bars instead.
+        let emptyLifetime = DashboardSnapshot.make(
+            records: [], source: .all, preset: .lifetime,
+            now: now, snapshot: nil, calendar: calendar)
+        XCTAssertTrue(emptyLifetime.trendBuckets.isEmpty)
+        XCTAssertEqual(emptyLifetime.stats.totalTokens, 0)
+        XCTAssertNil(emptyLifetime.comparison)
+        let emptyBest = DashboardSnapshot.make(
+            records: [], source: .all, preset: .bestMonth,
+            now: now, snapshot: nil, calendar: calendar)
+        XCTAssertTrue(emptyBest.trendBuckets.isEmpty)
+        XCTAssertNil(emptyBest.comparison)
     }
 
     func testNoBaselineComparisonHoldsNoDirectionAndNoPercentInEveryStyle() {

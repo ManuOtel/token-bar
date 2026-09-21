@@ -2562,7 +2562,7 @@ def run():
           and chart_fallback("automatic") == "automatic")
     check("chart style unknown values fall back to automatic",
           all(chart_fallback(r) == "automatic"
-              for r in ("heatmap", "BARS", "", "stacked-area", "line-points")))
+              for r in ("heatmap", "BARS", "", "automatic ", "stacked-area", "line-points")))
     check("chart style stored values round-trip",
           [chart_fallback(r) for r in ("automatic", "bars", "line", "area")]
           == ["automatic", "bars", "line", "area"])
@@ -2570,7 +2570,12 @@ def run():
           all(chart_resolve("automatic", p, 1, 2) == "bars"
               for p in ("today", "24h", "7d", "best-month")))
     check("automatic picks line with points for all time",
-          chart_resolve("automatic", "lifetime", 1, 2) == "linePoints")
+          chart_resolve("automatic", "lifetime", 1, 2) == "linePoints"
+          and chart_resolve("automatic", "lifetime", 0, 0) == "linePoints")
+    check("empty bucket list follows automatic mapping (lifetime line, others bars)",
+          all(chart_resolve("automatic", p, 0, 0) == "bars"
+              for p in ("today", "24h", "7d", "30d", "best-month"))
+          and chart_resolve("automatic", "lifetime", 0, 0) == "linePoints")
     check("automatic 30d sparse reads as bars incl boundary and empty",
           chart_resolve("automatic", "30d", 30, 31) == "bars"
           and chart_resolve("automatic", "30d", 4, 8) == "bars"
