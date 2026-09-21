@@ -2,6 +2,30 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.6.0 - 2026-09-21
+
+Configurable trend chart styles over the existing adaptive trends. No
+change to token math, pricing, source semantics, privacy boundaries, or
+sync behavior. macOS 14 stays the deployment target.
+
+- Chart style preference in expanded Details: Automatic (default),
+  Bars, Line with points, Area. Automatic maps hourly Today/24H and 7D
+  daily buckets to Bars and longer or sparse 30D/Best/All ranges to
+  Line with points; explicit picks render the same zero-filled buckets
+  with the same previous-period comparison. Preference persists with
+  Automatic fallback.
+- Adaptive trends unchanged: hourly for Today/24H, daily for
+  7D/30D/Best, monthly for All, with comparison lines and grain
+  captions in compact and expanded views.
+- Liquid Glass QA gate and docs: SECURITY_AND_VISUAL_QA matrix plus
+  functional-only glass on macOS 26 and later with the macOS 14
+  fallback; charts and metric cards stay on standard surfaces.
+- Release process docs: RELEASE_PROCESS lifecycle, RELEASE_ROADMAP
+  mapping for M12, plus the chart-style proposal and planning records.
+  No updater work ships in this release.
+- Cost figures remain estimates only (static table, not a bill;
+  subscription use is not an API invoice).
+
 ## 0.5.1
 
 Focused popover fix. No change to token math, pricing, source semantics,
