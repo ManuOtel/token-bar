@@ -295,7 +295,10 @@ public enum TrendModel {
     // MARK: - Hourly buckets
 
     /// Today: one bucket per local hour from the calendar-day start through
-    /// the current hour (inclusive), including zero-token hours.
+    /// the current hour (inclusive), including zero-token hours. Placement
+    /// uses the record's calendar local hour so spring-forward/fall-back
+    /// transitions label records with the correct local hour; bucket starts
+    /// stay on stable `Calendar.date(byAdding: .hour ...)` coverage.
     private static func hourlyBucketsToday(
         scoped: [NormalizedUsage],
         now: Date,
@@ -306,10 +309,11 @@ public enum TrendModel {
         var totals = Array(repeating: 0, count: currentHour + 1)
         var counts = Array(repeating: 0, count: currentHour + 1)
         for record in scoped {
-            var index = Int(record.timestamp.timeIntervalSince(dayStart) / 3600)
-            index = min(max(index, 0), currentHour)
-            totals[index] += record.totalTokens
-            counts[index] += 1
+            guard record.timestamp >= dayStart, record.timestamp <= now else { continue }
+            let hour = calendar.component(.hour, from: record.timestamp)
+            guard hour >= 0, hour <= currentHour else { continue }
+            totals[hour] += record.totalTokens
+            counts[hour] += 1
         }
         return (0...currentHour).map { hour in
             let start = calendar.date(byAdding: .hour, value: hour, to: dayStart) ?? dayStart
@@ -325,7 +329,8 @@ public enum TrendModel {
     /// Last 24 hours: 24 rolling hourly buckets covering
     /// `[now - 24h, now]`, including zero-token hours. Bucket `i` covers
     /// `[windowStart + i hours, windowStart + (i + 1) hours)`; a record at
-    /// exactly `now` lands in the final bucket.
+    /// exactly `now` lands in the final bucket, and a record at exactly
+    /// `windowStart` lands in bucket 0. Out-of-window records are skipped.
     private static func hourlyBucketsRolling(
         scoped: [NormalizedUsage],
         now: Date,
@@ -335,8 +340,12 @@ public enum TrendModel {
         var totals = Array(repeating: 0, count: 24)
         var counts = Array(repeating: 0, count: 24)
         for record in scoped {
-            var index = Int(record.timestamp.timeIntervalSince(windowStart) / 3600)
-            index = min(max(index, 0), 23)
+            guard record.timestamp >= windowStart, record.timestamp <= now else { continue }
+            let elapsed = record.timestamp.timeIntervalSince(windowStart)
+            guard elapsed >= 0, elapsed <= 24 * 3600 else { continue }
+            var index = Int(elapsed / 3600)
+            if index == 24 { index = 23 }
+            guard index >= 0, index < 24 else { continue }
             totals[index] += record.totalTokens
             counts[index] += 1
         }
@@ -399,7 +408,9 @@ public enum TrendModel {
     }
 
     /// Best month: one bucket per calendar day of the winning `monthKey`
-    /// (`yyyy-MM`), including empty days.
+    /// (`yyyy-MM`), including empty days. Only records whose calendar
+    /// month matches `monthKey` are counted, so unfiltered callers cannot
+    /// leak another month's same-day records into these buckets.
     private static func dailyBucketsMonth(
         scoped: [NormalizedUsage],
         monthKey: String,
@@ -420,6 +431,7 @@ public enum TrendModel {
         var totals = Array(repeating: 0, count: dayCount)
         var counts = Array(repeating: 0, count: dayCount)
         for record in scoped {
+            guard Aggregator.monthKey(for: record.timestamp, calendar: monthCalendar) == monthKey else { continue }
             let day = monthCalendar.component(.day, from: record.timestamp)
             let index = day - 1
             guard index >= 0, index < dayCount else { continue }

@@ -180,6 +180,40 @@ final class TrendModelTests: XCTestCase {
         XCTAssertEqual(hit?.label, "2026-09-09")
     }
 
+    func testTodayHourlyPlacementAcrossSpringForward() {
+        var nyCalendar = Calendar(identifier: .gregorian)
+        nyCalendar.timeZone = TimeZone(identifier: "America/New_York")!
+        // 2026-03-08 skips 02:00 in New York (spring forward). A 10:30
+        // record is only 9.5 elapsed hours after midnight, but its local
+        // hour is 10 and must land in bucket 10.
+        var nowComponents = DateComponents()
+        nowComponents.year = 2026
+        nowComponents.month = 3
+        nowComponents.day = 8
+        nowComponents.hour = 12
+        nowComponents.minute = 0
+        let dstNow = nyCalendar.date(from: nowComponents)!
+        var recordComponents = DateComponents()
+        recordComponents.year = 2026
+        recordComponents.month = 3
+        recordComponents.day = 8
+        recordComponents.hour = 10
+        recordComponents.minute = 30
+        let dstDate = nyCalendar.date(from: recordComponents)!
+        XCTAssertEqual(nyCalendar.component(.hour, from: dstDate), 10)
+        let scoped = Aggregator.filter(
+            [record("dst", at: dstDate)], source: .all, preset: .today,
+            now: dstNow, calendar: nyCalendar)
+        XCTAssertEqual(scoped.count, 1)
+        let buckets = TrendModel.buckets(
+            scoped: scoped, preset: .today, now: dstNow, calendar: nyCalendar)
+        XCTAssertEqual(buckets.count, 13) // local hours 00 through 12
+        XCTAssertEqual(buckets[10].requests, 1)
+        XCTAssertEqual(buckets[10].totalTokens, 150)
+        XCTAssertEqual(buckets[10].label, "10")
+        XCTAssertEqual(buckets.reduce(0) { $0 + $1.totalTokens }, 150)
+    }
+
     // MARK: - Best month daily buckets
 
     func testBestMonthHasDailyBucketsForWinningMonth() {

@@ -212,8 +212,8 @@ public enum DashboardInsights {
     }
 
     /// Per-bucket heights as 0...1 fractions of the peak bucket.
-    /// Empty input yields an empty array. A uniform floor keeps zero-token
-    /// buckets visible as a hairline when `visibleMinimum` > 0.
+    /// Empty input yields an empty array. Zero-token buckets stay at zero
+    /// so empty days read as gaps, not hairlines.
     public static func trendFractions(for buckets: [DailyBucket], visibleMinimum: Double = 0.04) -> [Double] {
         trendFractions(totals: buckets.map(\.totalTokens), visibleMinimum: visibleMinimum)
     }
