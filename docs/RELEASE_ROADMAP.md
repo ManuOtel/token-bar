@@ -11,7 +11,8 @@ and do not create a release.
 Normative planning sources: `PLAN.md` milestones, `docs/RELEASE_PROCESS.md`
 lifecycle (feature PR then release PR, exact `v<VERSION>` tag from
 `main` HEAD), `RELEASE_CHECKLIST.md` per-release gate, and
-`docs/SECURITY_AND_VISUAL_QA.md` merge and release gates.
+`docs/SECURITY_AND_VISUAL_QA.md` merge and release gates. The v0.7.0
+candidate checklist is `docs/V0.7.0_RELEASE_PLAN.md`.
 
 ## Release mapping
 
