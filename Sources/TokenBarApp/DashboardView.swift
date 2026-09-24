@@ -362,7 +362,7 @@ struct DashboardView: View {
                         .font(.caption2)
                         .monospacedDigit()
                         .lineLimit(1)
-                        .foregroundStyle(isActive ? .primary : .secondary)
+                        .foregroundStyle(isActive ? .white : .secondary)
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 34)
