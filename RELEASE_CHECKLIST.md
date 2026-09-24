@@ -117,10 +117,12 @@ back to the built app's `Info.plist`, then to it.
       stale HEAD. Full order: `docs/RELEASE_PROCESS.md` steps 7-8.
 - [ ] Confirm the tag workflow (`.github/workflows/release.yml`) is green
       for that exact tag. It re-runs `swift build` + `swift test`,
-      builds with `VERSION` plus `GITHUB_RUN_NUMBER`, packages zip and
-      dmg plus checksums, verifies the DMG layout, and publishes all
-      eight assets (versioned plus latest aliases). PR CI stays the full
-      pre-tag gate; the tag run is the publish step.
+      verifies the macOS 26 SDK so Liquid Glass is compiled into the
+      release binary, builds with `VERSION` plus `GITHUB_RUN_NUMBER`,
+      packages zip and dmg plus checksums, verifies the DMG layout, and
+      publishes all eight assets (versioned plus latest aliases). PR CI
+      stays the macOS 14 compatibility gate; the tag run is the publish
+      step.
 - [ ] Post-publish checks before any install: the GitHub Release holds
       all eight files (`TokenBar-<version>-macos.zip`/`.dmg` plus their
       `.sha256` files plus the `TokenBar-latest-macos.zip`/`.dmg` aliases

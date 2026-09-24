@@ -78,10 +78,10 @@ if grep -Fq -e '- "v[0-9]*.[0-9]*.[0-9]*"' "$WF" \
 else
   bad "release workflow triggers exactly on the version-tag shape" "expected a single tags entry: - \"v[0-9]*.[0-9]*.[0-9]*\""
 fi
-if grep -Eq 'runs-on:.*macos-14' "$WF"; then
-  ok "release workflow runs on macOS"
+if grep -Eq 'runs-on:.*macos-26' "$WF"; then
+  ok "release workflow runs on macOS 26 for Liquid Glass"
 else
-  bad "release workflow runs on macOS" "missing runs-on: macos-14"
+  bad "release workflow runs on macOS 26 for Liquid Glass" "missing runs-on: macos-26"
 fi
 # Count effective (non-comment) config lines so prose comments can never
 # satisfy the arrangement check.
@@ -116,6 +116,12 @@ if grep -Eq 'swift build' "$WF" && grep -Eq 'swift test' "$WF"; then
   ok "release workflow runs swift build and swift test"
 else
   bad "release workflow runs swift build and swift test" "missing swift steps"
+fi
+if grep -Eq 'xcrun --sdk macosx --show-sdk-version' "$WF" \
+  && grep -Eq '26\.\*' "$WF"; then
+  ok "release workflow rejects a toolchain without the macOS 26 SDK"
+else
+  bad "release workflow rejects a toolchain without the macOS 26 SDK" "missing the SDK guard"
 fi
 if grep -Eq 'scripts/build-app\.sh' "$WF"; then
   ok "release workflow builds with scripts/build-app.sh"
