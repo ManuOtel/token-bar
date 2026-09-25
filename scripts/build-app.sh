@@ -130,6 +130,8 @@ mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources"
 cp "$BIN" "$OUTPUT/Contents/MacOS/TokenBar"
 chmod +x "$OUTPUT/Contents/MacOS/TokenBar"
 
+./scripts/generate-app-icon.sh "$OUTPUT/Contents/Resources/TokenBar.icns"
+
 cat > "$OUTPUT/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -139,6 +141,7 @@ cat > "$OUTPUT/Contents/Info.plist" <<EOF
   <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
   <key>CFBundleName</key><string>TokenBar</string>
   <key>CFBundleDisplayName</key><string>TokenBar</string>
+  <key>CFBundleIconFile</key><string>TokenBar.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>

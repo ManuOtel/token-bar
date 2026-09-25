@@ -65,7 +65,44 @@ fi
 if [ -n "$LAST" ]; then : > "$LAST"; fi
 exit 0
 EOF
-chmod +x "$TMP/stubbin/swift" "$TMP/stubbin/zip" "$TMP/stubbin/hdiutil"
+cat > "$TMP/stubbin/qlmanage" <<'EOF'
+#!/bin/sh
+OUT=""
+SOURCE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) OUT="$2"; shift 2 ;;
+    -*) shift ;;
+    *) SOURCE="$1"; shift ;;
+  esac
+done
+mkdir -p "$OUT"
+: > "$OUT/$(basename "$SOURCE").png"
+EOF
+cat > "$TMP/stubbin/sips" <<'EOF'
+#!/bin/sh
+OUT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --out) OUT="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+: > "$OUT"
+EOF
+cat > "$TMP/stubbin/iconutil" <<'EOF'
+#!/bin/sh
+OUT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) OUT="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+: > "$OUT"
+EOF
+chmod +x "$TMP/stubbin/swift" "$TMP/stubbin/zip" "$TMP/stubbin/hdiutil" \
+  "$TMP/stubbin/qlmanage" "$TMP/stubbin/sips" "$TMP/stubbin/iconutil"
 PATH="$TMP/stubbin:$PATH"
 export PATH
 
@@ -101,6 +138,13 @@ if [ "$(plist_val "$TMP/Default.app/Contents/Info.plist" CFBundleShortVersionStr
 else
   bad "build-app default version matches VERSION" \
     "got '$(plist_val "$TMP/Default.app/Contents/Info.plist" CFBundleShortVersionString)'"
+fi
+if [ -f "$TMP/Default.app/Contents/Resources/TokenBar.icns" ] \
+  && grep -Fq '<key>CFBundleIconFile</key><string>TokenBar.icns</string>' \
+    "$TMP/Default.app/Contents/Info.plist"; then
+  ok "build-app packages the Token Bar app icon"
+else
+  bad "build-app packages the Token Bar app icon" "missing TokenBar.icns or CFBundleIconFile"
 fi
 
 # --- 3. TOKENBAR_VERSION env overrides the default ---
