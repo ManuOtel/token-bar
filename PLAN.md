@@ -269,17 +269,24 @@ Acceptance:
   `test-site.sh`); on a Mac, `swift build` + `swift test` remain the
   source of truth.
 
-### M11 - Future Settings-initiated auto-update (plan only)
+### M11 - Future in-app update from GitHub Releases (plan only)
 
 Status: plan only; do not implement in this milestone. The Non-goals
 entry on auto-updater stands until a dedicated proposal with fixtures,
 tests, and docs is accepted. When that proposal is written, it must
 require all of:
 
-- User initiation from Settings only (ships disabled or explicit
-  opt-in; never silent background install without consent).
+- GitHub Releases is the only update channel. The stable public Token
+  Bar repository's latest-release metadata is the authoritative
+  source; drafts and pre-releases are ignored. No arbitrary feed URLs,
+  mirrors, or private repositories are allowed.
+- The app may offer an opt-in automatic check for new metadata and a
+  Settings `Check for Updates` action. Automatic means discovery only:
+  downloading and installing always require an explicit user action.
 - HTTPS public release metadata only (no arbitrary URLs, no shell
-  commands, no unsigned channels).
+  commands, no unsigned channels). A no-update response is cached with
+  bounded retry/backoff so Settings stays responsive and GitHub rate
+  limits do not cause a loop.
 - Signed/notarized or equivalent artifact verification before any
   replacement; failed verification aborts with no change.
 - Safe atomic replacement with rollback to the previous versioned
@@ -294,6 +301,9 @@ require all of:
 - Evaluation of Sparkle or another maintained signed updater before
   any custom mechanism; prefer the maintained option unless the
   proposal documents why it cannot fit the sandbox and signing path.
+- The Settings surface shows installed version, latest stable version,
+  release notes, verification state, and a clear `Update` action. If
+  already current, it says so without downloading an artifact.
 
 Acceptance for this milestone is the accepted written plan only: no
 source, CI, packaging, or site-behavior change lands under M11.

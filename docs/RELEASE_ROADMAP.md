@@ -11,7 +11,8 @@ and do not create a release.
 Normative planning sources: `PLAN.md` milestones, `docs/RELEASE_PROCESS.md`
 lifecycle (feature PR then release PR, exact `v<VERSION>` tag from
 `main` HEAD), `RELEASE_CHECKLIST.md` per-release gate, and
-`docs/SECURITY_AND_VISUAL_QA.md` merge and release gates.
+`docs/SECURITY_AND_VISUAL_QA.md` merge and release gates. The v0.7.0
+candidate checklist is `docs/V0.7.0_RELEASE_PLAN.md`.
 
 ## Release mapping
 
@@ -52,12 +53,15 @@ lifecycle (feature PR then release PR, exact `v<VERSION>` tag from
   Transparency, and Increase Contrast states not rendered in the
   release smoke are explicit follow-up gaps, not passes. See
   `CHANGELOG.md` section 0.6.0 and `PLAN.md` M12.
-- Following candidate (candidate only, v0.7.0): Settings-initiated
-  updater after security and signing requirements are met. Scope
-  is the dedicated `docs/AUTO_UPDATE_PROPOSAL.md` only, and only
-  after its acceptance plus the signing and notarization
-  infrastructure it requires. There was no updater work in v0.6.0.
-  Until that infrastructure exists, all releases stay
+- Following candidate (candidate only, v0.7.0): in-app updates from
+  the stable public Token Bar GitHub Release channel after the
+  security and signing requirements are met. The planned Settings
+  surface supports an explicit check plus an opt-in automatic
+  metadata check; installation remains an explicit, verified user
+  action. Scope is the dedicated `docs/AUTO_UPDATE_PROPOSAL.md`
+  only, and only after its acceptance plus the signing and
+  notarization infrastructure it requires. There was no updater work
+  in v0.6.0. Until that infrastructure exists, all releases stay
   download-only (see the proposal section 1).
 
 Feature and release PRs stay separate: a feature PR implements one
