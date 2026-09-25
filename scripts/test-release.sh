@@ -7,7 +7,9 @@
 #     available, triggers exactly on the version-tag shape, keeps exactly
 #     one read default plus one job-scoped write widening
 #   - the workflow validates the pushed tag against VERSION, runs swift build
-#     plus swift test, builds with VERSION plus the monotonic workflow build
+#     plus swift test, rejects a toolchain below macOS SDK 26 (via
+#     scripts/check-release-sdk.sh, floor >= 26 so newer majors keep
+#     working), builds with VERSION plus the monotonic workflow build
 #     number, packages both zip and dmg with the existing scripts, verifies
 #     both checksums, runs the DMG layout verification, stages stable
 #     latest aliases for both formats, and uploads all eight versioned plus
@@ -78,10 +80,10 @@ if grep -Fq -e '- "v[0-9]*.[0-9]*.[0-9]*"' "$WF" \
 else
   bad "release workflow triggers exactly on the version-tag shape" "expected a single tags entry: - \"v[0-9]*.[0-9]*.[0-9]*\""
 fi
-if grep -Eq 'runs-on:.*macos-14' "$WF"; then
-  ok "release workflow runs on macOS"
+if grep -Eq 'runs-on:.*macos-26' "$WF"; then
+  ok "release workflow runs on macOS 26 for Liquid Glass"
 else
-  bad "release workflow runs on macOS" "missing runs-on: macos-14"
+  bad "release workflow runs on macOS 26 for Liquid Glass" "missing runs-on: macos-26"
 fi
 # Count effective (non-comment) config lines so prose comments can never
 # satisfy the arrangement check.
@@ -112,6 +114,51 @@ else
 fi
 
 # --- 6. Build, test, package both formats through the existing scripts ---
+if grep -Eq 'xcrun --sdk macosx --show-sdk-version' "$WF" \
+  && grep -Eq 'scripts/check-release-sdk\.sh' "$WF"; then
+  ok "release workflow rejects a toolchain below macOS SDK 26"
+else
+  bad "release workflow rejects a toolchain below macOS SDK 26" "missing the xcrun query plus scripts/check-release-sdk.sh guard"
+fi
+# The SDK floor helper is the testable unit behind the guard: it must
+# exist, pass shell syntax, enforce major >= 26 in its own source, reject
+# SDK 25, and accept SDK 26 plus a newer major (27).
+HELPER="scripts/check-release-sdk.sh"
+if [ ! -f "$HELPER" ]; then
+  bad "release SDK floor helper exists" "missing $HELPER"
+else
+  ok "release SDK floor helper exists ($HELPER)"
+  if [ -x "$HELPER" ]; then
+    ok "release SDK floor helper is executable"
+  else
+    bad "release SDK floor helper is executable" "missing +x bit"
+  fi
+  if sh -n "$HELPER" && bash -n "$HELPER"; then
+    ok "release SDK floor helper passes shell syntax checks"
+  else
+    bad "release SDK floor helper passes shell syntax checks" "sh/bash -n failed"
+  fi
+  if grep -Eq 'ge 26' "$HELPER"; then
+    ok "release SDK floor helper enforces major >= 26"
+  else
+    bad "release SDK floor helper enforces major >= 26" "missing the SDK 26 floor comparison"
+  fi
+  if "$HELPER" "25.5" >/dev/null 2>&1; then
+    bad "release SDK floor helper rejects SDK 25" "25.5 was accepted"
+  else
+    ok "release SDK floor helper rejects SDK 25"
+  fi
+  if "$HELPER" "26.2" >/dev/null 2>&1; then
+    ok "release SDK floor helper accepts SDK 26"
+  else
+    bad "release SDK floor helper accepts SDK 26" "26.2 was rejected"
+  fi
+  if "$HELPER" "27.0" >/dev/null 2>&1; then
+    ok "release SDK floor helper accepts a newer SDK major (27)"
+  else
+    bad "release SDK floor helper accepts a newer SDK major (27)" "27.0 was rejected"
+  fi
+fi
 if grep -Eq 'swift build' "$WF" && grep -Eq 'swift test' "$WF"; then
   ok "release workflow runs swift build and swift test"
 else

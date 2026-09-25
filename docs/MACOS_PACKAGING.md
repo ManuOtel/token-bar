@@ -64,7 +64,10 @@ git tag "v$VERSION"
 git push origin "v$VERSION"
 ```
 
-The tag-driven workflow (`.github/workflows/release.yml`, macOS) then:
+The tag-driven workflow (`.github/workflows/release.yml`, macOS 26)
+then builds the downloadable binary with the Liquid Glass branch enabled.
+The deployment target remains macOS 14, so older systems use the guarded
+fallback visuals. The workflow then:
 
 1. Validates the pushed tag is exactly `v<VERSION>` from the `VERSION`
    file and fails otherwise.
@@ -90,13 +93,20 @@ provider credentials are used; the only auth is the automatic
 
 ## Build (unsigned, reproducible, no credentials)
 
-On a Mac with Xcode 15+ (macOS 14 SDK):
+For compatibility checks, Xcode 15+ with the macOS 14 SDK is sufficient.
+For a release-quality binary that renders Liquid Glass on macOS 26, use
+Xcode 26 or the tag workflow's macOS 26 runner:
 
 ```sh
 ./scripts/build-app.sh                                   # version defaults to VERSION (read it with: tr -d ' \t\r\n' < VERSION)
 VERSION="$(tr -d ' \t\r\n' < VERSION)"; ./scripts/build-app.sh --version "$VERSION" --build <bumped-build-number>   # explicit version + bumped build for local verification
 ./scripts/build-app.sh --bundle-id com.example.TokenBar  # bundle id override only
 ```
+
+The source keeps the Liquid Glass APIs behind compiler and availability
+guards. A binary compiled with the macOS 14 SDK remains compatible, but it
+cannot contain the newer glass branch; release packaging therefore enforces
+macOS SDK 26 or newer.
 
 Env equivalents: `TOKENBAR_VERSION`, `TOKENBAR_BUILD`, `TOKENBAR_BUNDLE_ID`
 (precedence per value: explicit flag, then env, then the `VERSION` file at

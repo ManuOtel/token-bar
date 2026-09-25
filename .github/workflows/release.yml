@@ -4,7 +4,9 @@ name: Release
 # (v<VERSION>) to build, test, package, and publish
 # versioned plus stable latest-alias assets. No signing, no credentials,
 # no usage data: the only auth is the automatic GITHUB_TOKEN used to
-# create the GitHub Release.
+# create the GitHub Release. The release build uses macOS 26 so the
+# conditional Liquid Glass branch is compiled into the shipped binary;
+# PR CI still keeps the macOS 14 compatibility build.
 on:
   push:
     tags:
@@ -18,7 +20,7 @@ permissions:
 jobs:
   release:
     name: Build, package, publish
-    runs-on: macos-14
+    runs-on: macos-26
     # contents: write is required to create the GitHub Release and upload
     # assets. Scoped to this job only; nothing else is widened.
     permissions:
@@ -53,6 +55,14 @@ jobs:
 
       - name: Swift test
         run: swift test
+
+      - name: Verify Liquid Glass release toolchain
+        run: |
+          set -eu
+          SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+          echo "Swift: $(swift --version | head -1)"
+          echo "macOS SDK: $SDK_VERSION"
+          ./scripts/check-release-sdk.sh "$SDK_VERSION"
 
       - name: Build app with VERSION and workflow build number
         run: |
