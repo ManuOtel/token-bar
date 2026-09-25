@@ -2,6 +2,14 @@
 
 Public release notes. Costs are estimates only, never a bill.
 
+## 0.6.1 - 2026-09-25
+
+This patch fixes the app icon in packaged macOS downloads. Release builds use macOS SDK 26 or later. macOS 14 remains the minimum supported version.
+
+- App bundles now include the Token Bar icon.
+- Release builds compile the Liquid Glass code path for macOS 26 and later.
+- The app keeps its macOS 14 deployment target and guarded fallback.
+
 ## 0.6.0 - 2026-09-21
 
 Configurable trend chart styles over the existing adaptive trends. No
