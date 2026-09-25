@@ -86,9 +86,11 @@ Required green CI on the PR (`.github/workflows/ci.yml`):
   `scripts/check-privacy.sh` over tracked files only.
 
 The tag workflow (`release.yml`) re-runs build, test, and packaging on
-the tagged commit, but it is a publish step, not a review step. PR CI
-remains the full pre-tag quality gate: nothing reaches a tag without a
-reviewed, green PR merge.
+the tagged commit, but it is a publish step, not a review step. Its
+macOS 26 runner compiles the conditional Liquid Glass branch into the
+downloadable binary while the deployment target remains macOS 14.
+PR CI remains the full pre-tag quality gate: nothing reaches a tag
+without a reviewed, green PR merge.
 
 ## 6. Version and changelog decision
 
@@ -134,10 +136,11 @@ tagging.
 ## 8. What the tag workflow publishes
 
 Pushing the exact tag triggers `.github/workflows/release.yml`
-(macOS 14), which:
+(macOS 26 release toolchain, macOS 14 deployment target), which:
 
 1. Fails unless the tag is exactly `v<VERSION>`.
-2. Re-runs `swift build` and `swift test`.
+2. Re-runs `swift build` and `swift test`, then rejects a toolchain
+   whose macOS SDK major is below 26.
 3. Builds the app with the `VERSION` value and the monotonic workflow
    build number (`GITHUB_RUN_NUMBER` as `CFBundleVersion`).
 4. Packages zip and dmg with `scripts/package-release.sh`, verifies both
