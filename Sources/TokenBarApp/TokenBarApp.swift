@@ -52,7 +52,12 @@ struct TokenBarApp: App {
         let now = Date()
         let dash = DashboardSnapshot.make(
             records: report.records, source: source, preset: preset,
-            now: now, snapshot: pricing.snapshot)
+            now: now, snapshot: pricing.snapshot,
+            warnings: report.warnings,
+            skippedCodexLines: report.skippedCodexLines,
+            skippedOpenCodeRows: report.skippedOpenCodeRows,
+            skippedClaudeLines: report.skippedClaudeLines,
+            syncConfig: sync.config, syncStatus: sync.status)
         return MenuBarExtra("Tokens \(DashboardSnapshot.menuTitle(forTotal: dash.menuTotalTokens))", systemImage: "chart.bar") {
             DashboardView(
                 report: $report,
@@ -68,6 +73,7 @@ struct TokenBarApp: App {
                     )
                 },
                 bestMonthKey: dash.bestMonthKey,
+                health: dash.health,
                 trendBuckets: dash.trendBuckets,
                 trendTitle: dash.trendTitle,
                 comparison: dash.comparison,

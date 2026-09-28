@@ -89,6 +89,13 @@ public struct DashboardSnapshot: Hashable, Sendable {
     /// Previous-period comparison for chronological ranges; nil for
     /// `.bestMonth` and `.lifetime`, which are not one fixed period.
     public var comparison: TrendComparison?
+    /// Read-only per-source coverage for the current scope (M13 Source
+    /// Health). Derived from the already-loaded records plus the current
+    /// `LoadReport` warnings/counters, threaded through this snapshot so
+    /// renders cost one extra linear in-memory pass and no file I/O.
+    /// Rows render cross-source regardless of the selected source chip;
+    /// contributions follow the preset (Best uses `bestMonthKey`).
+    public var health: SourceHealthReport
 
     public init(
         stats: AggregatedStats,
@@ -99,7 +106,8 @@ public struct DashboardSnapshot: Hashable, Sendable {
         trendBuckets: [TrendBucket] = [],
         trendTitle: String = TrendModel.title(for: .lifetime),
         trendGrain: TrendGrain = .month,
-        comparison: TrendComparison? = nil
+        comparison: TrendComparison? = nil,
+        health: SourceHealthReport = SourceHealthReport()
     ) {
         self.stats = stats
         self.scopedCount = scopedCount
@@ -110,6 +118,7 @@ public struct DashboardSnapshot: Hashable, Sendable {
         self.trendTitle = trendTitle
         self.trendGrain = trendGrain
         self.comparison = comparison
+        self.health = health
     }
 
     /// Builds the full snapshot in: one sorted selected-scope filter, one
@@ -127,7 +136,13 @@ public struct DashboardSnapshot: Hashable, Sendable {
         preset: DatePreset,
         now: Date,
         snapshot: CatalogSnapshot? = nil,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        warnings: [String] = [],
+        skippedCodexLines: Int = 0,
+        skippedOpenCodeRows: Int = 0,
+        skippedClaudeLines: Int = 0,
+        syncConfig: OpenCodeSyncConfig? = nil,
+        syncStatus: OpenCodeSyncStatus? = nil
     ) -> DashboardSnapshot {
         let chips = chipTotals(records: records, preset: preset, now: now, calendar: calendar)
         let title = TrendModel.title(for: preset)
@@ -140,7 +155,14 @@ public struct DashboardSnapshot: Hashable, Sendable {
                 return DashboardSnapshot(
                     stats: .empty, scopedCount: lifetime.count,
                     menuTotalTokens: menuTotal, sourceTotals: chips, bestMonthKey: nil,
-                    trendBuckets: [], trendTitle: title, trendGrain: grain, comparison: nil)
+                    trendBuckets: [], trendTitle: title, trendGrain: grain, comparison: nil,
+                    health: SourceHealth.derive(
+                        records: records, warnings: warnings,
+                        skippedCodexLines: skippedCodexLines,
+                        skippedOpenCodeRows: skippedOpenCodeRows,
+                        skippedClaudeLines: skippedClaudeLines,
+                        preset: preset, bestMonthKey: nil, now: now,
+                        calendar: calendar, syncConfig: syncConfig, syncStatus: syncStatus))
             }
             let monthRecords = lifetime.filter {
                 Aggregator.monthKey(for: $0.timestamp, calendar: calendar) == best.monthKey
@@ -151,7 +173,14 @@ public struct DashboardSnapshot: Hashable, Sendable {
                 trendBuckets: TrendModel.buckets(
                     scoped: monthRecords, preset: preset, now: now,
                     calendar: calendar, bestMonthKey: best.monthKey),
-                trendTitle: title, trendGrain: grain, comparison: nil)
+                trendTitle: title, trendGrain: grain, comparison: nil,
+                health: SourceHealth.derive(
+                    records: records, warnings: warnings,
+                    skippedCodexLines: skippedCodexLines,
+                    skippedOpenCodeRows: skippedOpenCodeRows,
+                    skippedClaudeLines: skippedClaudeLines,
+                    preset: preset, bestMonthKey: best.monthKey, now: now,
+                    calendar: calendar, syncConfig: syncConfig, syncStatus: syncStatus))
         }
         let scoped = Aggregator.filter(
             records, source: source, preset: preset, now: now, calendar: calendar)
@@ -163,7 +192,14 @@ public struct DashboardSnapshot: Hashable, Sendable {
                 scoped: scoped, preset: preset, now: now, calendar: calendar),
             trendTitle: title, trendGrain: grain,
             comparison: TrendModel.comparison(
-                records: records, source: source, preset: preset, now: now, calendar: calendar))
+                records: records, source: source, preset: preset, now: now, calendar: calendar),
+            health: SourceHealth.derive(
+                records: records, warnings: warnings,
+                skippedCodexLines: skippedCodexLines,
+                skippedOpenCodeRows: skippedOpenCodeRows,
+                skippedClaudeLines: skippedClaudeLines,
+                preset: preset, bestMonthKey: nil, now: now,
+                calendar: calendar, syncConfig: syncConfig, syncStatus: syncStatus))
     }
 
     /// Menu-bar title formatting. Delegates to the shared

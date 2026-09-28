@@ -44,6 +44,11 @@ struct DashboardView: View {
     /// ("OpenCode 0") instead of a dead control.
     var sourceTotals: [SourceChipData]
     var bestMonthKey: String?
+    /// Read-only per-source coverage for the current scope (M13). Derived
+    /// in `TokenBarCore` and threaded through `DashboardSnapshot`: rows
+    /// render cross-source regardless of the selected source chip, range
+    /// contributions follow the preset (Best uses `bestMonthKey`).
+    var health: SourceHealthReport
     /// Adaptive trend for the selected scope, computed once per render in
     /// `TokenBarApp` via `DashboardSnapshot` (zero-filled buckets over the
     /// full selected range). Chart views render these values only; they do
@@ -122,6 +127,7 @@ struct DashboardView: View {
                         metricGrid
                         compositionCard
                         sourceBreakdown
+                        sourceHealthCard
                         modelBreakdown
                         trendFull
                         if hasNotices {
@@ -475,41 +481,68 @@ struct DashboardView: View {
         // Note: no combined accessibility element on the outer row. The
         // notices Button must stay its own activatable element; combining
         // the row would swallow it from VoiceOver.
-        return HStack(spacing: 6) {
-            if clean.isEmpty {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                    Text("Updated \(lastUpdatedShort)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if clean.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        Text("Updated \(lastUpdatedShort)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        Button(action: { isExpanded = true }) {
+                            Text("\(clean.count) notice\(clean.count == 1 ? "" : "s") - see Details")
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("Expand to read notices")
+                        .accessibilityLabel("\(clean.count) notices, expand details to read")
+                        .accessibilityHint("Opens the Details view with the notice list")
+                    }
                 }
-                .accessibilityElement(children: .combine)
-            } else {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                    Button(action: { isExpanded = true }) {
-                        Text("\(clean.count) notice\(clean.count == 1 ? "" : "s") - see Details")
+                Spacer()
+            }
+            // One-line coverage hint, omitted entirely when every provider
+            // is covered so no blank strip renders. Counted at provider
+            // level across all displayed sources, independent of the
+            // selected source chip (see SourceHealth). Plain parent `if`,
+            // no material or animation change; compact stays 400pt.
+            if let hint = health.compactHint {
+                Button(action: { isExpanded = true }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "stethoscope")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                        Text(hint)
                             .font(.caption)
                             .fontWeight(.medium)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .padding(.vertical, 6)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
-                    .help("Expand to read notices")
-                    .accessibilityLabel("\(clean.count) notices, expand details to read")
-                    .accessibilityHint("Opens the Details view with the notice list")
                 }
+                .buttonStyle(.plain)
+                .help("Expand to read per-source health")
+                .accessibilityLabel("\(hint)")
+                .accessibilityHint("Opens the Details view with the source health card")
             }
-            Spacer()
         }
     }
 
@@ -760,6 +793,98 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Source health (expanded Details only, M13)
+
+    /// Read-only coverage readout: one row per provider group (Codex, one
+    /// sub-row per exact sanitized OpenCode origin label, Claude) plus the
+    /// conditional generic Remote inputs diagnostic. Fixed provider order
+    /// regardless of the selected source chip; the selected range still
+    /// scopes each row's current-range contribution. Last-observed values
+    /// are lifetime maxima, omitted when the group has no lifetime
+    /// records (never a fabricated value). Only the generic remote-input
+    /// row carries sync freshness, never a custom origin. Standard card
+    /// surface, no custom glass, no settings fields; at most one plain
+    /// Open Settings action. Empty-store and no-scope screens keep their
+    /// existing UI with no health card (this card lives inside the
+    /// expanded scroll content only).
+    private var sourceHealthCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionEyebrow("SOURCE HEALTH")
+                .accessibilityLabel("Source health, coverage per source for this range")
+            ForEach(health.rows, id: \.title) { row in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text(row.title)
+                            .font(.callout)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(row.state.label)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("\(row.title): \(row.state.label)")
+                    HStack(spacing: 8) {
+                        if let seen = row.lastObserved {
+                            Text("Last seen \(seen.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Text("\(row.rangeRecords) req · \(compactCount(row.rangeTokens)) in range")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(healthDetailLabel(for: row))
+                    if row.isRemoteInputs, let sync = row.sync {
+                        HStack(spacing: 6) {
+                            Text(sync.freshness.label)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            if let error = sync.lastError, !error.isEmpty {
+                                Text(error)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Sync: \(sync.freshness.label)")
+                    }
+                }
+                .help(healthHelp(for: row))
+            }
+            Button("Open Settings") { showSettings = true }
+                .buttonStyle(.plain)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .help("Open settings: launch at login, pricing, remote sync")
+                .accessibilityLabel("Open Settings")
+                .accessibilityHint("Opens launch at login, pricing, and sync settings")
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func healthDetailLabel(for row: SourceHealthRow) -> String {
+        if row.lastObserved == nil {
+            return "\(row.rangeRecords) requests in range, no prior usage observed"
+        }
+        return "\(row.rangeRecords) requests in range"
+    }
+
+    private func healthHelp(for row: SourceHealthRow) -> String {
+        "\(row.title): \(row.state.label), \(row.rangeRecords) requests in range"
     }
 
     private var modelBreakdown: some View {
