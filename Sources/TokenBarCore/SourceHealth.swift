@@ -124,16 +124,16 @@ public struct SourceHealthRemoteSync: Hashable, Sendable {
                 enabled: true, freshness: .neverSynced,
                 lastSuccessAt: nil, lastError: status?.lastError)
         }
+        if let error = status?.lastError, !error.isEmpty {
+            return SourceHealthRemoteSync(
+                enabled: true, freshness: .failedKeptCache(message: error),
+                lastSuccessAt: lastSuccess, lastError: error)
+        }
         let window = Double(config.pollIntervalSeconds + config.timeoutSeconds)
         if now.timeIntervalSince(lastSuccess) > window {
             return SourceHealthRemoteSync(
                 enabled: true, freshness: .stale,
                 lastSuccessAt: lastSuccess, lastError: status?.lastError)
-        }
-        if let error = status?.lastError, !error.isEmpty {
-            return SourceHealthRemoteSync(
-                enabled: true, freshness: .failedKeptCache(message: error),
-                lastSuccessAt: lastSuccess, lastError: error)
         }
         return SourceHealthRemoteSync(
             enabled: true, freshness: .fresh,

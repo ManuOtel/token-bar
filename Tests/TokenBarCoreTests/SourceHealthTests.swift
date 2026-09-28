@@ -401,6 +401,25 @@ final class SourceHealthTests: XCTestCase {
         XCTAssertEqual(report.compactHint, "1 source needs attention - see Details")
     }
 
+    func testFailedKeptCacheWinsOverStaleWindow() {
+        let status = OpenCodeSyncStatus(
+            lastSuccessAt: now.addingTimeInterval(-7200),
+            lastAttemptAt: now,
+            lastError: "Remote pull failed; last good pull kept.")
+        let report = SourceHealth.derive(
+            records: [], preset: .lifetime, now: now, calendar: calendar,
+            syncConfig: syncConfig(), syncStatus: status)
+        let remote = row(report, titled: "Remote inputs")
+        let freshness = remote?.sync?.freshness
+        XCTAssertNotNil(freshness)
+        if let freshness, case .failedKeptCache(let message) = freshness {
+            XCTAssertEqual(message, "Remote pull failed; last good pull kept.")
+        } else {
+            XCTFail("expected failedKeptCache, got \(String(describing: freshness))")
+        }
+        XCTAssertEqual(report.compactHint, "1 source needs attention - see Details")
+    }
+
     func testSyncFreshnessNeverUnderCustomOrigin() {
         let records = [usage("o", source: .opencode, hoursAgo: 1, origin: "office")]
         let status = OpenCodeSyncStatus(
