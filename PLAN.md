@@ -412,3 +412,84 @@ Release record: the M12 implementation shipped as v0.6.0 through
 the feature PR plus release PR above. This planning edit is
 docs-only (no VERSION bump, no CHANGELOG entry, no release
 artifact, no source or site behavior change).
+
+### M13 - Source Health and Coverage (candidate, proposal only)
+
+Status: candidate only; do not implement in this milestone. This
+milestone tracks the written proposal only
+(`docs/SOURCE_HEALTH_PROPOSAL.md`). No release version is assigned
+and no shipping is claimed. When and if a later worker implements
+it, that work lands under a separate scoped feature PR with
+synthetic fixtures, tests, and docs, followed by the normal
+review, validation, merge to main, and version decision path. M11
+and M12 stay intact and unchanged.
+
+Scope: implement the accepted proposal only: a compact-first,
+read-only cross-source health readout (Codex, OpenCode, and Claude
+rows regardless of the selected source chip) that separates last
+observed usage (lifetime maxima over all already-loaded records,
+independent of source/range selection; OpenCode split by exact
+sanitized origin label) from current-range contribution (preset
+windows; Best uses `DashboardSnapshot.bestMonthKey`, the winning
+month under the current source filter, with per-source rows showing
+each source's contribution in that month), with OpenCode per-origin
+sub-rows plus a conditional generic `Remote inputs` diagnostic,
+sanitized six-state labels (`covered`, `zero in range`, `missing`,
+`unreadable`, `partial`, `no-usage-observed`) from the section 5
+decision table over allow-listed sanitized warnings only, `TokenBarCore`-only semantics
+derived after source and date filtering in the Aggregator and
+`DashboardSnapshot` layer (`TokenBarStore.load` stays
+file-reads-only), per-source history dates from the already-loaded
+`NormalizedUsage` set with at most one additional linear
+in-memory pass threaded through `DashboardSnapshot` (no file or
+history I/O added, and no claim that the snapshot already carries
+warning counts, per-source timestamps, or preset bounds), compact
+kept compact with at most a one-line footer hint counted at
+provider level across all displayed sources independent of the
+source chip and omitted when covered, full health in expanded
+Details only where Details is reachable (empty-store and no-scope
+screens unchanged), OpenCode origins aggregated by exact sanitized
+label with distinct custom labels never merged and sole origins
+named explicitly (`OpenCodeStore.sanitizeOriginLabel`, 64-character
+cap), sync freshness attached to the generic remote-input group
+only, settings kept in Settings, and the Liquid Glass visual QA
+from `docs/SECURITY_AND_VISUAL_QA.md` sections 3 to 5 with the
+functional-controls-only boundary.
+
+Boundaries: `TokenBarStore.load` places raw per-input warnings in
+`LoadReport`; `ReportFormatter` sanitizes them before rendering
+and `StartupReportCache` sanitizes them before persistence. Health
+matches sanitized warnings only, never raw paths or arbitrary
+prose: local default-DB issues map to the local group, extra-DB /
+snapshot / sync-cache issues map to the generic `Remote inputs`
+group without guessing a custom label, OpenCode skipped rows stay
+provider-level partial and are never assigned to an origin, and
+unknown warnings stay as notices without altering state. With
+usable records, missing/unreadable issues classify as partial;
+with none, unreadable takes precedence over missing.
+`no-usage-observed` never claims source presence or completeness.
+No new
+network, subprocess, telemetry, prompt or message storage,
+provider integration, or persistent usage data. `LoadReport`
+carries no per-input scan metadata, `StartupReportCache.savedAt`
+is one report timestamp only, and no per-input "last successful
+scan" timestamps or per-source scan freshness are promised. Sync
+freshness comes only from the existing `OpenCodeSyncStatus` with
+the configured interval and timeout, attached to the generic
+remote-input group only and never presented as belonging to a
+custom origin: never-synced only when
+`lastSuccessAt` is nil (never stale), stale only after a prior
+success older than interval plus timeout, and a later failed pull
+with retained last-good cache as a distinct sanitized error.
+`URLSession` stays confined to `PricingService.swift`; `Process(`
+stays confined to `OpenCodeSync.swift`. Counts, date ranges, and
+sanitized notices are derived from current scans and caches only;
+the history span is the observed parsed records, never proof that
+source logs are complete. Fixtures live under `Fixtures/` only;
+no real usage data in public artifacts. Contract criteria for the
+new card and hint slots land in `scripts/test-popover.sh`.
+
+Acceptance for this milestone is the accepted written plan only:
+this M13 section plus `docs/SOURCE_HEALTH_PROPOSAL.md` plus the
+roadmap candidate entry, with no source, test, CI, packaging,
+VERSION, CHANGELOG, website, or app-behavior change.
