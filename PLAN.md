@@ -426,23 +426,45 @@ and M12 stay intact and unchanged.
 
 Scope: implement the accepted proposal only: a compact-first,
 read-only per-source health readout that separates last observed
-usage from last successful scan or sync, with OpenCode local and
-remote sub-lines, sanitized zero/missing/stale/error states,
-`TokenBarCore`-only semantics threaded through `DashboardSnapshot`
-with no extra history scans, thin app and CLI renderers, compact
-kept compact with at most a one-line footer hint, full health in
-expanded Details only, settings kept in Settings, and the Liquid
-Glass visual QA from `docs/SECURITY_AND_VISUAL_QA.md` sections 3
-to 5.
+usage (max record timestamp per source over loaded records,
+OpenCode split into local and remote) from current-range
+contribution, with OpenCode local and remote sub-lines, sanitized
+zero/missing/stale/error states, `TokenBarCore`-only semantics
+derived after source and date filtering in the Aggregator and
+`DashboardSnapshot` layer (`TokenBarStore.load` stays
+file-reads-only), per-source history dates from the already-loaded
+`NormalizedUsage` set with at most one additional linear
+in-memory pass threaded through `DashboardSnapshot` (no file or
+history I/O added, and no claim that the snapshot already carries
+warning counts, per-source timestamps, or preset bounds), compact
+kept compact with at most a one-line footer hint omitted when
+covered, full health in expanded Details only where Details is
+reachable (empty-store and no-scope screens unchanged), sole
+OpenCode origins named explicitly with sanitizer-accepted labels
+only, settings kept in Settings, and the Liquid Glass visual QA
+from `docs/SECURITY_AND_VISUAL_QA.md` sections 3 to 5 with the
+functional-controls-only boundary.
 
-Boundaries: no new network, subprocess, telemetry, prompt or
-message storage, provider integration, or persistent usage data.
+Boundaries: `TokenBarStore.load` places raw per-input warnings in
+`LoadReport`; `ReportFormatter` sanitizes them before rendering
+and `StartupReportCache` sanitizes them before persistence. No new
+network, subprocess, telemetry, prompt or message storage,
+provider integration, or persistent usage data. `LoadReport`
+carries no per-input scan metadata, `StartupReportCache.savedAt`
+is one report timestamp only, and no per-input "last successful
+scan" timestamps or per-source scan freshness are promised. Sync
+freshness comes only from the existing `OpenCodeSyncStatus` with
+the configured interval and timeout: never-synced only when
+`lastSuccessAt` is nil (never stale), stale only after a prior
+success older than interval plus timeout, and a later failed pull
+with retained last-good cache as a distinct sanitized error.
 `URLSession` stays confined to `PricingService.swift`; `Process(`
 stays confined to `OpenCodeSync.swift`. Counts, date ranges, and
 sanitized notices are derived from current scans and caches only;
-no metric that needs unsupported instrumentation is promised.
-Fixtures live under `Fixtures/` only; no real usage data in public
-artifacts.
+the history span is the observed parsed records, never proof that
+source logs are complete. Fixtures live under `Fixtures/` only;
+no real usage data in public artifacts. Contract criteria for the
+new card and hint slots land in `scripts/test-popover.sh`.
 
 Acceptance for this milestone is the accepted written plan only:
 this M13 section plus `docs/SOURCE_HEALTH_PROPOSAL.md` plus the

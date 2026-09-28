@@ -53,8 +53,21 @@ candidate checklist is `docs/V0.7.0_RELEASE_PLAN.md`.
   Transparency, and Increase Contrast states not rendered in the
   release smoke are explicit follow-up gaps, not passes. See
   `CHANGELOG.md` section 0.6.0 and `PLAN.md` M12.
-- Following candidate (candidate only, v0.7.0): in-app updates from
-  the stable public Token Bar GitHub Release channel after the
+- Next-feature candidate (candidate only, no version assigned):
+  Source Health and Coverage readout per
+  `docs/SOURCE_HEALTH_PROPOSAL.md` and `PLAN.md` M13. This is the
+  current unversioned next-feature candidate. Compact-first
+  per-source coverage with last observed usage kept separate from
+  current-range contribution, OpenCode local and remote sub-lines,
+  sanitized zero/missing/stale/error states, `TokenBarCore`-only
+  semantics derived after filtering with no extra history scans, no
+  new network, subprocess, telemetry, prompt or message storage,
+  provider integration, or persistent usage data, plus the Liquid
+  Glass visual QA from `docs/SECURITY_AND_VISUAL_QA.md` sections 3
+  to 5. Proposal only; no implementation and no shipping are
+  claimed. This health candidate adds no updater work.
+- Separate gated candidate (candidate only, v0.7.0): in-app updates
+  from the stable public Token Bar GitHub Release channel after the
   security and signing requirements are met. The planned Settings
   surface supports an explicit check plus an opt-in automatic
   metadata check; installation remains an explicit, verified user
@@ -63,20 +76,10 @@ candidate checklist is `docs/V0.7.0_RELEASE_PLAN.md`.
   notarization infrastructure it requires. There was no updater work
   in v0.6.0. Until that infrastructure exists, all releases stay
   download-only (see the proposal section 1).
-- Following candidate (candidate only, no version assigned): Source
-  Health and Coverage readout per `docs/SOURCE_HEALTH_PROPOSAL.md`
-  and `PLAN.md` M13. Compact-first per-source coverage with last
-  observed usage kept separate from last successful scan or sync,
-  OpenCode local and remote sub-lines, sanitized
-  zero/missing/stale/error states, `TokenBarCore`-only semantics
-  with no extra history scans, no new network, subprocess,
-  telemetry, prompt or message storage, provider integration, or
-  persistent usage data, plus the Liquid Glass visual QA from
-  `docs/SECURITY_AND_VISUAL_QA.md` sections 3 to 5. Proposal only;
-  no implementation and no shipping are claimed. It stays separate
-  from the v0.7.0 updater candidate above: updater planning lives
-  in `docs/AUTO_UPDATE_PROPOSAL.md` and this health candidate
-  adds no updater work.
+- Release order and version sequencing between the health
+  candidate and the updater candidate are deferred: the health
+  candidate carries no version, and no shipping order is claimed.
+  Updater planning lives in `docs/AUTO_UPDATE_PROPOSAL.md`.
 
 Feature and release PRs stay separate: a feature PR implements one
 scoped change and merges to `main` after review and green checks; it
