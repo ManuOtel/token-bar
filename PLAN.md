@@ -425,11 +425,18 @@ review, validation, merge to main, and version decision path. M11
 and M12 stay intact and unchanged.
 
 Scope: implement the accepted proposal only: a compact-first,
-read-only per-source health readout that separates last observed
-usage (max record timestamp per source over loaded records,
-OpenCode split into local and remote) from current-range
-contribution, with OpenCode local and remote sub-lines, sanitized
-zero/missing/stale/error states, `TokenBarCore`-only semantics
+read-only cross-source health readout (Codex, OpenCode, and Claude
+rows regardless of the selected source chip) that separates last
+observed usage (lifetime maxima over all already-loaded records,
+independent of source/range selection; OpenCode split by exact
+sanitized origin label) from current-range contribution (preset
+windows; Best uses `DashboardSnapshot.bestMonthKey`, the winning
+month under the current source filter, with per-source rows showing
+each source's contribution in that month), with OpenCode per-origin
+sub-rows plus a conditional generic `Remote inputs` diagnostic,
+sanitized six-state labels (`covered`, `zero in range`, `missing`,
+`unreadable`, `partial`, `no-usage-observed`) from the section 5
+decision table over allow-listed sanitized warnings only, `TokenBarCore`-only semantics
 derived after source and date filtering in the Aggregator and
 `DashboardSnapshot` layer (`TokenBarStore.load` stays
 file-reads-only), per-source history dates from the already-loaded
@@ -437,24 +444,40 @@ file-reads-only), per-source history dates from the already-loaded
 in-memory pass threaded through `DashboardSnapshot` (no file or
 history I/O added, and no claim that the snapshot already carries
 warning counts, per-source timestamps, or preset bounds), compact
-kept compact with at most a one-line footer hint omitted when
-covered, full health in expanded Details only where Details is
-reachable (empty-store and no-scope screens unchanged), sole
-OpenCode origins named explicitly with sanitizer-accepted labels
+kept compact with at most a one-line footer hint counted at
+provider level across all displayed sources independent of the
+source chip and omitted when covered, full health in expanded
+Details only where Details is reachable (empty-store and no-scope
+screens unchanged), OpenCode origins aggregated by exact sanitized
+label with distinct custom labels never merged and sole origins
+named explicitly (`OpenCodeStore.sanitizeOriginLabel`, 64-character
+cap), sync freshness attached to the generic remote-input group
 only, settings kept in Settings, and the Liquid Glass visual QA
 from `docs/SECURITY_AND_VISUAL_QA.md` sections 3 to 5 with the
 functional-controls-only boundary.
 
 Boundaries: `TokenBarStore.load` places raw per-input warnings in
 `LoadReport`; `ReportFormatter` sanitizes them before rendering
-and `StartupReportCache` sanitizes them before persistence. No new
+and `StartupReportCache` sanitizes them before persistence. Health
+matches sanitized warnings only, never raw paths or arbitrary
+prose: local default-DB issues map to the local group, extra-DB /
+snapshot / sync-cache issues map to the generic `Remote inputs`
+group without guessing a custom label, OpenCode skipped rows stay
+provider-level partial and are never assigned to an origin, and
+unknown warnings stay as notices without altering state. With
+usable records, missing/unreadable issues classify as partial;
+with none, unreadable takes precedence over missing.
+`no-usage-observed` never claims source presence or completeness.
+No new
 network, subprocess, telemetry, prompt or message storage,
 provider integration, or persistent usage data. `LoadReport`
 carries no per-input scan metadata, `StartupReportCache.savedAt`
 is one report timestamp only, and no per-input "last successful
 scan" timestamps or per-source scan freshness are promised. Sync
 freshness comes only from the existing `OpenCodeSyncStatus` with
-the configured interval and timeout: never-synced only when
+the configured interval and timeout, attached to the generic
+remote-input group only and never presented as belonging to a
+custom origin: never-synced only when
 `lastSuccessAt` is nil (never stale), stale only after a prior
 success older than interval plus timeout, and a later failed pull
 with retained last-good cache as a distinct sanitized error.
