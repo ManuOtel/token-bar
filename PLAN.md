@@ -412,3 +412,39 @@ Release record: the M12 implementation shipped as v0.6.0 through
 the feature PR plus release PR above. This planning edit is
 docs-only (no VERSION bump, no CHANGELOG entry, no release
 artifact, no source or site behavior change).
+
+### M13 - Source Health and Coverage (candidate, proposal only)
+
+Status: candidate only; do not implement in this milestone. This
+milestone tracks the written proposal only
+(`docs/SOURCE_HEALTH_PROPOSAL.md`). No release version is assigned
+and no shipping is claimed. When and if a later worker implements
+it, that work lands under a separate scoped feature PR with
+synthetic fixtures, tests, and docs, followed by the normal
+review, validation, merge to main, and version decision path. M11
+and M12 stay intact and unchanged.
+
+Scope: implement the accepted proposal only: a compact-first,
+read-only per-source health readout that separates last observed
+usage from last successful scan or sync, with OpenCode local and
+remote sub-lines, sanitized zero/missing/stale/error states,
+`TokenBarCore`-only semantics threaded through `DashboardSnapshot`
+with no extra history scans, thin app and CLI renderers, compact
+kept compact with at most a one-line footer hint, full health in
+expanded Details only, settings kept in Settings, and the Liquid
+Glass visual QA from `docs/SECURITY_AND_VISUAL_QA.md` sections 3
+to 5.
+
+Boundaries: no new network, subprocess, telemetry, prompt or
+message storage, provider integration, or persistent usage data.
+`URLSession` stays confined to `PricingService.swift`; `Process(`
+stays confined to `OpenCodeSync.swift`. Counts, date ranges, and
+sanitized notices are derived from current scans and caches only;
+no metric that needs unsupported instrumentation is promised.
+Fixtures live under `Fixtures/` only; no real usage data in public
+artifacts.
+
+Acceptance for this milestone is the accepted written plan only:
+this M13 section plus `docs/SOURCE_HEALTH_PROPOSAL.md` plus the
+roadmap candidate entry, with no source, test, CI, packaging,
+VERSION, CHANGELOG, website, or app-behavior change.
