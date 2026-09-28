@@ -115,9 +115,12 @@ public struct SourceHealthRemoteSync: Hashable, Sendable {
         now: Date
     ) -> SourceHealthRemoteSync {
         guard let config, config.enabled else {
+            // Disabled sync renders "Sync off" with no error: a stale
+            // persisted lastError from a previously-enabled sync must not
+            // propagate into health state.
             return SourceHealthRemoteSync(
                 enabled: false, freshness: .disabled,
-                lastSuccessAt: status?.lastSuccessAt, lastError: status?.lastError)
+                lastSuccessAt: status?.lastSuccessAt, lastError: nil)
         }
         guard let lastSuccess = status?.lastSuccessAt else {
             return SourceHealthRemoteSync(
@@ -437,6 +440,17 @@ public enum SourceHealth {
         if origins.isEmpty {
             // Single local placeholder row; names no presence. Provider
             // skipped rows surface here at provider level only.
+            rows.append(SourceHealthRow(
+                provider: .opencode, title: "OpenCode - local", origin: "local",
+                state: resolveState(
+                    lifetimeCount: 0, rangeCount: 0,
+                    hasMissing: localMissing, hasUnreadable: localUnreadable,
+                    skippedCount: skippedOpenCodeRows)))
+        } else if (localMissing || localUnreadable) && origins["local"] == nil {
+            // Remote-only origins: a local default-DB warning would
+            // otherwise drop with no local row to map to. Insert a
+            // zero-count local row so the missing/unreadable state stays
+            // visible alongside the remote origin rows.
             rows.append(SourceHealthRow(
                 provider: .opencode, title: "OpenCode - local", origin: "local",
                 state: resolveState(

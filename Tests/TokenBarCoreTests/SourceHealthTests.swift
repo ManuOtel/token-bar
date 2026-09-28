@@ -314,6 +314,26 @@ final class SourceHealthTests: XCTestCase {
         XCTAssertEqual(row(report, titled: "OpenCode - remote")?.state, .covered)
     }
 
+    func testRemoteOnlyWithLocalWarningKeepsVisibleLocalRow() {
+        // Remote-only origins must not drop the local default-DB warning:
+        // a zero-count local row carries the missing/unreadable state.
+        let records = [usage("r", source: .opencode, hoursAgo: 1, origin: "remote")]
+        let missing = SourceHealth.derive(
+            records: records,
+            warnings: ["OpenCode database not found (checked default location or TOKENBAR_OPENCODE_DB)."],
+            preset: .lifetime, now: now, calendar: calendar)
+        XCTAssertEqual(row(missing, titled: "OpenCode - local")?.state, .missing)
+        XCTAssertEqual(row(missing, titled: "OpenCode - remote")?.state, .covered)
+        XCTAssertEqual(missing.providersNeedingAttention, 1)
+        let unreadable = SourceHealth.derive(
+            records: records,
+            warnings: ["OpenCode database unreadable; others still load."],
+            preset: .lifetime, now: now, calendar: calendar)
+        XCTAssertEqual(row(unreadable, titled: "OpenCode - local")?.state, .unreadable)
+        XCTAssertEqual(row(unreadable, titled: "OpenCode - remote")?.state, .covered)
+        XCTAssertEqual(unreadable.providersNeedingAttention, 1)
+    }
+
     func testEmptyOpenCodeRendersSingleLocalPlaceholder() {
         let report = SourceHealth.derive(
             records: [], preset: .lifetime, now: now, calendar: calendar)
@@ -349,6 +369,27 @@ final class SourceHealthTests: XCTestCase {
             syncStatus: OpenCodeSyncStatus())
         XCTAssertNil(row(report, titled: "Remote inputs"))
         XCTAssertNil(report.compactHint)
+    }
+
+    func testDisabledSyncSuppressesStaleLastError() {
+        // A persisted lastError from a previously-enabled sync must not
+        // propagate into health state while sync is disabled, even when
+        // the Remote inputs row renders for a remote-input warning.
+        let status = OpenCodeSyncStatus(
+            lastSuccessAt: now.addingTimeInterval(-600),
+            lastAttemptAt: now,
+            lastError: "Remote pull failed; last good pull kept.")
+        let report = SourceHealth.derive(
+            records: [],
+            warnings: ["OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON)."],
+            preset: .lifetime, now: now, calendar: calendar,
+            syncConfig: syncConfig(enabled: false),
+            syncStatus: status)
+        let remote = row(report, titled: "Remote inputs")
+        XCTAssertNotNil(remote)
+        XCTAssertFalse(remote?.sync?.enabled ?? true)
+        XCTAssertEqual(remote?.sync?.freshness, .disabled)
+        XCTAssertNil(remote?.sync?.lastError)
     }
 
     func testNeverSyncedIsDistinctFromStale() {

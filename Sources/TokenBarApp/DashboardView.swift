@@ -849,7 +849,9 @@ struct DashboardView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
-                            if let error = sync.lastError, !error.isEmpty {
+                            // Sync errors render only while sync is enabled;
+                            // "Sync off" never shows a stale persisted error.
+                            if sync.enabled, let error = sync.lastError, !error.isEmpty {
                                 Text(error)
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
