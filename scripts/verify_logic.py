@@ -2593,6 +2593,93 @@ def run():
     check("style leaves bucket sums equal to the hero total",
           sum([150] + [0] * 30) == 150)
 
+    # Source Health (M13) decision-table mirror: allow-listed sanitized
+    # warning categories map to their group, states follow the precedence
+    # (skipped-partial, partial-with-records, covered, zero-in-range,
+    # unreadable-over-missing, no-usage-observed), unknown strings stay
+    # notice-only, and the compact hint counts unique providers once
+    # (OpenCode local + remote inputs count once).
+    def health_classify(warning):
+        table = {
+            "Codex sessions not found (checked default location or TOKENBAR_CODEX_ROOT).": ("codex", "missing"),
+            "Claude sessions not found (checked default location or TOKENBAR_CLAUDE_ROOT).": ("claude", "missing"),
+            "OpenCode database not found (checked default location or TOKENBAR_OPENCODE_DB).": ("local", "missing"),
+            "OpenCode database unreadable; others still load.": ("local", "unreadable"),
+            "OpenCode database present but SQLite module unavailable in this build.": ("local", "unreadable"),
+            "OpenCode extra database not found (checked TOKENBAR_OPENCODE_DB_EXTRA).": ("remote", "missing"),
+            "OpenCode extra database skipped: SQLite module unavailable in this build.": ("remote", "unreadable"),
+            "OpenCode extra database unreadable; others still load.": ("remote", "unreadable"),
+            "OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON).": ("remote", "missing"),
+            "OpenCode snapshot unreadable; others still load.": ("remote", "unreadable"),
+            "OpenCode remote sync cache unreadable; others still load.": ("remote", "unreadable"),
+        }
+        return table.get(warning)
+
+    def health_state(lifetime, in_range, missing, unreadable, skipped):
+        if skipped > 0:
+            return "partial"
+        if lifetime > 0 and (missing or unreadable):
+            return "partial"
+        if lifetime > 0 and in_range > 0:
+            return "covered"
+        if lifetime > 0:
+            return "zero-in-range"
+        if unreadable:
+            return "unreadable"
+        if missing:
+            return "missing"
+        return "no-usage-observed"
+
+    check("health covered with in-range record",
+          health_state(1, 1, False, False, 0) == "covered")
+    check("health zero-in-range with lifetime record only",
+          health_state(1, 0, False, False, 0) == "zero-in-range")
+    check("health unreadable beats missing with no records",
+          health_state(0, 0, True, True, 0) == "unreadable")
+    check("health missing with no records",
+          health_state(0, 0, True, False, 0) == "missing")
+    check("health partial with records plus issue",
+          health_state(2, 1, True, False, 0) == "partial")
+    check("health skipped counter degrades to partial",
+          health_state(1, 1, False, False, 3) == "partial"
+          and health_state(0, 0, False, False, 1) == "partial")
+    check("health no-usage-observed when empty",
+          health_state(0, 0, False, False, 0) == "no-usage-observed")
+    check("health decision table maps allow-listed categories",
+          health_classify("Codex sessions not found (checked default location or TOKENBAR_CODEX_ROOT).") == ("codex", "missing")
+          and health_classify("OpenCode database unreadable; others still load.") == ("local", "unreadable")
+          and health_classify("OpenCode usage snapshot not found (checked TOKENBAR_OPENCODE_USAGE_JSON).") == ("remote", "missing")
+          and health_classify("OpenCode remote sync cache unreadable; others still load.") == ("remote", "unreadable"))
+    check("health unknown warnings stay notice-only",
+          health_classify("Something unexpected happened.") is None
+          and health_classify("OpenCode snapshot contained extra non-token fields (ignored).") is None
+          and health_classify("3 OpenCode row(s) skipped as undecodable.") is None)
+
+    def health_hint(codex, opencode, claude):
+        n = sum(1 for v in (codex, opencode, claude) if v)
+        if n == 0:
+            return None
+        return "1 source needs attention - see Details" if n == 1 else f"{n} sources need attention - see Details"
+
+    check("health hint counts providers once",
+          health_hint(False, False, False) is None
+          and health_hint(True, False, False) == "1 source needs attention - see Details"
+          and health_hint(True, False, True) == "2 sources need attention - see Details")
+    # Health fixture keeps distinct OpenCode origins unmerged: local,
+    # default remote, two customs, legacy, plus one unsafe label that the
+    # sanitizer folds into the shared remote fallback.
+    health_fixture = os.path.join(root, "Fixtures", "synthetic-source-health-snapshot.json")
+    if os.path.exists(health_fixture):
+        with open(health_fixture) as f:
+            rows = json.load(f)
+        origins = [r.get("origin", "") for r in rows]
+        allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-")
+        sanitized = [o if o and len(o) <= 64 and set(o) <= allowed else "remote" for o in origins]
+        check("health fixture origins stay distinct except the unsafe fallback",
+              sorted(set(sanitized)) == ["homeserver", "laptop", "local", "office", "remote"]
+              and len(rows) == 6,
+              f"origins={origins}")
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")

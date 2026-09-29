@@ -77,14 +77,18 @@ and expanded popover in both light and dark appearances:
   (All/Codex/OpenCode/Claude), range chips
   (Today/24H/7D/30D/Best/All), input/output comparison bars, source
   bar, adaptive mini trend with comparison line, Details action,
-  updated/notices footer.
+  updated/notices footer plus at most a one-line source-health hint
+  when a provider needs attention (omitted when covered).
 - Expanded Details (scrollable): metric cards, composition card,
-  source rows with OpenCode local/remote sub-lines, top-5 models, full
+  source rows with OpenCode local/remote sub-lines, source health
+  card (after source rows, before top-5 models), top-5 models, full
   adaptive trend with grain caption and comparison, notices, Show less.
 - States: empty store (no records), zero scoped count for the selected
   filter, no-comparison ranges (Best month, All time), long notice
   lists (must scroll inside expanded Details, not push the popover),
-  stale-cache and loading banner on/off.
+  stale-cache and loading banner on/off, plus each source-health state
+  once (covered, zero in range, missing, unreadable, partial,
+  no-usage-observed) with the compact hint shown and hidden.
 - Checks per state: accessibility tree exposes every control and chart
   with a label (no unlabeled image-only content); full keyboard focus
   order reaches chips, Details/Show less, and Settings controls with a

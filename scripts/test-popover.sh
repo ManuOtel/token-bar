@@ -33,6 +33,11 @@
 #     strip above/below the content; the compact path keeps exactly one
 #     vertical ScrollView (expanded only) with the root padding + width-400
 #     geometry intact
+#   - source health card (M13) renders once inside the expanded ScrollView
+#     content after the source rows and before the top-5 models, with at
+#     most a one-line compact hint omitted via a plain parent `if` when
+#     covered, at most one Open Settings action, and no custom glass,
+#     material, fixed height, or size-changing animation
 #
 # Run: ./scripts/test-popover.sh (from the repo root).
 set -eu
@@ -213,6 +218,69 @@ if grep -q '\.padding(16)' "$DASH" && grep -q '\.frame(width: 400)' "$DASH"; the
   ok "root popover keeps padding-16 + width-400 content-sized geometry"
 else
   bad "root popover keeps padding-16 + width-400 content-sized geometry" "missing '.padding(16)' or '.frame(width: 400)' in $DASH"
+fi
+
+# --- 10. Source health card slot (M13) ---
+# The read-only coverage card lives only in expanded Details, in scroll
+# content after the source rows and before the top-5 models, collapsing
+# with Show less. The compact footer carries at most a one-line hint,
+# omitted via a plain parent `if` when every provider is covered. Health
+# rows, labels, and cards stay off custom glass with no new material,
+# fixed height, or size-changing animation; empty-store and no-scope
+# screens keep their existing UI with no health card.
+if grep -q 'sourceHealthCard' "$DASH"; then
+  ok "source health card exists in DashboardView"
+else
+  bad "source health card exists in DashboardView" "missing 'sourceHealthCard' in $DASH"
+fi
+CARD_DEF="$(grep -n 'private var sourceHealthCard' "$DASH" | head -1 | cut -d: -f1)"
+CARD_USE="$(grep -n '^[[:space:]]*sourceHealthCard$' "$DASH" | cut -d: -f1)"
+CARD_USE_COUNT="$(printf '%s\n' "$CARD_USE" | grep -c '[0-9]' || true)"
+if [ "$CARD_USE_COUNT" = "1" ] && [ -n "$CARD_DEF" ] && [ -n "$SCROLL_LINE" ] && [ -n "$FRAME_LINE" ] \
+  && [ "$CARD_USE" -gt "$SCROLL_LINE" ] && [ "$CARD_USE" -lt "$FRAME_LINE" ]; then
+  ok "health card renders once inside the expanded ScrollView content"
+else
+  bad "health card renders once inside the expanded ScrollView content" "expected 1 placement between scroll=$SCROLL_LINE and frame=$FRAME_LINE (found '$CARD_USE')"
+fi
+SRC_LINE="$(grep -n 'private var sourceBreakdown' "$DASH" | head -1 | cut -d: -f1)"
+MODEL_LINE="$(grep -n 'private var modelBreakdown' "$DASH" | head -1 | cut -d: -f1)"
+SRC_USE="$(grep -n '^[[:space:]]*sourceBreakdown$' "$DASH" | head -1 | cut -d: -f1)"
+MODEL_USE="$(grep -n '^[[:space:]]*modelBreakdown$' "$DASH" | head -1 | cut -d: -f1)"
+if [ -n "$CARD_USE" ] && [ -n "$SRC_USE" ] && [ -n "$MODEL_USE" ] \
+  && [ "$CARD_USE" -gt "$SRC_USE" ] && [ "$CARD_USE" -lt "$MODEL_USE" ] \
+  && [ -n "$CARD_DEF" ] && [ -n "$SRC_LINE" ] && [ -n "$MODEL_LINE" ] \
+  && [ "$CARD_DEF" -gt "$SRC_LINE" ] && [ "$CARD_DEF" -lt "$MODEL_LINE" ]; then
+  ok "health card sits after source rows and before top-5 models"
+else
+  bad "health card sits after source rows and before top-5 models" "order must be sourceBreakdown($SRC_USE/$SRC_LINE) < health($CARD_USE/$CARD_DEF) < modelBreakdown($MODEL_USE/$MODEL_LINE)"
+fi
+if grep -q 'health.compactHint' "$DASH" && grep -q 'if let hint = health.compactHint' "$DASH"; then
+  ok "compact health hint omitted when covered (plain parent if, no strip)"
+else
+  bad "compact health hint omitted when covered" "missing 'health.compactHint' + 'if let hint = health.compactHint' guard in $DASH"
+fi
+HINT_COUNT="$(grep -c 'health.compactHint' "$DASH" || true)"
+if [ "$HINT_COUNT" -le 3 ]; then
+  ok "compact hint stays one line (no extra hint slots)"
+else
+  bad "compact hint stays one line" "found $HINT_COUNT 'health.compactHint' mentions in $DASH"
+fi
+SETTINGS_COUNT="$(grep -c 'Open Settings' "$DASH" || true)"
+if [ "$SETTINGS_COUNT" -le 3 ]; then
+  ok "health card carries at most one Open Settings action"
+else
+  bad "health card carries at most one Open Settings action" "found $SETTINGS_COUNT 'Open Settings' mentions in $DASH"
+fi
+CARD_BODY="$(sed -n "/private var sourceHealthCard/,/private func healthDetailLabel/p" "$DASH")"
+if printf '%s\n' "$CARD_BODY" | grep -q 'liquidGlass\|glassEffect'; then
+  bad "no custom glass on the health card" "health rows/labels/cards must stay off custom glass"
+else
+  ok "no custom glass on the health card"
+fi
+if printf '%s\n' "$CARD_BODY" | grep -Eq '\.frame\(height: [0-9]{3}'; then
+  bad "no fixed height on the health card" "found a 100pt+ '.frame(height:' in the health card"
+else
+  ok "no fixed height on the health card"
 fi
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
