@@ -2593,6 +2593,29 @@ def run():
     check("style leaves bucket sums equal to the hero total",
           sum([150] + [0] * 30) == 150)
 
+    # Dashboard selection mirror (DashboardSelection.swift): persisted
+    # Source/Range are simple UI strings only, with All + last7Days
+    # defaults and safe fallback for missing/unknown values.
+    valid_sources = ("all", "codex", "opencode", "claude")
+    valid_presets = ("today", "last24Hours", "last7Days", "last30Days", "bestMonth", "lifetime")
+
+    def sel_source(raw):
+        return raw if raw in valid_sources else "all"
+
+    def sel_preset(raw):
+        return raw if raw in valid_presets else "last7Days"
+
+    check("dashboard selection defaults preserve first-run behavior",
+          sel_source(None) == "all" and sel_preset(None) == "last7Days")
+    check("dashboard selection unknown values fall back to defaults",
+          all(sel_source(r) == "all"
+              for r in ("heatmap", "ALL", "", "all ", "last-7-days", "unknown"))
+          and all(sel_preset(r) == "last7Days"
+                  for r in ("heatmap", "LAST7DAYS", "", "last7Days ", "7d", "unknown")))
+    check("dashboard selection stored values round-trip",
+          [sel_source(r) for r in valid_sources] == list(valid_sources)
+          and [sel_preset(r) for r in valid_presets] == list(valid_presets))
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} FAILURES: {FAILURES}")
