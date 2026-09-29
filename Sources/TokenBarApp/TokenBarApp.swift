@@ -17,11 +17,28 @@ struct TokenBarApp: App {
     // no cache keeps the previous empty + loading behavior. Both values
     // derive from one shared seed so startup reads/decodes the file once.
     @State private var report: LoadReport
-    @State private var source: SourceFilter = .all
-    // Initial dashboard range: rolling last 7 days (DashboardSnapshot
-    // default). More useful than the narrow calendar-day window for a usage
-    // tracker; every range chip stays available and math is unchanged.
-    @State private var preset: DatePreset = DashboardSnapshot.defaultPreset
+    // Persisted dashboard selection: the most recently selected Source and
+    // Range restore across restarts (simple UserDefaults strings only, via
+    // DashboardSelection keys). First run keeps the existing defaults
+    // (All + DashboardSnapshot.defaultPreset); missing/unknown stored
+    // values fall back to those defaults. Chart style stays persisted
+    // separately in DashboardView via ChartStyle.storageKey.
+    @AppStorage(DashboardSelection.sourceStorageKey) private var sourceRaw: String = DashboardSelection.defaultSource.rawValue
+    @AppStorage(DashboardSelection.presetStorageKey) private var presetRaw: String = DashboardSelection.defaultPreset.rawValue
+    private var selectedSource: SourceFilter { DashboardSelection.source(storedRawValue: sourceRaw) }
+    private var selectedPreset: DatePreset { DashboardSelection.preset(storedRawValue: presetRaw) }
+    private var sourceBinding: Binding<SourceFilter> {
+        Binding(
+            get: { DashboardSelection.source(storedRawValue: sourceRaw) },
+            set: { sourceRaw = $0.rawValue }
+        )
+    }
+    private var presetBinding: Binding<DatePreset> {
+        Binding(
+            get: { DashboardSelection.preset(storedRawValue: presetRaw) },
+            set: { presetRaw = $0.rawValue }
+        )
+    }
     @State private var isLoading = false
     @State private var isExpanded = false
     // True only when the on-screen report came from the startup cache and
@@ -51,13 +68,13 @@ struct TokenBarApp: App {
         // launch; every render still derives from the current report.
         let now = Date()
         let dash = DashboardSnapshot.make(
-            records: report.records, source: source, preset: preset,
+            records: report.records, source: selectedSource, preset: selectedPreset,
             now: now, snapshot: pricing.snapshot)
         return MenuBarExtra("Tokens \(DashboardSnapshot.menuTitle(forTotal: dash.menuTotalTokens))", systemImage: "chart.bar") {
             DashboardView(
                 report: $report,
-                source: $source,
-                preset: $preset,
+                source: sourceBinding,
+                preset: presetBinding,
                 stats: dash.stats,
                 scopedCount: dash.scopedCount,
                 sourceTotals: dash.sourceTotals.map { entry in
